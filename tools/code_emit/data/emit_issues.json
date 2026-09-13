@@ -2589,5 +2589,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "00012b20": [
+    {
+      "what": "The eligibility gate's POSITIVE side is unverified by test, and here that covers more than it does for the enemy twin: no case can show that an eligible NPC actually reaches fdps_map_actor_behavior_step, nor that the side literal pushed at 00012bab is 1 rather than 0, nor that the side compare at 00012b88 is against 1. What is established comes from the assembly alone: CMP EAX,0x1 / JNZ for the side, AND AL,0x81 for the two busy bits, CMP byte ptr [EAX+0x26],0x0 for paralysis, and PUSH 0x1 / PUSH index / CALL 0x00010010 / ADD ESP,0x8 for the call the three tests guard. The obstacle is that the call has no observable effect in a test process: fdps_map_actor_behavior_step's only arm that returns before the fdps_render_view_frame tail -- behaviour 8, the one an eligible fixture must carry or the run hangs on the VGA retrace spin (tests/mapai.c documents the same wall) -- writes nothing whatever, so an eligible NPC and an ineligible one leave byte-identical state behind. What the tests do pin is everything around the gate, and in particular that no scorer is called, which is the difference between this phase and the enemy one.",
+      "needs": "An observation of a real NPC phase in DOSBox-X: on a chapter with friendly NPCs on the field, every side-1 unit that is not retired, not already marked done and not paralysed should take exactly one AI turn during the NPC phase, in index order, and no side-0 or side-2 unit should move during it. A paralysed NPC should stand still for that phase and act again once the counter runs out.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The event dispatch at 00012bd6 is verified only on its negative side: no test can make data_fdps_chapter_pending_event_idx non-0xff at the moment the phase tests it. The slot is seeded with 0xff at the top of every iteration and the only code between that seed and the test is fdps_map_actor_behavior_step, which is out of reach for the reason above; fdps_map_set_pending_tile_event (maptile.h), called from inside that step's tail, is the writer the original relies on. What IS pinned is that the seed happens once per unit rather than once per phase, and, from the assembly, that the handler is called with this unit's index (PUSH EAX at 00012bd5 / ADD ESP,0x4 at 00012bdc) and not with a literal -- which is where Ghidra's decompilation of this function is wrong, showing a bare `()`.",
+      "needs": "The same real NPC phase in DOSBox-X: an NPC that finishes its move on a tile carrying an event should fire that event's handler before the chapter's post-action handler runs and before the next NPC is looked at. Chapter 26's fdps_chapter_26_event_deploy_waves_2_and_3, which refuses to fire unless the unit index it is handed names a side-2 unit, is the handler that would show the argument is really passed.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Reached the same wall independently and confirmed its cause inside the callee rather than assuming it: fdps_map_actor_behavior_step's behaviour-8 arm is CMP dword ptr [EBP-0x14],0x8 / JZ 0x0001074e at 000104c1, jumping straight to the epilogue with no store of any kind, so the fixture's only non-hanging behaviour is also its only silent one. One site the emitter did not name: that same callee's retirement test at 0001004b (AND AL,0x1 / JNZ 0x0001074e) is a second silent early return, so even a fixture that tried to reach an observable arm through a retired unit would return without a trace. Nothing in a test process can distinguish an eligible NPC from an ineligible one here.",
+      "needs": "An observation of a real NPC phase in DOSBox-X: on a chapter with friendly NPCs on the field, every side-1 unit that is not retired, not already marked done and not paralysed takes exactly one AI turn during the NPC phase, in index order, and no side-0 or side-2 unit moves during it.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Confirmed for myself that the dispatch at 00012bd6 is tested only on its negative side, and that the argument question is settled by assembly alone: PUSH EAX at 00012bd5 with EAX loaded from [EBP-0x8] at 00012bd2, cleaned by ADD ESP,0x4 at 00012bdc, is one stack argument and it is this unit's index, while Ghidra's decompiled C for this function shows a bare () and is wrong. My pass adds nothing to the emitter's reading of why no test can make the slot non-0xff at the moment of the compare -- the only code between the seed at 00012b73 and the compare at 00012bb9 is the unobservable behaviour step above.",
+      "needs": "The same real NPC phase in DOSBox-X: an NPC finishing its move on an event tile should fire that event's handler before the chapter's post-action handler and before the next NPC is looked at. fdps_chapter_26_event_deploy_waves_2_and_3, which refuses to fire unless the index it is handed names a side-2 unit, is the handler that would show the argument is really passed.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

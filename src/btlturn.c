@@ -225,3 +225,84 @@ void fdps_battle_enemy_turn_phase(void)
         }
     }
 }
+
+/* Side 1 in the record +6 encoding: the friendly NPCs, the side this phase
+   sweeps.  It is also the side_select literal handed to the behaviour step --
+   PUSH 0x1 at 00012bab, against the PUSH 0x0 the enemy phase makes at
+   00012a08 -- so the one constant does both jobs here exactly as
+   ENEMY_PHASE_SIDE does in the enemy phase above. */
+#define NPC_PHASE_SIDE 1
+
+/* 00012b20.  The NPC side's whole phase of one battle turn: ONE sweep over the
+   unit array, giving every eligible side-1 unit a behaviour step.
+
+   It is the enemy phase's first sweep with the scoring taken out.  There is no
+   second sweep -- the last instruction of the loop body is the battle-end test
+   and its JZ goes back to the increment at 00012b4d, and the fall-through at
+   00012bfe is the epilogue -- and there is no score gate: an eligible NPC is
+   handed straight to fdps_map_actor_behavior_step with nothing in front of it.
+   No call to either scorer appears in the body at all, so the two score
+   globals the enemy phase leans on are not read or written anywhere in this
+   phase.  Ordering the NPCs by what they have worth casting, which is what the
+   enemy phase's two sweeps buy, is simply not done for this side: the NPCs act
+   in index order.
+
+   Eligibility is the same three tests as the enemy phase, with 1 for the side:
+   side byte +6 equal to NPC_PHASE_SIDE, neither bit of UNIT_BUSY_FLAGS_MASK
+   set in the status byte at +5, and the paralysis counter at status_timers[4]
+   zero.
+
+   The cursor-mode clear happens ONCE BEFORE the loop as well as once per
+   iteration -- MOV dword ptr [0x00069cd0],0x0 at 00012b2c, ahead of the index
+   being zeroed at 00012b36, and again at 00012b55 inside the body.  The
+   pre-loop one is the only write this function makes when the battle has no
+   units at all, and it is not redundant with the in-loop one: the player phase
+   that ran before this leaves the cursor overlay up, and a battle whose NPC
+   side is empty would otherwise keep painting it.
+
+   As in the enemy phase the bound is re-read from data_fdps_map_unit_count
+   every iteration (CMP EAX,dword ptr [0x00060150] at 00012b40, inside the
+   loop), and the record pointer is re-fetched from fdps_get_unit_record after
+   fdps_relocate_unit_array, never carried across it -- the relocation frees
+   and zeroes the block every pointer into the array was aimed at, and an
+   event handler may deploy units that grow the count part-way through
+   (unit.h).
+
+   The tail after a unit has been dealt with runs whether or not it acted and
+   is the enemy phase's tail exactly: a pending event fires its handler with
+   THIS unit's index (PUSH EAX at 00012bd5, the unit index, then CALL dword ptr
+   [EDX+0x601c4] and ADD ESP,0x4), the chapter's post-action handler is then
+   called with no argument at all (no PUSH, no ADD ESP around CALL dword ptr
+   [EAX+0x6028c] at 00012beb), and a non-zero battle-end code returns at once.
+   fdps_battle_advance_turn, the only caller, tests that same global on the
+   instruction after the call (0001e59a). */
+void fdps_battle_npc_turn_phase(void)
+{
+    int unit_index;
+    struct fdps_unit_record *unit;
+
+    data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+        fdps_relocate_unit_array();
+        unit = fdps_get_unit_record(unit_index);
+        data_fdps_chapter_pending_event_idx = NO_PENDING_EVENT;
+
+        if ((int) unit->side == NPC_PHASE_SIDE &&
+            (unit->flags & UNIT_BUSY_FLAGS_MASK) == 0 &&
+            unit->status_timers[STATUS_TIMER_PARALYSIS] == 0) {
+            fdps_map_actor_behavior_step(unit_index, NPC_PHASE_SIDE);
+        }
+
+        if (data_fdps_chapter_pending_event_idx != NO_PENDING_EVENT) {
+            data_fdps_chapter_event_handler_table
+                [data_fdps_chapter_pending_event_idx](unit_index);
+        }
+        data_fdps_chapter_post_action_handler_table
+            [data_fdps_chapter_current_chapter_id]();
+        if (data_fdps_chapter_event_or_battle_end_code != 0) {
+            return;
+        }
+    }
+}

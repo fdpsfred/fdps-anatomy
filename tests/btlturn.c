@@ -1108,6 +1108,240 @@ static void phase_rereads_the_unit_count_every_iteration(void)
     phase_unstage();
 }
 
+/* fdps_battle_npc_turn_phase at 00012b20, from here down.
+ *
+ * The same fixture the enemy-phase cases use, and the same wall in front of
+ * it: fdps_map_actor_behavior_step cannot be observed from a test process
+ * (see the note above).  Here that wall is larger, because this phase has no
+ * score gate and no scorers -- the behaviour step is the ONLY thing an
+ * eligible NPC gets, and behaviour 8, the one arm that returns before the
+ * frame-clock tail, writes nothing at all.  So an eligible NPC and an
+ * ineligible one leave identical state behind, and no case below can pin the
+ * eligibility gate on its positive side; the verdict records that as an open
+ * issue for a real machine.
+ *
+ * What IS reachable is everything around the gate, and the differences from
+ * the enemy phase are exactly there: ONE sweep instead of two, a cursor clear
+ * BEFORE the sweep as well as inside it, and no call to either scorer -- the
+ * score sentinels survive even a run whose unit is eligible, which is the
+ * assertion that a copy of the enemy phase would fail.
+ *
+ * Expected values come from the assembly at 00012b20 -- MOV dword ptr
+ * [0x00069cd0],0x0 at 00012b2c ahead of the index being zeroed at 00012b36
+ * for the pre-loop clear and again at 00012b55 for the per-unit one, CMP
+ * EAX,dword ptr [0x00060150] / JL at 00012b40 inside the loop for the re-read
+ * bound, CALL 0x0002df90 at 00012b5f for the relocation, MOV dword ptr
+ * [0x00069d90],0xff at 00012b73 for the per-iteration seed, CMP EAX,0x1 at
+ * 00012b88 / AND AL,0x81 at 00012b93 / CMP byte ptr [EAX+0x26],0x0 at 00012ba3
+ * for the three-part gate, PUSH 0x1 at 00012bab for the side literal, CALL
+ * dword ptr [EAX+0x6028c] at 00012beb for the post-action dispatch, CMP dword
+ * ptr [0x00069da0],0x0 / JZ 0x00012b4d at 00012bf1 for the abort and for the
+ * loop being the only backward branch in the body -- and from the record
+ * layout ticket 17 settled.  None of them is read off the emitted C.
+ */
+
+/* Side 1, nothing set in the status byte and no paralysis: the three tests
+   this phase applies, all passed.  Behaviour 8 with them, for the same reason
+   phase_make_eligible carries it -- the NPC phase hands every eligible unit to
+   fdps_map_actor_behavior_step with no gate in front of it, and 8 is the one
+   arm that returns before fdps_render_view_frame. */
+static void npc_make_eligible(int index)
+{
+    struct fdps_unit_record *unit;
+
+    unit = phase_unit(index);
+    unit->side = SIDE_NPC;
+    unit->flags = 0;
+    unit->status_timers[4] = 0;
+    unit->ai_behavior = PHASE_IDLE_BEHAVIOR;
+}
+
+/* MOV dword ptr [0x00069cd0],0x0 at 00012b2c is ahead of the loop, so it runs
+   even when the loop body never does.  With no units that clear is the whole
+   function: the cursor sentinel is gone, and every sentinel the body would
+   have touched is still standing.  The enemy phase, whose clear is inside its
+   first loop, leaves the cursor sentinel in place in this same case. */
+static void npc_phase_hides_the_cursor_before_the_sweep(void)
+{
+    unsigned char *base;
+
+    phase_stage(0);
+    base = data_fdps_map_unit_array_ptr;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, PHASE_CURSOR_HIDDEN);
+    CHECK_EQ(post_calls, 0);
+    CHECK_EQ(handler_calls, 0);
+    CHECK_EQ((int) data_fdps_chapter_pending_event_idx,
+             PHASE_PENDING_SENTINEL);
+    CHECK_EQ(data_fdps_map_unit_array_ptr == base, 1);
+    phase_unstage();
+}
+
+/* One sweep, not two: three units give three post-action calls, where the
+   enemy phase's two sweeps over the same fixture give six.  None of the three
+   is eligible, which is what shows the dispatch is reached whether or not the
+   unit acted. */
+static void npc_phase_sweeps_every_unit_once(void)
+{
+    phase_stage(3);
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 3);
+    CHECK_EQ(handler_calls, 0);
+    phase_unstage();
+}
+
+/* MOV dword ptr [0x00069cd0],0x0 at 00012b55 is inside the loop body too, so
+   every unit gets the overlay put away before it acts.  The handler puts the
+   sentinel back after each call; both iterations still report the hidden
+   value, which they could only do if the clear runs once per unit. */
+static void npc_phase_hides_the_cursor_every_iteration(void)
+{
+    phase_stage(2);
+    phase_restore_cursor = 1;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 2);
+    CHECK_EQ(post_cursor_mode[0], PHASE_CURSOR_HIDDEN);
+    CHECK_EQ(post_cursor_mode[1], PHASE_CURSOR_HIDDEN);
+    phase_unstage();
+}
+
+/* CALL 0x0002df90 at 00012b5f is inside the loop body, and it publishes a new
+   block every time it runs.  So each iteration's handler sees a different
+   pointer from the one before it, and the records' contents have to survive
+   every move. */
+static void npc_phase_relocates_the_array_every_iteration(void)
+{
+    unsigned char *base;
+
+    phase_stage(2);
+    phase_unit(0)->char_id = 0x33;
+    phase_unit(1)->char_id = 0x44;
+    base = data_fdps_map_unit_array_ptr;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 2);
+    CHECK_EQ(post_array_ptr[0] != base, 1);
+    CHECK_EQ(post_array_ptr[1] != post_array_ptr[0], 1);
+    CHECK_EQ(data_fdps_map_unit_array_ptr == post_array_ptr[1], 1);
+    CHECK_EQ((int) phase_unit(0)->char_id, 0x33);
+    CHECK_EQ((int) phase_unit(1)->char_id, 0x44);
+    phase_unstage();
+}
+
+/* MOV dword ptr [0x00069d90],0xff at 00012b73 is inside the loop body, once
+   per unit.  The handler writes slot 1 into the pending slot after the first
+   call; if the seed were hoisted out of the loop the next iteration would read
+   that 1 back and call handler_in_slot_1, so handler_calls staying at 0 is the
+   assertion.  The slot is left holding the seed when the phase returns. */
+static void npc_phase_seeds_the_pending_slot_every_iteration(void)
+{
+    phase_stage(2);
+    phase_set_pending_on_call = 1;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 2);
+    CHECK_EQ(handler_calls, 0);
+    CHECK_EQ((int) data_fdps_chapter_pending_event_idx, PHASE_NO_EVENT);
+    phase_unstage();
+}
+
+/* MOV EAX,[0x00069cf4] at 00012bdf sits inside the loop body, so the chapter
+   id is read fresh for every dispatch.  The run starts on the other chapter's
+   slot; that handler switches the id after its first call, and the second
+   unit's dispatch lands on the first slot instead. */
+static void npc_phase_dispatches_on_the_current_chapter_id(void)
+{
+    phase_stage(2);
+    data_fdps_chapter_current_chapter_id = PHASE_OTHER_CHAPTER_ID;
+    phase_switch_chapter_on_call = 1;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(other_post_calls, 1);
+    CHECK_EQ(post_calls, 1);
+    phase_unstage();
+}
+
+/* There is no CALL to either scorer anywhere in this body, so neither score
+   global is written -- not even for a unit that passes the eligibility gate
+   and is handed to the behaviour step.  Both scorers zero their own score
+   first thing, so a surviving sentinel is what says they never ran.  This is
+   the case that separates the NPC phase from a copy of the enemy phase. */
+static void npc_phase_calls_no_scorer(void)
+{
+    phase_stage(1);
+    npc_make_eligible(0);
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, PHASE_SCORE_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, PHASE_SCORE_SENTINEL);
+    CHECK_EQ(post_calls, 1);
+    phase_unstage();
+
+    /* And the same for a unit the gate turns away, so the sentinel above is
+       not standing merely because the unit was skipped. */
+    phase_stage(1);
+    npc_make_eligible(0);
+    phase_unit(0)->flags = 0x80;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(data_fdps_battle_ai_best_spell_score, PHASE_SCORE_SENTINEL);
+    CHECK_EQ(data_fdps_battle_ai_best_item_score, PHASE_SCORE_SENTINEL);
+    CHECK_EQ(post_calls, 1);
+    phase_unstage();
+}
+
+/* CMP dword ptr [0x00069da0],0x0 / JZ 0x00012b4d at 00012bf1: a non-zero code
+   falls out of the loop and off the end of the function.  Three units make the
+   sweep three calls long, so an abort on call 1 stops everything and an abort
+   on call 2 stops the third unit only. */
+static void npc_phase_stops_on_a_battle_end_code(void)
+{
+    phase_stage(3);
+    phase_end_on_call = 1;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 1);
+    phase_unstage();
+
+    phase_stage(3);
+    phase_end_on_call = 2;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 2);
+    phase_unstage();
+}
+
+/* CMP EAX,dword ptr [0x00060150] at 00012b40 is evaluated inside the loop, so
+   an NPC deployed part-way through is reached by the sweep that is running.
+   The handler grows the array and the count after the first unit; the bound
+   has to pick that up, giving two calls where a count hoisted into a local
+   would give one. */
+static void npc_phase_rereads_the_unit_count_every_iteration(void)
+{
+    phase_stage(1);
+    phase_grow_on_call = 1;
+
+    fdps_battle_npc_turn_phase();
+
+    CHECK_EQ(post_calls, 2);
+    CHECK_EQ(post_unit_count[0], 1);
+    CHECK_EQ(post_unit_count[1], 2);
+    phase_unstage();
+}
+
 void run_btlturn_tests(void)
 {
     RUN_TEST(mark_record_layout_matches_the_assembly);
@@ -1144,6 +1378,17 @@ void run_btlturn_tests(void)
     RUN_TEST(phase_skips_a_paralysed_unit);
     RUN_TEST(phase_stops_on_a_battle_end_code);
     RUN_TEST(phase_rereads_the_unit_count_every_iteration);
+
+    RUN_TEST(npc_phase_hides_the_cursor_before_the_sweep);
+    RUN_TEST(npc_phase_sweeps_every_unit_once);
+    RUN_TEST(npc_phase_hides_the_cursor_every_iteration);
+    RUN_TEST(npc_phase_relocates_the_array_every_iteration);
+    RUN_TEST(npc_phase_seeds_the_pending_slot_every_iteration);
+    RUN_TEST(npc_phase_dispatches_on_the_current_chapter_id);
+    RUN_TEST(npc_phase_calls_no_scorer);
+    RUN_TEST(npc_phase_stops_on_a_battle_end_code);
+    RUN_TEST(npc_phase_rereads_the_unit_count_every_iteration);
+
 
     /* Put the globals back before leaving.  stage() points them at this
        file's own fixture and the runners share one process: a later unit that

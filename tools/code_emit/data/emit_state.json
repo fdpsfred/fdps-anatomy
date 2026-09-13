@@ -3925,6 +3925,14 @@
       "status": "committed",
       "rounds": 0,
       "emitted_against": "0x1b9"
+    },
+    "00012b20": {
+      "name": "fdps_battle_npc_turn_phase",
+      "target": "btlturn.c",
+      "body_size": "0xe5",
+      "status": "committed",
+      "emitted_against": "0xe5",
+      "rounds": 0
     }
   }
 }

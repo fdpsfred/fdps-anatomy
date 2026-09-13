@@ -60,4 +60,26 @@ extern void fdps_battle_run_turn_events(int side);
 extern void fdps_battle_enemy_turn_phase(void);
 #pragma aux fdps_battle_enemy_turn_phase "*" parm caller [];
 
+/* Runs the friendly NPC side's whole phase of the current battle turn.  Takes
+   nothing, returns nothing; whether the battle ended part-way through is left
+   in data_fdps_chapter_event_or_battle_end_code (gamedata.h), which
+   fdps_battle_advance_turn -- the only caller -- tests the instant this
+   returns.
+
+   ONE sweep, not the enemy phase's two, and no score gate: every eligible NPC
+   is given a behaviour step in index order, and neither
+   fdps_map_actor_score_best_spell nor fdps_map_actor_score_best_item is called
+   anywhere in this phase.
+
+   An NPC is eligible when its side byte is 1, neither bit 0 (retired) nor bit
+   7 (already acted) is set in its status byte, and its paralysis counter at
+   status_timers[4] is zero.  Units deployed by an event part-way through are
+   reached, because the bound is re-read from data_fdps_map_unit_count every
+   iteration.
+
+   The map-cursor overlay is put away once before the sweep starts as well as
+   once per unit, so a battle whose NPC side is empty still has it hidden. */
+extern void fdps_battle_npc_turn_phase(void);
+#pragma aux fdps_battle_npc_turn_phase "*" parm caller [];
+
 #endif
