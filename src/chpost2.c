@@ -658,3 +658,102 @@ void fdps_chapter_22_post_action(void)
         data_fdps_chapter_event_or_battle_end_code = 1;
     }
 }
+
+/* Chapter 23's post-action test.  Two CALLs to fdps_unit_is_retired, one
+   message and two stores -- and, like chapter 22's handler above it, no forward
+   to the shared end test at all.
+
+   0003b2e0.  The frame is the standard four-push Watcom one with an empty
+   local area -- PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at
+   0003b2e0..0003b2e6 -- and nothing in it is ever read, so there is no local to
+   name.  No argument is read from [EBP+8] or above; the epilogue is the four
+   bare POPs at 0003b341..0003b344 with no MOV ESP,EBP in front of them, which
+   is what an empty local area leaves behind, and the RET at 0003b345 carries
+   no immediate.  Both of this body's own calls push their arguments and clear
+   them afterwards -- ADD ESP,0x4 at 0003b2f3 and 0003b30d, ADD ESP,0x1c at
+   0003b334 -- which is the stack convention, caller cleans.
+
+   The two tests are nested, not sequential, and that is the whole shape of the
+   function.  PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 at 0003b2ec..0003b2f3 is
+   fdps_unit_is_retired(3) and its EAX is used at once: TEST EAX,EAX / JZ
+   0003b306 at 0003b2f6 goes to the second test only when slot 3 is standing.
+   Where it falls through, MOV dword ptr [0x00069da0],0x1 at 0003b2fa stores the
+   defeat and JMP 0x0003b341 at 0003b304 leaves over the top of everything else
+   -- so a retired slot 3 draws nothing.  The second test, PUSH 0x1f / CALL
+   0x000109b0 / ADD ESP,0x4 at 0003b306..0003b30d, has its EAX tested the same
+   way at 0003b310, and its JZ 0003b341 skips the message AND the store
+   together: the only path that paints is the one where slot 3 is standing and
+   slot 0x1f is not.
+
+   The message is the seven-argument full-screen form of fdps_draw_text
+   (text.h): the pushes at 0003b314..0003b329 are, in reverse, the chapter text
+   block at 0x00060124, entry 0x14, the mode 13h aperture at 0xa0000, a pitch of
+   0x140 and the three standard message colours 0xd0, 0 and 0x6d.  The trailing
+   three are glyph colours forwarded to fdps_draw_glyph, not a rectangle.  The
+   cursor fdps_draw_text hands back in EAX is discarded -- the ADD ESP,0x1c at
+   0003b334 is followed straight by the store at 0003b337, and nothing between
+   there and the RET reads EAX.
+
+   Writing the natural "lose if A or B" here -- two independent ifs, or one if
+   with ||, with the message after them -- changes what the player sees on the
+   losing turn: with slot 3 already retired the original declares the defeat in
+   silence even when slot 0x1f is gone too, and the flattened form paints entry
+   0x14 over the map first.
+
+   Neither store carries a "only while the code is still 0" guard, unlike the
+   two the shared test at 0003a2e0 puts around its own writes, and adding one by
+   analogy changes behaviour: a defeat found on the same action as the scripted
+   boss-defeat clear overwrites the 2 with a 1 in the original, and the player
+   gets a Game Over where the guarded version would clear the chapter.
+
+   There is no CALL 0x0003a2e0 here and that is deliberate rather than a missing
+   line.  The guide gives 第23章 死神冥河 勝利條件 擊倒死神 -- one named boss,
+   not 敵人全滅 -- so the clear is the scripted fdps_chapter_23_event_boss_defeat
+   at 00038950 to write, and a forward added here would clear the chapter the
+   moment the last minion fell with the 死神 still standing.
+
+   Unit slot 3 is 法蓮娜, the first of the chapter's two stated 失敗條件: unit
+   slot i is roster slot i, the roster is in join order and is never permuted,
+   and chapter 23 deploys 蘭迪斯以外的所有人, so the slot 0 the shared test
+   watches in most chapters belongs to a character who is not on this map at
+   all.  fdps_chapter_23_init parking the map cursor on unit 3 is the same
+   reading of the chapter.
+
+   Slot 0x1f is NOT a roster slot.  fdps_chapter_23_end sweeps unit indices 11
+   and up as the map's own units and leaves 0 through 10 alone as the eleven
+   player units this chapter deploys, so 0x1f is one of map22.dat's own
+   deployment records rather than a party member, and which one it is is not
+   settled here -- the deployment record format has not been decoded yet and entry 0x14
+   of FDETXT23.TXT is a stream of font glyph indices rather than readable text.
+   The chapter's second stated 失敗條件 is 蘭迪斯從戰場上方消失（二十回合）,
+   which is the only other loss the guide gives, but the identification of that
+   clause with this slot is not established.
+
+   The address reaches the dispatchers only as the dword at 000602e4,
+   twenty-two entries into the table based at 0006028c, which is why the
+   function has no static caller: slot 22 is chapter 23. */
+
+/* 法蓮娜, the chapter's first 失敗條件. */
+#define CHAPTER_23_FARLENA_UNIT_INDEX 3
+
+/* The map unit whose retirement is the chapter's second defeat, announced with
+   entry 0x14 before the code is written.  Which unit map22.dat puts there is
+   not established; see the note above. */
+#define CHAPTER_23_SECOND_LOSS_UNIT_INDEX 0x1f
+
+/* Entry 0x14 of the chapter text block, the line the second defeat paints. */
+#define CHAPTER_23_SECOND_LOSS_TEXT_ID 0x14
+
+void fdps_chapter_23_post_action(void)
+{
+    if (fdps_unit_is_retired(CHAPTER_23_FARLENA_UNIT_INDEX) != 0) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    } else if (fdps_unit_is_retired(CHAPTER_23_SECOND_LOSS_UNIT_INDEX) != 0) {
+        fdps_draw_text(data_fdps_current_chapter_text_ptr,
+                       CHAPTER_23_SECOND_LOSS_TEXT_ID,
+                       (unsigned char *) VGA_SCREEN_BASE, VGA_SCREEN_PITCH,
+                       MESSAGE_FG_COLOR, MESSAGE_BG_COLOR,
+                       MESSAGE_OUTLINE_COLOR);
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}

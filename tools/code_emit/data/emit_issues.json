@@ -2505,5 +2505,33 @@
       "status": "open",
       "from": "review"
     }
+  ],
+  "0003b2e0": [
+    {
+      "what": "Which unit map22.dat deploys at index 0x1f, and therefore which of chapter 23's two stated 失敗條件 the second test enforces. Established here: 0x1f is not a roster slot -- fdps_chapter_23_end (0003b350) treats indices 0..10 as this chapter's eleven player units and 11 upward as the map's own, so 0x1f is one of map22.dat's deployment records; the image contains only two literal PUSH 0x1f operands (this one and one in fdps_chapter_04_event_for_turn), so no other function identifies it; and the strategy guide's 第23章 死神冥河 gives 失敗條件：法蓮娜死亡，蘭迪斯從戰場上方消失（二十回合）, whose first clause is the slot-3 test, leaving the second clause as the only candidate for this one -- but nothing ties that clause to slot 0x1f. The emitted C is unaffected either way: the index is the literal 0x1f.",
+      "needs": "The MAP%02d.DAT deployment-record layout (not yet decoded; resource_info/ covers VFS, CEL, SAF and the MISC.VFS tables only), read against MAP22.DAT so slot 0x1f's character id can be looked up -- or a playtest that loses chapter 23 on that condition and reads the line the game prints.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "The message on the second defeat path is not asserted by the unit test. fdps_draw_text (0001ff60, src/text.c) is emitted and really runs, so the else-arm ordering -- entry 0x14 painted only when slot 3 is standing and slot 0x1f is not -- does happen; it simply leaves no trace a case can read back, because the destination is the hard-coded VGA aperture at 0xa0000 and not a surface the caller chooses. The test therefore pins the battle-end code on both arms and stages a text block whose entries point straight at a -1 terminator, so the call is harmless and deterministic instead of walking from a null base.",
+      "needs": "A graphics-mode test harness that can fill the 0xa0000 aperture with a sentinel and read it back, the way tests/anim.c does, plus a staged font sheet and a text entry holding one glyph: with those, the first arm has to leave the aperture untouched and the second has to change it.",
+      "status": "open",
+      "from": "emit"
+    },
+    {
+      "what": "Confirmed the emitter's sweep for myself rather than taking it: search_instructions for PUSH with operand 0x1f across all 89420 instructions returns exactly two literal 6a 1f sites in the image -- 00036fc0 in fdps_chapter_04_event_for_turn and 0003b306 here -- so no other function identifies the unit. I also confirmed the boundary the emitter leans on: fdps_chapter_23_end at 0003b350 seeds its sweep at MOV dword ptr [EBP + -0x8],0xb (0003b361), so 0x1f sits above the eleven player slots and is one of the map's own records. Nothing to add to the gap itself, and the emitted C is the literal 0x1f either way.",
+      "needs": "The MAP%02d.DAT deployment-record layout read against MAP22.DAT, or a playtest that loses chapter 23 on that condition and reads the line the game prints.",
+      "same_as": "emit#0",
+      "status": "open",
+      "from": "review"
+    },
+    {
+      "what": "Checked the staging rather than only the concern: with every entry of the staged block pointing at byte 42 and that short holding -1, fdps_draw_text exits its while loop on the first test (src/text.c:391) with window_opened still 0, so the tail at text.c:546 neither waits on a key nor closes a window, and 0xa0000 is never written. The concern itself stands as honest -- the message really is unobservable from a text-mode case -- and the call is now harmless instead of walking from a null base.",
+      "needs": "A graphics-mode harness that can seed and read back the 0xa0000 aperture, plus a staged font sheet and a text entry holding one glyph.",
+      "same_as": "emit#1",
+      "status": "open",
+      "from": "review"
+    }
   ]
 }

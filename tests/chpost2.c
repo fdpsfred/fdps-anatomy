@@ -2191,6 +2191,309 @@ static void chapter_22_the_chapter_id_is_never_consulted(void)
     CHECK_EQ(end_code(), 0);
 }
 
+/* Chapter 23's post-action handler, 0003b2e0, is two calls to
+   fdps_unit_is_retired nested one inside the other, a message and two stores:
+   PUSH 0x3 / CALL 0x000109b0 / ADD ESP,0x4 at 0003b2ec, TEST EAX,EAX / JZ
+   0003b306 at 0003b2f6, MOV dword ptr [0x00069da0],0x1 at 0003b2fa and JMP
+   0003b341 at 0003b304 for the first arm; PUSH 0x1f / CALL 0x000109b0 at
+   0003b306, TEST EAX,EAX / JZ 0003b341 at 0003b310, the seven pushes and CALL
+   0x0001ff60 at 0003b314..0003b32f and MOV dword ptr [0x00069da0],0x1 at
+   0003b337 for the second.  There is no CALL 0x0003a2e0 anywhere in the body.
+
+   So the cases below pin four things: that a retired slot 3 is a defeat, that a
+   retired slot 0x1f is a defeat too, that nothing else in the unit array moves
+   the code at all -- in particular that wiping the enemy side out does not
+   clear this chapter, which is what a body that forwarded to the shared test
+   would do -- and that both stores are unguarded, so either defeat overwrites a
+   clear already in the code.
+
+   The expected verdicts are those instructions' and the 0/1/2 meanings of the
+   code are program_info/architecture.md.  The chapter's rules agree: the
+   strategy guide's 第23章 死神冥河 gives 勝利條件：擊倒死神, a named boss and
+   not 敵人全滅, and 失敗條件：法蓮娜死亡，蘭迪斯從戰場上方消失（二十回合）.
+
+   What is NOT asserted here is the message.  fdps_draw_text (text.c) is real
+   code and it is reached on the second defeat path, but its destination is the
+   hard-coded VGA aperture at 0xa0000 rather than a surface a case could hand
+   it, so the else-arm ordering -- silence when slot 3 is the one that fell --
+   leaves no trace a test running in a text-mode console can read back.  What
+   the cases below can do is make that call harmless and deterministic, which
+   the staged text block does.
+
+   THE TEXT BLOCK HAS TO BE STAGED.  fdps_draw_text's first act is
+   text_base += *(short *)(text_base + text_id * 2) and then a walk from there
+   until the -1 terminator, with no null check anywhere: left at the zero
+   ticket 23 gives it, data_fdps_current_chapter_text_ptr sends that walk
+   through whatever the low linear addresses happen to hold, and a token that
+   lands on the page break stands a modal wait on the keyboard.  So stage23
+   publishes a block whose every entry points straight at a terminator, and the
+   message path draws nothing and returns at once.
+
+   The unit array is staged here rather than read from a game file: the handler
+   takes no arguments, so the array global, the unit count, the chapter id and
+   that text block are its entire input.  It is staged one slot longer than slot
+   0x1f because fdps_unit_is_retired range checks nothing at either end. */
+
+/* Chapter 23 is chapter id 22 (0x16). */
+#define CHAPTER_23_ID 22
+
+/* Thirty-three slots, so that index 0x1f has a record of its own and the sweep
+   has one slot past it to retire. */
+#define CH23_STAGE_UNITS 0x21
+
+/* The second defeat's unit, PUSH 0x1f at 0003b306.  It is one of map22.dat's
+   own deployed units and not a roster member -- fdps_chapter_23_end treats
+   indices 11 and up as the map's -- and which unit it is has not been
+   established. */
+#define CH23_SECOND_LOSS_SLOT 0x1f
+
+/* The staged text block: 0x15 entries, 0 through the 0x14 the handler asks
+   for, and one terminator token after them for every entry to point at.  The
+   offset table is 16-bit and so is the token stream, the offset is a byte
+   count added to the base of the block, and -1 ends an entry (src/text.c). */
+#define CH23_TEXT_ENTRIES 0x15
+#define CH23_TEXT_TERMINATOR_AT (CH23_TEXT_ENTRIES * 2)
+#define CH23_TEXT_END (-1)
+
+static struct fdps_unit_record ch23_units[CH23_STAGE_UNITS];
+static short ch23_text_block[CH23_TEXT_ENTRIES + 1];
+
+static void stage23(int live_unit_count, int battle_end_code)
+{
+    unsigned char *bytes;
+    int i;
+
+    bytes = (unsigned char *) ch23_units;
+    for (i = 0; i < (int) sizeof(ch23_units); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < CH23_TEXT_ENTRIES; i++) {
+        ch23_text_block[i] = (short) CH23_TEXT_TERMINATOR_AT;
+    }
+    ch23_text_block[CH23_TEXT_ENTRIES] = (short) CH23_TEXT_END;
+    data_fdps_current_chapter_text_ptr = (unsigned char *) ch23_text_block;
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch23_units;
+    data_fdps_map_unit_count = live_unit_count;
+    data_fdps_chapter_current_chapter_id = CHAPTER_23_ID;
+    data_fdps_chapter_event_or_battle_end_code = (unsigned int) battle_end_code;
+}
+
+static void stage23_unit(int unit_index, int side, int flags)
+{
+    ch23_units[unit_index].side = (unsigned char) side;
+    ch23_units[unit_index].flags = (unsigned char) flags;
+}
+
+/* 失敗條件：法蓮娜死亡.  A retired slot 3 puts a 1 in the code: the TEST/JZ at
+   0003b2f6 falls through to the store at 0003b2fa. */
+static void chapter_23_a_retired_farlena_is_a_defeat(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The second condition: slot 3 standing sends the body to PUSH 0x1f at
+   0003b306, and a retired slot 0x1f falls through the TEST/JZ at 0003b310 to
+   the message and the store at 0003b337.  A handler that carried only chapter
+   22's single test would leave the 0 here. */
+static void chapter_23_a_retired_second_loss_unit_is_a_defeat(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* Both watched slots standing and the body writes nothing on any path.  It is
+   called twice because the dispatchers run it after every unit action, and a
+   handler that only behaved on its first call would still pass every other case
+   here. */
+static void chapter_23_an_open_battle_stays_open(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The case that separates this handler from the ones that forward: with every
+   enemy retired and both watched slots standing the code stays 0.  A body
+   carrying CALL 0x0003a2e0 would answer 2, because that test's sweep is
+   precisely 敵人全滅 -- and chapter 23 is won by 擊倒死神 instead, which the
+   scripted boss-defeat event writes. */
+static void chapter_23_wiping_the_enemy_out_does_not_clear_the_chapter(void)
+{
+    int slot;
+
+    stage23(CH23_STAGE_UNITS, 0);
+    for (slot = 0; slot < CH23_STAGE_UNITS; slot++) {
+        stage23_unit(slot, SIDE_ENEMY, FLAG_RETIRED);
+    }
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_PLAYER, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* A retired slot 0 is not this chapter's defeat.  蘭迪斯 is not deployed here --
+   己方：蘭迪斯以外的所有人 -- and the pushes are 0x3 and 0x1f, never 0x0, so a
+   body that carried the shared test's usual index would answer 1 below. */
+static void chapter_23_a_retired_slot_0_is_not_a_defeat(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* No slot but 3 and 0x1f ends this battle, and the sweep also catches either
+   argument having drifted by one: 2, 4, 0x1e and 0x20 are all retired in turn
+   with the two watched slots left standing, and the code has to stay 0 each
+   time. */
+static void chapter_23_no_other_slot_ends_the_battle(void)
+{
+    int retired_slot;
+    int other_slot;
+
+    for (retired_slot = 0; retired_slot < CH23_STAGE_UNITS; retired_slot++) {
+        if (retired_slot == FARLENA_SLOT
+            || retired_slot == CH23_SECOND_LOSS_SLOT) {
+            continue;
+        }
+        stage23(CH23_STAGE_UNITS, 0);
+        for (other_slot = 0; other_slot < CH23_STAGE_UNITS; other_slot++) {
+            stage23_unit(other_slot, SIDE_PLAYER, 0);
+        }
+        ch23_units[retired_slot].flags = FLAG_RETIRED;
+        fdps_chapter_23_post_action();
+        CHECK_EQ(end_code(), 0);
+    }
+}
+
+/* The first store consults nothing, so a clear the boss-defeat event already
+   recorded loses to 法蓮娜 falling on the same action.  Gating the store on the
+   code still being 0 -- the guard the shared test puts on its own writes --
+   would leave the 2 standing here. */
+static void chapter_23_a_recorded_clear_still_loses_to_a_retired_farlena(void)
+{
+    stage23(CH23_STAGE_UNITS, 2);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The same for the second store at 0003b337, which is equally unguarded: the
+   message path overwrites a recorded clear as well. */
+static void chapter_23_a_recorded_clear_still_loses_to_the_second_unit(void)
+{
+    stage23(CH23_STAGE_UNITS, 2);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* With both watched slots standing there is no store on any path, so a verdict
+   already in the code survives whatever else the map looks like -- including
+   the wiped out enemy side that would have made the shared test recompute a
+   2. */
+static void chapter_23_a_recorded_verdict_survives_both_standing(void)
+{
+    stage23(CH23_STAGE_UNITS, 2);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 2);
+
+    stage23(CH23_STAGE_UNITS, 1);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* Both watched slots gone is still one defeat and the same 1: the JMP at
+   0003b304 leaves over the second test entirely, so the two arms cannot both
+   run and the verdict is the first arm's. */
+static void chapter_23_both_watched_slots_gone_is_still_a_defeat(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, FLAG_RETIRED);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
+/* The body contains no CMP against data_fdps_chapter_current_chapter_id, so the
+   answer cannot depend on it.  Staging chapter 17's id and then chapter 21's --
+   the two ids either side of the shared test's chapter comparison -- changes
+   neither verdict, which is the observable difference between this handler and
+   one that reached the shared test. */
+static void chapter_23_the_chapter_id_is_never_consulted(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_17_ID;
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+
+    stage23(CH23_STAGE_UNITS, 0);
+    data_fdps_chapter_current_chapter_id = CHAPTER_21_ID;
+    stage23_unit(0, SIDE_PLAYER, FLAG_RETIRED);
+    stage23_unit(1, SIDE_ENEMY, FLAG_RETIRED);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, 0);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 0);
+}
+
+/* The handler holds no state of its own, so the same map answers the same way
+   however many unit actions it is run after. */
+static void chapter_23_the_verdict_is_stable_across_calls(void)
+{
+    stage23(CH23_STAGE_UNITS, 0);
+    stage23_unit(0, SIDE_PLAYER, 0);
+    stage23_unit(1, SIDE_ENEMY, 0);
+    stage23_unit(FARLENA_SLOT, SIDE_PLAYER, 0);
+    stage23_unit(CH23_SECOND_LOSS_SLOT, SIDE_ENEMY, FLAG_RETIRED);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+    fdps_chapter_23_post_action();
+    CHECK_EQ(end_code(), 1);
+}
+
 void run_chpost2_tests(void)
 {
     RUN_TEST(the_shared_end_test_runs);
@@ -2264,4 +2567,16 @@ void run_chpost2_tests(void)
     RUN_TEST(chapter_22_a_recorded_clear_still_loses_to_a_retired_farlena);
     RUN_TEST(chapter_22_a_recorded_verdict_survives_a_standing_farlena);
     RUN_TEST(chapter_22_the_chapter_id_is_never_consulted);
+    RUN_TEST(chapter_23_a_retired_farlena_is_a_defeat);
+    RUN_TEST(chapter_23_a_retired_second_loss_unit_is_a_defeat);
+    RUN_TEST(chapter_23_an_open_battle_stays_open);
+    RUN_TEST(chapter_23_wiping_the_enemy_out_does_not_clear_the_chapter);
+    RUN_TEST(chapter_23_a_retired_slot_0_is_not_a_defeat);
+    RUN_TEST(chapter_23_no_other_slot_ends_the_battle);
+    RUN_TEST(chapter_23_a_recorded_clear_still_loses_to_a_retired_farlena);
+    RUN_TEST(chapter_23_a_recorded_clear_still_loses_to_the_second_unit);
+    RUN_TEST(chapter_23_a_recorded_verdict_survives_both_standing);
+    RUN_TEST(chapter_23_both_watched_slots_gone_is_still_a_defeat);
+    RUN_TEST(chapter_23_the_chapter_id_is_never_consulted);
+    RUN_TEST(chapter_23_the_verdict_is_stable_across_calls);
 }

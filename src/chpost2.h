@@ -251,4 +251,46 @@ extern void fdps_chapter_21_post_action(void);
 extern void fdps_chapter_22_post_action(void);
 #pragma aux fdps_chapter_22_post_action "*" parm caller [];
 
+/* Chapter 23's post-action test: two defeat conditions of its own, tested one
+   inside the other, and no shared test at all.  Takes nothing, returns nothing,
+   and leaves the verdict in data_fdps_chapter_event_or_battle_end_code
+   (gamedata.h) -- a 1 when unit slot 3 has retired, a 1 preceded by a message
+   when slot 3 is standing and unit slot 0x1f has retired, and whatever the code
+   already held otherwise.
+
+   Like chapter 22's handler it does not forward to
+   fdps_battle_check_default_end_conditions (btlend.h), so it declares no
+   victory: chapter 23's 勝利條件 is 擊倒死神, one named boss rather than
+   敵人全滅, and the clear is the scripted boss-defeat event's to write.  A
+   forward added here would clear the chapter as soon as the last minion fell.
+
+   THE SECOND TEST IS THE FIRST ONE'S ELSE.  With slot 3 already retired the
+   handler declares the defeat in silence and never looks at slot 0x1f, so
+   flattening the two into "lose if either" -- two ifs, or one || -- paints
+   entry 0x14 of the chapter text block on a turn the original leaves quiet.
+
+   Both stores are unguarded, so either defeat outranks a clear the boss event
+   recorded earlier in the same action: the code is written, never read.
+
+   Unit slot 3 is 法蓮娜, the chapter's 失敗條件 法蓮娜死亡.  Chapter 23 deploys
+   蘭迪斯以外的所有人, so the slot 0 the shared test would have watched is not on
+   the map at all, and fdps_chapter_23_init opens the map cursor on slot 3 for
+   the same reason.
+
+   Unit slot 0x1f is one of the map's own deployed units rather than a roster
+   member -- fdps_chapter_23_end treats indices 11 and up as the map's and 0
+   through 10 as this chapter's eleven player units.  Which unit it is has not
+   been established; the chapter's second stated 失敗條件 is 蘭迪斯從戰場上方
+   消失（二十回合）, the only other loss the guide gives, but nothing here ties
+   that clause to this slot.
+
+   The message drawn on that second path is entry 0x14 of
+   data_fdps_current_chapter_text_ptr (gamedata.h), painted straight onto the
+   mode 13h aperture at 0xa0000 with pitch 0x140 in the standard message colours
+   0xd0 / 0 / 0x6d, and the cursor fdps_draw_text hands back is discarded.
+
+   Table slot 22. */
+extern void fdps_chapter_23_post_action(void);
+#pragma aux fdps_chapter_23_post_action "*" parm caller [];
+
 #endif
