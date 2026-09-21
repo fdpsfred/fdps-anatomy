@@ -27,7 +27,9 @@
  * name is a failed assertion rather than a missing member and a silent pass.
  * WIN25.DAT is also the real member for chapter 26's handler, which is
  * covered further down, and WIN26.DAT is its high-side decoy.  WINGA26.DAT,
- * the fifth member, is chapter 27's hidden-route scene, covered last.
+ * the fifth member, is chapter 27's hidden-route scene.  WIN27.DAT and
+ * WIN28.DAT, the last two, are chapter 28's scene and its high-side decoy
+ * (WIN26.DAT doubles as its low-side one), covered last.
  *
  * HOW THE ORDER IS PINNED DOWN RATHER THAN ASSUMED.  Each of the first three
  * steps leaves a mark the step after it would erase or miss:
@@ -94,7 +96,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 5
+#define FIXTURE_MEMBERS 7
 
 /* How many records each staged array holds.  Two of the battle array are all
    the run needs; the spares behind them are there so a write past the end of
@@ -244,19 +246,47 @@ static unsigned char fixture_winga26_dat[] = {
     0x00
 };
 
+/* WIN27.DAT, chapter 28's scene: like WIN24.DAT it RETIRES battle unit 0
+   first, so a handler that interpreted it before banking the party would
+   leave the roster slot at its filler, and then writes a marker of its own
+   into status_timers[4]. */
+#define WIN27_MARKER_OPERAND 1
+#define WIN27_MARKER_SLOT 4
+#define WIN27_MARKER_VALUE 47
+
+static unsigned char fixture_win27_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, WIN27_MARKER_OPERAND, WIN27_MARKER_VALUE,
+    0x00
+};
+
+/* WIN28.DAT: what a chapter 28 handler that named the chapter it hands ON to
+   would open.  status_timers[5], a value of its own, retires nobody. */
+#define WIN28_MARKER_OPERAND 2
+#define WIN28_MARKER_SLOT 5
+#define WIN28_MARKER_VALUE 53
+
+static unsigned char fixture_win28_dat[] = {
+    0x12, RANDIS_UNIT, WIN28_MARKER_OPERAND, WIN28_MARKER_VALUE,
+    0x00
+};
+
 static char *fixture_names[FIXTURE_MEMBERS] = {
-    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT", "WIN26.DAT", "WINGA26.DAT"
+    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT", "WIN26.DAT", "WINGA26.DAT",
+    "WIN27.DAT", "WIN28.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
     fixture_win23_dat, fixture_win24_dat, fixture_win25_dat,
-    fixture_win26_dat, fixture_winga26_dat
+    fixture_win26_dat, fixture_winga26_dat, fixture_win27_dat,
+    fixture_win28_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_win23_dat), sizeof(fixture_win24_dat),
     sizeof(fixture_win25_dat), sizeof(fixture_win26_dat),
-    sizeof(fixture_winga26_dat)
+    sizeof(fixture_winga26_dat), sizeof(fixture_win27_dat),
+    sizeof(fixture_win28_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -1085,6 +1115,147 @@ static void chapter_27_hidden_route_advances_to_chapter_twenty_eight(void)
     CHECK_EQ(seen->party_gold, PARTY_GOLD_BEFORE);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_28_end at 0003b9b0.
+ *
+ *   0003b9bc  CALL 0x00039e10          every unit on the enemy side is swept
+ *   0003b9c1  CALL 0x00023980          the battle party is banked
+ *   0003b9c6  MOV EAX,0x6220c / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win27.dat" is interpreted
+ *   0003b9d4  CALL 0x00039e70          the fallen are revived
+ *   0003b9d9  MOV dword ptr [0x00069cf4],0x1c
+ *
+ * One run against the same staging as chapter 25's, with the same order
+ * witnesses: WIN27.DAT retires unit 0 before its marker, so the roster slot
+ * carrying the battle record proves the writeback ran before the scene.
+ * ------------------------------------------------------------------------ */
+
+/* The index chapter 28's handler leaves: 0x1c at 0003b9d9, chapter 29. */
+#define CH28_CHAPTER_ID_AFTER 28
+
+struct ch28_snapshot {
+    int state;
+    unsigned char unit_timers[STATUS_TIMER_COUNT];
+    unsigned char slot_timers[STATUS_TIMER_COUNT];
+    int unit_flags;
+    int slot_char_id;
+    int slot_level;
+    int slot_hp_current;
+    int enemy_hp_current;
+    int chapter_id;
+    int party_gold;
+};
+
+static struct ch28_snapshot ch28_seen;
+
+/* Runs chapter 28's handler once and records what it left behind. */
+static struct ch28_snapshot *ch28_run(void)
+{
+    struct ch28_snapshot *seen;
+    int i;
+
+    seen = &ch28_seen;
+    if (seen->state != 0) {
+        return seen;
+    }
+    seen->state = 2;
+
+    if (!ensure_fixture()) {
+        return seen;
+    }
+
+    stage_globals();
+
+    fdps_chapter_28_end();
+
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        seen->unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+        seen->slot_timers[i] =
+            roster_image[RANDIS_ROSTER_SLOT].status_timers[i];
+    }
+    seen->unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    seen->slot_char_id = (int) roster_image[RANDIS_ROSTER_SLOT].char_id;
+    seen->slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    seen->slot_hp_current =
+        (int) roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    seen->enemy_hp_current = (int) unit_image[ENEMY_UNIT].hp_current;
+    seen->chapter_id = data_fdps_chapter_current_chapter_id;
+    seen->party_gold = data_fdps_shared_party_total_gold;
+    seen->state = 1;
+    return seen;
+}
+
+/* The sweep ran: the enemy's hit points are 0 where the staging left 50. */
+static void chapter_28_sweeps_the_enemy_side(void)
+{
+    struct ch28_snapshot *seen;
+
+    seen = ch28_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->enemy_hp_current, 0);
+}
+
+/* The party is banked, and banked before the scene: the roster slot carries
+   the battle record's level and the writeback's full heal instead of the
+   0xa5 filler, which WIN27.DAT's retire would have prevented had it run
+   first, and its status bytes are the writeback's zeroes rather than the
+   scene's marker. */
+static void chapter_28_banks_the_party_before_the_cutscene_runs(void)
+{
+    struct ch28_snapshot *seen;
+
+    seen = ch28_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->slot_char_id, RANDIS_CHAR_ID);
+    CHECK_EQ(seen->slot_level, RANDIS_LEVEL);
+    CHECK_EQ(seen->slot_hp_current, RANDIS_HP_MAX);
+    CHECK_EQ(seen->slot_timers[WIN27_MARKER_SLOT], 0);
+}
+
+/* The scene is Win27.dat, the 0-based id of the chapter just won: its retire
+   and its marker 47 are on the live record, and neither WIN26.DAT's 71 in
+   status_timers[3] nor WIN28.DAT's 53 in status_timers[5] is. */
+static void chapter_28_victory_cutscene_is_win27_dat(void)
+{
+    struct ch28_snapshot *seen;
+
+    seen = ch28_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->unit_timers[WIN27_MARKER_SLOT], WIN27_MARKER_VALUE);
+    CHECK_EQ(seen->unit_timers[WIN26_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_timers[WIN28_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_flags, UNIT_FLAG_RETIRED);
+}
+
+/* The index is assigned chapter 29's 28 -- from a start of 4, so not an
+   increment and not the scene's 27 -- and the revive, finding nobody at
+   0 HP, bills nothing. */
+static void chapter_28_advances_the_chapter_index_to_chapter_twenty_nine(void)
+{
+    struct ch28_snapshot *seen;
+
+    seen = ch28_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->chapter_id, CH28_CHAPTER_ID_AFTER);
+    CHECK_EQ(seen->party_gold, PARTY_GOLD_BEFORE);
+}
+
 /* The fixture container goes again, so that nothing this file wrote outlives
    its run and the next file that wants that name finds it free. */
 static void the_fixture_container_is_removed(void)
@@ -1115,5 +1286,9 @@ void run_chend2b_tests(void)
     RUN_TEST(chapter_27_hidden_route_plays_winga26_dat);
     RUN_TEST(chapter_27_does_not_bank_the_party);
     RUN_TEST(chapter_27_hidden_route_advances_to_chapter_twenty_eight);
+    RUN_TEST(chapter_28_sweeps_the_enemy_side);
+    RUN_TEST(chapter_28_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_28_victory_cutscene_is_win27_dat);
+    RUN_TEST(chapter_28_advances_the_chapter_index_to_chapter_twenty_nine);
     RUN_TEST(the_fixture_container_is_removed);
 }

@@ -3983,6 +3983,11 @@
       "status": "committed",
       "emitted_against": "0x9f",
       "rounds": 0
+    },
+    "0003b9b0": {
+      "status": "committed",
+      "emitted_against": "0x38",
+      "rounds": 0
     }
   }
 }
