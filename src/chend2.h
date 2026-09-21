@@ -232,4 +232,27 @@ extern void fdps_chapter_22_end(void);
 extern void fdps_chapter_23_end(void);
 #pragma aux fdps_chapter_23_end "*" parm caller [];
 
+/* Chapter 24's end handler: closes chapter 24 out and hands the game to
+   chapter 25.  Takes nothing and returns nothing.
+
+   THE CHAPTER'S DUEL IS UNDONE HERE, as chapter 19's is.  If the 大刀老漢's
+   challenge to 裘娜 was PUT to the player -- whether it was accepted or refused
+   -- every battle unit carrying one of the twelve permanent roster character
+   ids has its flags byte cleared and its hit points and magic points put back
+   on their maxima, which takes the retired marks the duel staging stamped on
+   the party off again and revives, free, anyone who genuinely fell during the
+   chapter.  The recovery runs BEFORE the party is banked, because the
+   writeback reads the same flags byte to decide whether to heal.
+
+   Then the family's full shape, in the family's order: every enemy still
+   standing on the battle map is swept; the battle party is banked onto the
+   persistent roster; the victory cut-scene Win23.dat is interpreted; every
+   party member still at 0 hit points is revived and billed for it; and the
+   chapter index is advanced to 24, chapter 25.  Unlike chapter 19 the map IS
+   swept, and the sweep comes after the recovery rather than first.
+
+   Table slot 23. */
+extern void fdps_chapter_24_end(void);
+#pragma aux fdps_chapter_24_end "*" parm caller [];
+
 #endif

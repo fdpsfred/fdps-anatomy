@@ -876,3 +876,140 @@ void fdps_chapter_23_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH23_NEXT_CHAPTER_ID;
 }
+
+/* The gate on the whole recovery sweep, CMP byte ptr [0x000640e9],0x0 / JZ at
+   0003b60c: element 0x11 of the 32-entry array
+   data_fdps_map_cell_event_triggered_flags based at 0x000640d8 (gamedata.h),
+   the slot chapter 24 keeps 裘娜's second duel in -- the same slot chapter 19's
+   handler reads for the first one.
+
+   THE GATE IS "THE DUEL WAS OFFERED", NOT "THE DUEL WAS FOUGHT"
+   (rebuild_info/pitfalls.md).  fdps_chapter_24_post_action (chpost2.h) raises
+   this byte at 0003b5ee once it has put the 大刀老漢's challenge to the player,
+   and raises it on BOTH answers; only the acceptance also stages the duel by
+   retiring every unit but 裘娜.  A player who declines therefore arrives here
+   with the byte up and nothing staged, and still gets the free full recovery
+   below.
+
+   fdps_chapter_state_reset clears the whole block when a chapter starts, so a
+   chapter 24 whose offer never fired -- cleared after turn 25, 裘娜 down, or
+   the 妖刀村正 not in her bag -- arrives here with the byte at 0. */
+#define CH24_DUEL_LATCH_SLOT 0x11
+
+/* Which records the recovery is for, MOV AL,[EAX+0x8] / AND EAX,0xff / CMP
+   EAX,0xb / JG at 0003b643..0003b64e: every battle unit whose character id is
+   0x0b or lower, the twelve permanent roster characters.
+
+   IT IS AN UNSIGNED COMPARE, and the AND EAX,0xff in front of it is what makes
+   it one (rebuild_info/pitfalls.md, contract C).  char_id is an unsigned char
+   in src/fdpstype.h and must stay one: a signed test would let every id from
+   0x80 up through the gate. */
+#define CH24_LAST_ROSTER_CHAR_ID 0x0b
+
+/* What each recovered record is left holding in its flags byte, MOV byte ptr
+   [EAX+0x5],0x0 at 0003b653.  IT IS A WHOLE-BYTE STORE AND NOT AN AND-NOT: it
+   drops the retired bit 0x01 the duel staging stamped and everything else the
+   byte was holding with it. */
+#define CH24_UNIT_FLAGS_CLEARED 0
+
+/* Chapter 24's victory cut-scene, the string at 0x621d0 loaded into EAX at
+   0003b67f and pushed as fdps_icon_script_run's only argument.  The member is
+   named for the chapter that has just been WON: chapter 24 is the 0-based id
+   23, so this is Win23.dat.
+
+   read_memory at 0x621c4 returns 57 69 6e 32 32 2e 64 61 74 00 64 61 57 69 6e
+   32 33 2e 64 61 74 00 64 61 57 69 6e 32 34 2e 64 61, so "Win22.dat" sits at
+   0x621c4 and "Win24.dat" at 0x621dc, each two bytes of 64 61 filler away:
+   both neighbours are real member names, so a slip in either direction would
+   not announce itself as a missing member.
+
+   The literal is the bare member name with no path and no container, and the
+   lower-case spelling is the original's: see CH16_VICTORY_SCRIPT above for why
+   it must not be tidied and why it cannot live in read-only storage. */
+#define CH24_VICTORY_SCRIPT "Win23.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x18 at 0003b692.  The index is 0-based, so 24 is chapter
+   25 -- both the village phase that runs next and the chapter loaded after it
+   read this global, so this one store is what advances the game.
+
+   THE TWO NUMBERS IN THIS HANDLER DIFFER BY ONE ON PURPOSE: the script above
+   is 23, the index of the chapter that has just been won, and this store is
+   24, the index of the one that comes next. */
+#define CH24_NEXT_CHAPTER_ID 0x18
+
+/* Chapter 24's end handler: chapter 19's conditional free full recovery of the
+   party, followed by the family's full four calls and one store.
+
+   WHY THE RECOVERY IS THERE.  Chapter 24 runs 裘娜's second duel, and staging
+   it costs the rest of the field its place: an accepted challenge makes
+   fdps_chapter_24_post_action retire every unit below
+   data_fdps_map_unit_count - 1 except index 4, her own slot, 蘭迪斯 included.
+   Nothing else in the chapter takes those marks off again, so this handler is
+   where the party is put back: the flags byte is cleared and current hit
+   points and current magic points are put back on their maxima.
+
+   BECAUSE THE GATE DOES NOT RECORD WHICH ANSWER THE PLAYER GAVE, a chapter 24
+   where the duel was declined reaches this handler with the byte up and
+   nothing staged, and the sweep then revives whoever genuinely fell during the
+   chapter -- free, and before the paid revive screen ever sees them.  That is
+   the chapter's behaviour and not a slip; see CH24_DUEL_LATCH_SLOT above.
+
+   THE RECOVERY MUST RUN BEFORE THE WRITEBACK (rebuild_info/pitfalls.md).
+   fdps_roster_write_back_battle_units masks the unit flags byte down to bit 0
+   and skips restoring current hit points from the maximum whenever that bit
+   survives, so banking the party first and healing it afterwards carries the
+   whole party into chapter 25 recorded as dead -- and
+   fdps_roster_revive_fallen_members then bills the player for every one.
+
+   THE RECOVERY ALSO RUNS BEFORE THE ENEMY SWEEP, which is where this handler
+   and chapter 19's part company: chapter 19 never sweeps at all, and here
+   fdps_battle_destroy_remaining_enemies (CALL 0x00039e10 at 0003b675) is the
+   first thing after the recovery, not the first thing in the body as it is in
+   chapters 16 to 23.  The recovery filters on the character id alone -- no
+   side test -- so the order only shows on a side-0 record carrying one of the
+   twelve roster ids: healed and un-retired first, it is then zeroed by the
+   sweep and played off the map by its death pass.  The order is the
+   original's either way.
+
+   THE SWEEP WALKS THE LIVE UNIT COUNT, data_fdps_map_unit_count, re-read on
+   every pass: CMP EAX,[0x00060150] / JL at 0003b61f.  The duel's challenger is
+   appended to the array by a deployment during the chapter, so a literal
+   taken from the map's opening size would stop short of the array's end.
+
+   VALUES USED AFTER A CALL: one.  fdps_get_unit_record's record pointer is
+   stored to [EBP-0x4] at 0003b63d and reloaded from that slot before the id
+   read and each of the three stores.  fdps_icon_script_run leaves a uint in
+   EAX which this call site discards -- ADD ESP,0x4 at 0003b68a and the CALL at
+   0003b68d are all that follow it -- and the other three CALLs return void.
+
+   THE CHAPTER IS ADVANCED HERE and nowhere else on this path: the store at
+   0003b692 is the handler's last act. */
+void fdps_chapter_24_end(void)
+{
+    /* The record the recovery is on, [EBP-0x4].  The original reloads the slot
+       into EAX before the id read and each of the three stores rather than
+       keeping the pointer in a register. */
+    struct fdps_unit_record *unit;
+    /* The recovery sweep's counter, [EBP-0x8]: a battle unit index. */
+    int unit_index;
+
+    if (data_fdps_map_cell_event_triggered_flags[CH24_DUEL_LATCH_SLOT] != 0) {
+        for (unit_index = 0;
+             unit_index < data_fdps_map_unit_count;
+             unit_index++) {
+            unit = fdps_get_unit_record(unit_index);
+            if (unit->char_id <= CH24_LAST_ROSTER_CHAR_ID) {
+                unit->flags = CH24_UNIT_FLAGS_CLEARED;
+                unit->hp_current = unit->hp_max;
+                unit->mp_current = unit->mp_max;
+            }
+        }
+    }
+
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH24_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH24_NEXT_CHAPTER_ID;
+}

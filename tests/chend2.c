@@ -4151,6 +4151,548 @@ static void the_ch23_fixture_container_is_removed(void)
     CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
 }
 
+/* --------------------------------------------------------------------------
+ * fdps_chapter_24_end at 0003b600.
+ *
+ * Chapter 19's conditional recovery in front of the family's FULL four calls
+ * and one store -- so this half is the chapter 19 half again with the enemy
+ * sweep put back, and the sweep lands after the recovery rather than first.
+ *
+ *   0003b60c  CMP byte ptr [0x000640e9],0x0 / JZ 0003b675
+ *             element 0x11 of data_fdps_map_cell_event_triggered_flags, the
+ *             duel latch: clear and the whole recovery is skipped
+ *   0003b61f  CMP EAX,[0x00060150] / JL
+ *             the recovery walks the LIVE unit count, not a literal
+ *   0003b635  CALL 0x0002d210          the record is resolved
+ *   0003b643  MOV AL,[EAX+0x8] / AND EAX,0xff / CMP EAX,0xb / JG 0003b673
+ *             an UNSIGNED test on the character id
+ *   0003b653  MOV byte ptr [EAX+0x5],0x0      the whole flags byte
+ *   0003b65a  MOV DX,[EAX+0x42] / MOV [EAX+0x40],DX     hp_current = hp_max
+ *   0003b668  MOV DX,[EAX+0x46] / MOV [EAX+0x44],DX     mp_current = mp_max
+ *   0003b675  CALL 0x00039e10          every unit on the enemy side is swept
+ *   0003b67a  CALL 0x00023980          the battle party is banked
+ *   0003b67f  MOV EAX,0x621d0 / PUSH EAX / CALL 0x00021650 / ADD ESP,0x4
+ *             the cut-scene "Win23.dat" is interpreted
+ *   0003b68d  CALL 0x00039e70          the fallen are revived
+ *   0003b692  MOV dword ptr [0x00069cf4],0x18
+ *
+ * TWO RUNS, latch up (A) and latch down (B), staged exactly as the chapter 19
+ * half stages them and for the same reasons: the same six records, the same
+ * 0x05 in every flags byte, every pool below its maximum and above 0.
+ *
+ *   unit 0   character 0, and the record the cut-scene retires
+ *   unit 1   character 0x0b, the LAST id the test lets through
+ *   unit 2   character 0x0c, the first it does not
+ *   unit 3   character 0x80, which a SIGNED test would let through as -128
+ *   unit 4   an enemy, character 0x1e, already retired, hit points left
+ *   unit 5   character 0x03, sitting BEYOND data_fdps_map_unit_count
+ *
+ * THE ENEMY IS WHAT SEPARATES THIS HALF FROM CHAPTER 19'S.  There the enemy
+ * had to keep its hit points; here the sweep at 0003b675 must zero them in
+ * both runs.  It is staged already retired so the sweep's death pass finds an
+ * empty list (src/death.c) -- the reason the top of this file gives.
+ *
+ * WHAT THIS HALF CANNOT WITNESS: the order of the recovery against the enemy
+ * sweep.  It only shows on a side-0 record carrying a roster id, and that
+ * record, un-retired and then zeroed, is exactly what sends the death pass
+ * into its frame loop.  The assembly is the evidence for that order.
+ * ------------------------------------------------------------------------ */
+
+#define CH24_DUEL_LATCH_SLOT 0x11
+
+/* WIN23.DAT is the member the handler names; WIN22.DAT is where a body copied
+   from fdps_chapter_23_end without changing the operand would land, and
+   WIN24.DAT is where a handler that named the chapter it hands ON to -- the
+   0x18 of the store -- would land.  Both decoys share status_timers[5]. */
+#define CH24_WIN23_MARKER_OPERAND 1
+#define CH24_WIN23_MARKER_SLOT 4
+#define CH24_WIN23_MARKER_VALUE 123
+#define CH24_DECOY_MARKER_OPERAND 2
+#define CH24_DECOY_MARKER_SLOT 5
+#define CH24_WIN22_DECOY_VALUE 122
+#define CH24_WIN24_DECOY_VALUE 124
+
+#define CH24_FIXTURE_MEMBERS 3
+
+/* The index chapter 24's handler must leave: chapter 25, 0-based, the literal
+   of the store at 0003b692.  The run starts from CHAPTER_ID_BEFORE, 4. */
+#define CH24_CHAPTER_ID_AFTER 24
+
+#define CH24_UNIT_CAPACITY 8
+#define CH24_UNIT_COUNT 5
+#define CH24_ROSTER_CAPACITY 4
+
+#define CH24_LAST_ROSTER_UNIT 1
+#define CH24_LAST_ROSTER_CHAR_ID 0x0b
+#define CH24_PAST_BOUND_UNIT 2
+#define CH24_PAST_BOUND_CHAR_ID 0x0c
+#define CH24_HIGH_ID_UNIT 3
+#define CH24_HIGH_ID_CHAR_ID 0x80
+#define CH24_ENEMY_UNIT_SLOT 4
+#define CH24_ENEMY_UNIT_CHAR_ID 0x1e
+#define CH24_BEYOND_COUNT_UNIT 5
+#define CH24_BEYOND_COUNT_CHAR_ID 0x03
+
+#define CH24_LAST_ROSTER_SLOT 1
+#define CH24_ROSTER_MEMBERS 2
+
+/* The retired bit plus 0x04, for the reason CH19_STAGED_FLAGS gives: 0x04
+   tells a whole-byte store from an AND-NOT, and 0x80 would be masked off by
+   the cut-scene interpreter whatever this handler did. */
+#define CH24_STAGED_FLAGS 0x05
+
+#define CH24_RANDIS_HP_CURRENT 25
+#define CH24_RANDIS_HP_MAX 40
+#define CH24_RANDIS_MP_CURRENT 2
+#define CH24_RANDIS_MP_MAX 9
+#define CH24_RANDIS_LEVEL 3
+#define CH24_LAST_ROSTER_HP_CURRENT 10
+#define CH24_LAST_ROSTER_HP_MAX 33
+#define CH24_LAST_ROSTER_MP_CURRENT 1
+#define CH24_LAST_ROSTER_MP_MAX 7
+#define CH24_PAST_BOUND_HP_CURRENT 12
+#define CH24_PAST_BOUND_HP_MAX 44
+#define CH24_PAST_BOUND_MP_CURRENT 3
+#define CH24_PAST_BOUND_MP_MAX 8
+#define CH24_HIGH_ID_HP_CURRENT 14
+#define CH24_HIGH_ID_HP_MAX 45
+#define CH24_HIGH_ID_MP_CURRENT 4
+#define CH24_HIGH_ID_MP_MAX 6
+#define CH24_BEYOND_HP_CURRENT 5
+#define CH24_BEYOND_HP_MAX 50
+#define CH24_ENEMY_HP 44
+
+static struct fdps_unit_record ch24_unit_image[CH24_UNIT_CAPACITY];
+static struct fdps_unit_record ch24_roster_image[CH24_ROSTER_CAPACITY];
+static unsigned char ch24_item_image[ITEM_TABLE_ROWS
+                                     * sizeof(struct fdps_item_effect)];
+
+/* WIN23.DAT: retire battle unit 0, write the marker into its
+   status_timers[4], stop.  The retire is what shows the party was banked
+   before the script ran, as in the chapter 19 half. */
+static unsigned char fixture_win23_dat[] = {
+    0x0b, RANDIS_UNIT,
+    0x12, RANDIS_UNIT, CH24_WIN23_MARKER_OPERAND, CH24_WIN23_MARKER_VALUE,
+    0x00
+};
+
+static unsigned char fixture_ch24_win22_dat[] = {
+    0x12, RANDIS_UNIT, CH24_DECOY_MARKER_OPERAND, CH24_WIN22_DECOY_VALUE,
+    0x00
+};
+
+static unsigned char fixture_ch24_win24_dat[] = {
+    0x12, RANDIS_UNIT, CH24_DECOY_MARKER_OPERAND, CH24_WIN24_DECOY_VALUE,
+    0x00
+};
+
+static char *fixture_ch24_names[CH24_FIXTURE_MEMBERS] = {
+    "WIN22.DAT", "WIN23.DAT", "WIN24.DAT"
+};
+
+static unsigned char *fixture_ch24_bytes[CH24_FIXTURE_MEMBERS] = {
+    fixture_ch24_win22_dat, fixture_win23_dat, fixture_ch24_win24_dat
+};
+
+static int fixture_ch24_lengths[CH24_FIXTURE_MEMBERS] = {
+    sizeof(fixture_ch24_win22_dat), sizeof(fixture_win23_dat),
+    sizeof(fixture_ch24_win24_dat)
+};
+
+/* 0 not attempted, 1 built by this half and usable, 2 unavailable. */
+static int ch24_fixture_state = 0;
+
+/* What one run of the handler left behind. */
+struct ch24_snapshot {
+    unsigned char randis_timers[STATUS_TIMER_COUNT];
+    int randis_flags;
+    int last_roster_flags;
+    int last_roster_hp_current;
+    int last_roster_mp_current;
+    int past_bound_flags;
+    int past_bound_hp_current;
+    int past_bound_mp_current;
+    int high_id_flags;
+    int high_id_hp_current;
+    int high_id_mp_current;
+    int beyond_flags;
+    int beyond_hp_current;
+    int enemy_flags;
+    int enemy_hp_current;
+    int slot_level;
+    int slot_hp_current;
+    int slot_mp_current;
+    int last_slot_flags;
+    int last_slot_hp_current;
+    int chapter_id;
+    int party_gold;
+};
+
+/* 0 not attempted, 1 the run happened and its snapshot is good, 2 the run
+   could not be made and every case that reads it says so. */
+static int ch24_duel_state = 0;
+static int ch24_nolatch_state = 0;
+static struct ch24_snapshot ch24_duel_seen;
+static struct ch24_snapshot ch24_nolatch_seen;
+
+/* Builds the container the two runs share, once, to the layout in
+   resource_info/vfs.md and by the same refusal protocol as the halves above. */
+static int ch24_fixture_available(void)
+{
+    FILE *fp;
+    long member_at;
+    int i;
+
+    if (ch24_fixture_state != 0) {
+        return ch24_fixture_state == 1;
+    }
+    ch24_fixture_state = 2;
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "rb");
+    if (fp != NULL) {
+        fclose(fp);
+        return 0;
+    }
+
+    fp = fopen(SCRIPT_ARCHIVE_FILE, "wb");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    fwrite("VFS", 1, 3, fp);
+    write_word(fp, 1);
+    write_word(fp, VFS_HEADER_BYTES);
+    write_dword(fp, (long) CH24_FIXTURE_MEMBERS);
+    fwrite("Dynasty Information Co.,", 1, VFS_SIGNATURE_BYTES, fp);
+
+    member_at = (long) VFS_HEADER_BYTES
+                + (long) CH24_FIXTURE_MEMBERS * VFS_ENTRY_BYTES;
+    for (i = 0; i < CH24_FIXTURE_MEMBERS; i++) {
+        write_name(fp, fixture_ch24_names[i]);
+        write_dword(fp, (long) fixture_ch24_lengths[i]);
+        write_dword(fp, (long) fixture_ch24_lengths[i]);
+        fputc(0, fp);
+        write_dword(fp, member_at);
+        member_at += (long) fixture_ch24_lengths[i];
+    }
+    for (i = 0; i < CH24_FIXTURE_MEMBERS; i++) {
+        fwrite(fixture_ch24_bytes[i], 1, (size_t) fixture_ch24_lengths[i], fp);
+    }
+    fclose(fp);
+
+    ch24_fixture_state = 1;
+    return 1;
+}
+
+/* Stages one record of the battle array. */
+static void ch24_stage_unit(int unit_index, int char_id, int side, int flags,
+                            int hp_current, int hp_max, int mp_current,
+                            int mp_max)
+{
+    struct fdps_unit_record *unit;
+
+    unit = &ch24_unit_image[unit_index];
+    unit->char_id = (unsigned char) char_id;
+    unit->side = (unsigned char) side;
+    unit->flags = (unsigned char) flags;
+    unit->hp_current = (short) hp_current;
+    unit->hp_max = (short) hp_max;
+    unit->mp_current = (short) mp_current;
+    unit->mp_max = (short) mp_max;
+}
+
+/* The battle array, the roster block and the item table as they stand when
+   chapter 24's battle has just been won and the duel has been staged over it.
+   latch says whether the chapter's duel was ever put to the player. */
+static void ch24_stage_globals(int latch)
+{
+    memset(ch24_unit_image, 0, sizeof(ch24_unit_image));
+    memset(ch24_roster_image, ROSTER_FILLER, sizeof(ch24_roster_image));
+    memset(ch24_item_image, 0, sizeof(ch24_item_image));
+
+    ch24_stage_unit(RANDIS_UNIT, RANDIS_CHAR_ID, PLAYER_SIDE,
+                    CH24_STAGED_FLAGS, CH24_RANDIS_HP_CURRENT,
+                    CH24_RANDIS_HP_MAX, CH24_RANDIS_MP_CURRENT,
+                    CH24_RANDIS_MP_MAX);
+    ch24_unit_image[RANDIS_UNIT].level = CH24_RANDIS_LEVEL;
+    ch24_stage_unit(CH24_LAST_ROSTER_UNIT, CH24_LAST_ROSTER_CHAR_ID,
+                    PLAYER_SIDE, CH24_STAGED_FLAGS,
+                    CH24_LAST_ROSTER_HP_CURRENT, CH24_LAST_ROSTER_HP_MAX,
+                    CH24_LAST_ROSTER_MP_CURRENT, CH24_LAST_ROSTER_MP_MAX);
+    ch24_stage_unit(CH24_PAST_BOUND_UNIT, CH24_PAST_BOUND_CHAR_ID,
+                    PLAYER_SIDE, CH24_STAGED_FLAGS,
+                    CH24_PAST_BOUND_HP_CURRENT, CH24_PAST_BOUND_HP_MAX,
+                    CH24_PAST_BOUND_MP_CURRENT, CH24_PAST_BOUND_MP_MAX);
+    ch24_stage_unit(CH24_HIGH_ID_UNIT, CH24_HIGH_ID_CHAR_ID, PLAYER_SIDE,
+                    CH24_STAGED_FLAGS, CH24_HIGH_ID_HP_CURRENT,
+                    CH24_HIGH_ID_HP_MAX, CH24_HIGH_ID_MP_CURRENT,
+                    CH24_HIGH_ID_MP_MAX);
+    ch24_stage_unit(CH24_ENEMY_UNIT_SLOT, CH24_ENEMY_UNIT_CHAR_ID, ENEMY_SIDE,
+                    UNIT_FLAG_RETIRED, CH24_ENEMY_HP, CH24_ENEMY_HP, 0, 0);
+    ch24_stage_unit(CH24_BEYOND_COUNT_UNIT, CH24_BEYOND_COUNT_CHAR_ID,
+                    PLAYER_SIDE, CH24_STAGED_FLAGS, CH24_BEYOND_HP_CURRENT,
+                    CH24_BEYOND_HP_MAX, 0, 0);
+
+    ch24_roster_image[RANDIS_ROSTER_SLOT].char_id = RANDIS_CHAR_ID;
+    ch24_roster_image[CH24_LAST_ROSTER_SLOT].char_id =
+        CH24_LAST_ROSTER_CHAR_ID;
+
+    data_fdps_map_cell_event_triggered_flags[CH24_DUEL_LATCH_SLOT] =
+        (unsigned char) latch;
+    data_fdps_map_unit_array_ptr = (unsigned char *) ch24_unit_image;
+    data_fdps_roster_array_ptr = (unsigned char *) ch24_roster_image;
+    data_fdps_item_effect_table_ptr = ch24_item_image;
+    data_fdps_map_unit_count = CH24_UNIT_COUNT;
+    data_fdps_roster_member_count = CH24_ROSTER_MEMBERS;
+    data_fdps_chapter_current_chapter_id = CHAPTER_ID_BEFORE;
+    data_fdps_shared_party_total_gold = PARTY_GOLD_BEFORE;
+}
+
+static void ch24_capture(struct ch24_snapshot *seen)
+{
+    int i;
+    struct fdps_unit_record *unit;
+
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        seen->randis_timers[i] = ch24_unit_image[RANDIS_UNIT].status_timers[i];
+    }
+    seen->randis_flags = (int) ch24_unit_image[RANDIS_UNIT].flags;
+    unit = &ch24_unit_image[CH24_LAST_ROSTER_UNIT];
+    seen->last_roster_flags = (int) unit->flags;
+    seen->last_roster_hp_current = (int) unit->hp_current;
+    seen->last_roster_mp_current = (int) unit->mp_current;
+    unit = &ch24_unit_image[CH24_PAST_BOUND_UNIT];
+    seen->past_bound_flags = (int) unit->flags;
+    seen->past_bound_hp_current = (int) unit->hp_current;
+    seen->past_bound_mp_current = (int) unit->mp_current;
+    unit = &ch24_unit_image[CH24_HIGH_ID_UNIT];
+    seen->high_id_flags = (int) unit->flags;
+    seen->high_id_hp_current = (int) unit->hp_current;
+    seen->high_id_mp_current = (int) unit->mp_current;
+    unit = &ch24_unit_image[CH24_BEYOND_COUNT_UNIT];
+    seen->beyond_flags = (int) unit->flags;
+    seen->beyond_hp_current = (int) unit->hp_current;
+    unit = &ch24_unit_image[CH24_ENEMY_UNIT_SLOT];
+    seen->enemy_flags = (int) unit->flags;
+    seen->enemy_hp_current = (int) unit->hp_current;
+    seen->slot_level = (int) ch24_roster_image[RANDIS_ROSTER_SLOT].level;
+    seen->slot_hp_current =
+        (int) ch24_roster_image[RANDIS_ROSTER_SLOT].hp_current;
+    seen->slot_mp_current =
+        (int) ch24_roster_image[RANDIS_ROSTER_SLOT].mp_current;
+    seen->last_slot_flags =
+        (int) ch24_roster_image[CH24_LAST_ROSTER_SLOT].flags;
+    seen->last_slot_hp_current =
+        (int) ch24_roster_image[CH24_LAST_ROSTER_SLOT].hp_current;
+    seen->chapter_id = data_fdps_chapter_current_chapter_id;
+    seen->party_gold = data_fdps_shared_party_total_gold;
+}
+
+/* Run A: the duel was put to the player, so the recovery must run. */
+static void ch24_run_duel(void)
+{
+    if (ch24_duel_state != 0) {
+        return;
+    }
+    ch24_duel_state = 2;
+
+    if (!ch24_fixture_available()) {
+        return;
+    }
+
+    ch24_stage_globals(1);
+    fdps_chapter_24_end();
+    ch24_capture(&ch24_duel_seen);
+    ch24_duel_state = 1;
+}
+
+/* Run B: the duel was never offered, so the recovery must be skipped whole. */
+static void ch24_run_no_latch(void)
+{
+    if (ch24_nolatch_state != 0) {
+        return;
+    }
+    ch24_nolatch_state = 2;
+
+    if (!ch24_fixture_available()) {
+        return;
+    }
+
+    ch24_stage_globals(0);
+    fdps_chapter_24_end();
+    ch24_capture(&ch24_nolatch_seen);
+    ch24_nolatch_state = 1;
+}
+
+/* The recovery reaches the last id the test lets through, 0x0b, and does all
+   three of its stores there: MOV byte ptr [EAX+0x5],0x0 at 0003b653, then the
+   two word copies from +0x42 and +0x46 at 0003b65a and 0003b668. */
+static void chapter_24_recovers_the_party_when_the_duel_was_offered(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.last_roster_flags, 0);
+    CHECK_EQ(ch24_duel_seen.last_roster_hp_current, CH24_LAST_ROSTER_HP_MAX);
+    CHECK_EQ(ch24_duel_seen.last_roster_mp_current, CH24_LAST_ROSTER_MP_MAX);
+}
+
+/* The flags store is a whole byte: the 0x04 staged beside the retired bit has
+   to be gone as well. */
+static void chapter_24_recovery_clears_the_whole_flags_byte(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(CH24_STAGED_FLAGS & 0x04, 0x04);
+    CHECK_EQ(ch24_duel_seen.last_roster_flags & 0x04, 0);
+    CHECK_EQ(ch24_duel_seen.last_roster_flags & 0x01, 0);
+}
+
+/* The character-id test stops at 0x0b: CMP EAX,0xb / JG 0003b673. */
+static void chapter_24_recovery_stops_after_character_id_eleven(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.past_bound_flags, CH24_STAGED_FLAGS);
+    CHECK_EQ(ch24_duel_seen.past_bound_hp_current, CH24_PAST_BOUND_HP_CURRENT);
+    CHECK_EQ(ch24_duel_seen.past_bound_mp_current, CH24_PAST_BOUND_MP_CURRENT);
+}
+
+/* The character id is read UNSIGNED: AND EAX,0xff at 0003b646, so 0x80 is 128
+   and fails the test. */
+static void chapter_24_recovery_reads_the_character_id_unsigned(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.high_id_flags, CH24_STAGED_FLAGS);
+    CHECK_EQ(ch24_duel_seen.high_id_hp_current, CH24_HIGH_ID_HP_CURRENT);
+    CHECK_EQ(ch24_duel_seen.high_id_mp_current, CH24_HIGH_ID_MP_CURRENT);
+}
+
+/* The bound is data_fdps_map_unit_count: CMP EAX,[0x00060150] / JL at
+   0003b61f.  The record one past the count carries a passing id and must come
+   out untouched. */
+static void chapter_24_recovery_walks_the_live_unit_count(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(CH24_BEYOND_COUNT_UNIT >= CH24_UNIT_COUNT, 1);
+    CHECK_EQ(ch24_duel_seen.beyond_flags, CH24_STAGED_FLAGS);
+    CHECK_EQ(ch24_duel_seen.beyond_hp_current, CH24_BEYOND_HP_CURRENT);
+}
+
+/* The map IS swept, CALL 0x00039e10 at 0003b675: the enemy's hit points are
+   zeroed, and its retired bit is left as staged.  This is the case that tells
+   this handler from chapter 19's. */
+static void chapter_24_sweeps_the_enemy_side(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.enemy_hp_current, 0);
+    CHECK_EQ(ch24_duel_seen.enemy_flags, UNIT_FLAG_RETIRED);
+}
+
+/* The recovery runs BEFORE the writeback: the roster copy of character 0x0b
+   comes out un-retired and on its maximum. */
+static void chapter_24_recovers_the_party_before_banking_it(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.last_slot_flags, 0);
+    CHECK_EQ(ch24_duel_seen.last_slot_hp_current, CH24_LAST_ROSTER_HP_MAX);
+}
+
+/* The party is banked BEFORE the cut-scene: WIN23.DAT retires unit 0 and the
+   writeback would then refuse to bank character 0, leaving roster slot 0 at
+   its filler. */
+static void chapter_24_banks_the_party_before_the_cutscene_runs(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.slot_level, CH24_RANDIS_LEVEL);
+    CHECK_EQ(ch24_duel_seen.slot_hp_current, CH24_RANDIS_HP_MAX);
+    CHECK_EQ(ch24_duel_seen.slot_mp_current, CH24_RANDIS_MP_MAX);
+    CHECK_EQ(ch24_duel_seen.randis_flags, UNIT_FLAG_RETIRED);
+}
+
+/* The member opened is WIN23.DAT and neither decoy: MOV EAX,0x621d0 at
+   0003b67f. */
+static void chapter_24_victory_cutscene_is_win23_dat(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.randis_timers[CH24_WIN23_MARKER_SLOT],
+             CH24_WIN23_MARKER_VALUE);
+    CHECK_EQ(ch24_duel_seen.randis_timers[CH24_DECOY_MARKER_SLOT], 0);
+}
+
+/* The revive sweep finds nobody at 0 hit points and charges nothing. */
+static void chapter_24_revive_charges_nothing_when_nobody_fell(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The chapter index is advanced to 24, chapter 25, and not to the 23 the
+   script name carries.  MOV dword ptr [0x00069cf4],0x18 at 0003b692. */
+static void chapter_24_advances_the_chapter_index_to_chapter_twenty_five(void)
+{
+    ch24_run_duel();
+    CHECK_EQ(ch24_duel_state, 1);
+    CHECK_EQ(ch24_duel_seen.chapter_id, CH24_CHAPTER_ID_AFTER);
+}
+
+/* Run B.  With the latch down the whole recovery is jumped over: CMP byte ptr
+   [0x000640e9],0x0 / JZ 0003b675 at 0003b60c. */
+static void chapter_24_recovers_nobody_without_the_duel_latch(void)
+{
+    ch24_run_no_latch();
+    CHECK_EQ(ch24_nolatch_state, 1);
+    CHECK_EQ(ch24_nolatch_seen.last_roster_flags, CH24_STAGED_FLAGS);
+    CHECK_EQ(ch24_nolatch_seen.last_roster_hp_current,
+             CH24_LAST_ROSTER_HP_CURRENT);
+    CHECK_EQ(ch24_nolatch_seen.last_roster_mp_current,
+             CH24_LAST_ROSTER_MP_CURRENT);
+}
+
+/* And the writeback then keeps the retired bit and does not heal, which is why
+   the recovery has to stand in front of it. */
+static void chapter_24_banks_a_retired_party_without_the_latch(void)
+{
+    ch24_run_no_latch();
+    CHECK_EQ(ch24_nolatch_state, 1);
+    CHECK_EQ(ch24_nolatch_seen.last_slot_flags, UNIT_FLAG_RETIRED);
+    CHECK_EQ(ch24_nolatch_seen.last_slot_hp_current,
+             CH24_LAST_ROSTER_HP_CURRENT);
+}
+
+/* The JZ lands on the sweep, not past it: the four unconditional steps run
+   either way -- the enemy is zeroed, the same cut-scene is opened and the same
+   chapter index is left behind. */
+static void chapter_24_still_closes_the_chapter_without_the_latch(void)
+{
+    ch24_run_no_latch();
+    CHECK_EQ(ch24_nolatch_state, 1);
+    CHECK_EQ(ch24_nolatch_seen.enemy_hp_current, 0);
+    CHECK_EQ(ch24_nolatch_seen.randis_timers[CH24_WIN23_MARKER_SLOT],
+             CH24_WIN23_MARKER_VALUE);
+    CHECK_EQ(ch24_nolatch_seen.randis_timers[CH24_DECOY_MARKER_SLOT], 0);
+    CHECK_EQ(ch24_nolatch_seen.chapter_id, CH24_CHAPTER_ID_AFTER);
+    CHECK_EQ(ch24_nolatch_seen.party_gold, PARTY_GOLD_BEFORE);
+}
+
+/* The shared fixture container goes again. */
+static void the_ch24_fixture_container_is_removed(void)
+{
+    if (ch24_fixture_state != 1) {
+        return;
+    }
+
+    remove(SCRIPT_ARCHIVE_FILE);
+    ch24_fixture_state = 0;
+    CHECK_EQ(file_present(SCRIPT_ARCHIVE_FILE), 0);
+}
+
 void run_chend2_tests(void)
 {
     RUN_TEST(chapter_16_sweeps_the_enemy_side);
@@ -4232,4 +4774,19 @@ void run_chend2_tests(void)
     RUN_TEST(chapter_23_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_23_advances_the_chapter_index_to_chapter_twenty_four);
     RUN_TEST(the_ch23_fixture_container_is_removed);
+    RUN_TEST(chapter_24_recovers_the_party_when_the_duel_was_offered);
+    RUN_TEST(chapter_24_recovery_clears_the_whole_flags_byte);
+    RUN_TEST(chapter_24_recovery_stops_after_character_id_eleven);
+    RUN_TEST(chapter_24_recovery_reads_the_character_id_unsigned);
+    RUN_TEST(chapter_24_recovery_walks_the_live_unit_count);
+    RUN_TEST(chapter_24_sweeps_the_enemy_side);
+    RUN_TEST(chapter_24_recovers_the_party_before_banking_it);
+    RUN_TEST(chapter_24_banks_the_party_before_the_cutscene_runs);
+    RUN_TEST(chapter_24_victory_cutscene_is_win23_dat);
+    RUN_TEST(chapter_24_revive_charges_nothing_when_nobody_fell);
+    RUN_TEST(chapter_24_advances_the_chapter_index_to_chapter_twenty_five);
+    RUN_TEST(chapter_24_recovers_nobody_without_the_duel_latch);
+    RUN_TEST(chapter_24_banks_a_retired_party_without_the_latch);
+    RUN_TEST(chapter_24_still_closes_the_chapter_without_the_latch);
+    RUN_TEST(the_ch24_fixture_container_is_removed);
 }
