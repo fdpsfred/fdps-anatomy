@@ -1170,7 +1170,7 @@
 00062200 | 0xa | /string | s_Win26.dat_00062200 | DEFAULT
 0006220c | 0xa | /string | s_Win27.dat_0006220c | DEFAULT
 00062218 | 0xa | /char[10] | binary_artifact_string_literal_icon_script_win28_dat_62218 | USER_DEFINED
-00062222 | 0xc | /string | - | -
+00062224 | 0xa | /char[10] | binary_artifact_string_literal_icon_script_win29_dat_62224 | USER_DEFINED
 00062230 | 0xc | /char[12] | binary_artifact_string_literal_good_ending_script_name_62230 | USER_DEFINED
 0006223c | 0x1a | /string | s_DEVICE_REQUEST_FAILED!!!_0006223c | DEFAULT
 00062258 | 0x3 | /char[3] | binary_artifact_string_literal_lx_signature_62258 | USER_DEFINED

@@ -1404,6 +1404,35 @@ static void chapter_29_advances_the_chapter_index_to_chapter_thirty(void)
     CHECK_EQ(seen->party_gold, PARTY_GOLD_BEFORE);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_30_end at 0003ba80.
+ *
+ *   0003ba8c  CALL 0x00039e10          sweep
+ *   0003ba91  CALL 0x00023980          writeback
+ *   0003ba96  "Win29.dat" -> CALL 0x00021650
+ *   0003baa4  byte [0x00060158] = 1, byte [0x00060159] = 1
+ *   0003bab2  CALL 0x0001ba40          the ending sequence
+ *   0003bab7  PUSH 0x7530 -> CALL 0x0003d370 (delay)
+ *   0003bac4  "GoodEnd.dat" -> CALL 0x00021650
+ *   0003bad2  byte [0x000643eb] = 1
+ *
+ * NOT RUN HERE, for the reason chapter 27's ending route is not run above,
+ * made stronger by one more call.  The body has no branch, so there is no
+ * part of it that can be reached without passing through
+ * fdps_play_ending_credit_roll, which plays the character gallery and the End
+ * movie through the VGA aperture, the audio stack, the keyboard vector and the
+ * CD path, and needs the whole machine fence tests/ending.c builds around its
+ * own two runs.  Behind it the handler holds in the CRT's delay for thirty
+ * seconds: that delay (00043cb0) is a calibrated count of INT 21h AH=2Ch
+ * calls, so reprogramming the interval timer does not shorten it, and thirty
+ * seconds of it plus the credit roll's own frames approaches the host's
+ * 45-second heartbeat window with no chance for the harness to write a
+ * heartbeat in between.  What the handler decides -- the order, the two
+ * scene names, the two gate stores, the absence of a revive and of a chapter
+ * index store, and the return-to-title flag -- is left to the playtest of the
+ * game's last chapter.
+ * ------------------------------------------------------------------------ */
+
 /* The fixture container goes again, so that nothing this file wrote outlives
    its run and the next file that wants that name finds it free. */
 static void the_fixture_container_is_removed(void)

@@ -10,6 +10,7 @@
  *
  * See chend2b.h for what each handler closes out.  Nothing here owns state.
  */
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "btlend.h"
@@ -341,4 +342,71 @@ void fdps_chapter_29_end(void)
     fdps_icon_script_run(CH29_VICTORY_SCRIPT);
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH29_NEXT_CHAPTER_ID;
+}
+
+/* Chapter 30's victory cut-scene, the string at 0x62224 loaded into EAX at
+   0003ba96 and pushed as fdps_icon_script_run's only argument.  Named after
+   the 0-based id of the chapter just WON: chapter 30 is id 29.  read_memory
+   at 0x62218 returns 57 69 6e 32 38 2e 64 61 74 00 64 61 57 69 6e 32 39 2e
+   64 61 74 00 64 61 47 6f 6f 64 45 6e 64 2e 64 61 74 00, so 0x62222..0x62223
+   is the 64 61 filler behind "Win28.dat", 0x62224 is the W of "Win29.dat",
+   0x6222e..0x6222f is the filler behind it and 0x62230 is the G of
+   "GoodEnd.dat".  Lower case and writable for the same reason as chapter
+   25's. */
+#define CH30_VICTORY_SCRIPT "Win29.dat"
+
+/* The closing scene, the string at 0x62230 loaded into EAX at 0003bac4 and
+   pushed as fdps_icon_script_run's only argument on its second
+   call. */
+#define CH30_EPILOGUE_SCRIPT "GoodEnd.dat"
+
+/* The two info-panel gates, MOV byte ptr [0x00060158],0x1 at 0003baa4 and
+   MOV byte ptr [0x00060159],0x1 at 0003baab.  Both are one-byte booleans
+   tested only against zero (gamedata.h), so 1 is simply "raised". */
+#define CH30_PANEL_OPTION_ON 1
+#define CH30_PLAY_ACTIVE 1
+
+/* The hold between the ending sequence and the closing scene: PUSH 0x7530 at
+   0003bab7 into the CRT's delay, thirty thousand milliseconds.  Nothing is
+   polled across it. */
+#define CH30_ENDING_HOLD_MS 30000
+
+/* The return-to-title request, MOV byte ptr [0x000643eb],0x1 at 0003bad2, the
+   store chapter 27's ending route also ends on (gamedata.h). */
+#define CH30_QUIT_REQUESTED 1
+
+/* 0003ba80.  Chapter 30's end handler, the end of the game.  The four-push
+   prologue with SUB ESP,0x0: no local, no branch, and nothing pushed by the
+   dispatcher (table slot 29, the pointer at 0x00060378, the table's last).
+
+   THE ORDER IS THE ALGORITHM: sweep (CALL 0x00039e10 at 0003ba8c), writeback
+   (CALL 0x00023980 at 0003ba91), Win29.dat (CALL 0x00021650 at 0003ba9c), the
+   two panel gates raised, the ending sequence (CALL 0x0001ba40 at 0003bab2),
+   the thirty-second hold (CALL 0x0003d370, the delay thunk, at 0003babc),
+   GoodEnd.dat (CALL 0x00021650 at 0003baca), and the return-to-title flag.
+
+   UNLIKE EVERY OTHER HANDLER OF THE TABLE it neither revives the fallen nor
+   stores a next chapter index into data_fdps_chapter_current_chapter_id:
+   there is no chapter 31, and the game ends by unwinding to the title screen
+   on data_fdps_shared_quit_game_requested instead.
+
+   THE TWO PANEL STORES ARE NOT A SAVE/RESTORE.  Both gates are set to 1 and
+   neither is put back: data_fdps_ui_terrain_hud_user_enabled is the player's
+   own options-menu setting, and this handler forces it on.
+
+   Values used after a CALL: none.  Each argumented CALL (0003ba9c, 0003babc,
+   0003baca) is followed directly by the caller's ADD ESP,0x4, and no
+   instruction in the body reads EAX, EDX or any other register a callee
+   could have left a result in; the stores are immediates. */
+void fdps_chapter_30_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH30_VICTORY_SCRIPT);
+    data_fdps_ui_terrain_hud_user_enabled = CH30_PANEL_OPTION_ON;
+    data_fdps_ui_play_active_flag = CH30_PLAY_ACTIVE;
+    fdps_play_ending_credit_roll();
+    delay(CH30_ENDING_HOLD_MS);
+    fdps_icon_script_run(CH30_EPILOGUE_SCRIPT);
+    data_fdps_shared_quit_game_requested = CH30_QUIT_REQUESTED;
 }

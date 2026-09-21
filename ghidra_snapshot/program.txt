@@ -21,4 +21,4 @@ counts.excluded.loaderFixupComments = 6844
 counts.excluded.loaderFixupLabels = 6806
 counts.excluded.loaderFixupTypes = 6927
 counts.functions = 1345
-counts.labels = 953
+counts.labels = 954

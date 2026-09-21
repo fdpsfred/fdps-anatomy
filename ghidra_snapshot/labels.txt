@@ -654,6 +654,7 @@
 000621dc | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter25_victory_script_name_621dc
 000621e8 | Label | USER_DEFINED | primary | binary_artifact_string_literal_chapter26_victory_script_name_621e8
 00062218 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win28_dat_62218
+00062224 | Label | USER_DEFINED | primary | binary_artifact_string_literal_icon_script_win29_dat_62224
 00062230 | Label | USER_DEFINED | primary | binary_artifact_string_literal_good_ending_script_name_62230
 00062258 | Label | USER_DEFINED | primary | binary_artifact_string_literal_lx_signature_62258
 00062277 | Label | USER_DEFINED | primary | binary_artifact_string_literal_ail_log_timestamp_pad_space_62277

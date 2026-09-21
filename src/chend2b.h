@@ -103,4 +103,23 @@ extern void fdps_chapter_28_end(void);
 extern void fdps_chapter_29_end(void);
 #pragma aux fdps_chapter_29_end "*" parm caller [];
 
+/* Chapter 30's end handler, and the end of the game.  Takes nothing and
+   returns nothing.
+
+   In order: the enemy side is swept, the battle party is banked, the victory
+   cut-scene Win29.dat is interpreted, the two battle-map info-panel gates
+   (data_fdps_ui_terrain_hud_user_enabled, the player's own option, and
+   data_fdps_ui_play_active_flag) are both raised and never put back, the
+   ending sequence (ending.h) plays, the CRT's delay holds for thirty
+   seconds, the closing scene GoodEnd.dat is interpreted, and
+   data_fdps_shared_quit_game_requested is raised, sending the game back to
+   the title screen.
+
+   No revive, and no store to data_fdps_chapter_current_chapter_id: there is
+   no chapter 31.
+
+   Table slot 29, the last. */
+extern void fdps_chapter_30_end(void);
+#pragma aux fdps_chapter_30_end "*" parm caller [];
+
 #endif
