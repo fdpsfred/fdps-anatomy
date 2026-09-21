@@ -128,4 +128,17 @@ extern void (*data_fdps_chapter_post_action_handler_table[30])(void);
    events inside the battle that follows. */
 extern void (*data_fdps_chapter_init_handler_table[30])(void);
 
+/* 00060304.  The thirty per-chapter wrap-up scripts, run when a battle ends
+   with the chapter cleared.  Entry n is fdps_chapter_NN_end for NN = n + 1 --
+   entry 0 is fdps_chapter_01_end at 0003a410 and entry 29 is
+   fdps_chapter_30_end at 0003ba80 -- and the 120 bytes end at 0006037c,
+   where a zero dword follows.
+
+   One site reaches it, in main: MOV EAX,[0x00069cf4] / LEA EAX,[EAX*0x4 + 0x0]
+   / CALL dword ptr [EAX + 0x60304] at 00029395-000293a1, nothing pushed and no
+   ADD ESP afterwards, so the handlers take no argument and return nothing.
+   The chapter id is not range-checked.  Ghidra types the slots as void_fn;
+   the bare call is what fixes them as void (*)(void). */
+extern void (*data_fdps_chapter_end_handler_table[30])(void);
+
 #endif

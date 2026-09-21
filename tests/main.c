@@ -1569,6 +1569,53 @@ static void reads_the_tables_back_from_the_cache(void)
     load_ran = -1;
 }
 
+/* main itself is not called anywhere in this file.  It ends in exit(1) on
+   either failed check and otherwise runs the game's outer loop until the
+   player quits, so no case could call it and come back; the test image
+   compiles it renamed away for that reason (rebuild_info/emit_pipeline.md).
+
+   What IS checked is the input contract its two unbounded "%s" scans rely
+   on: the shipped DISK.NO holds "CDROM at e:\r\n" (13 bytes, read off the
+   file itself), main drops the first two tokens into a 20-byte stack buffer
+   (LEA EAX,[EBP-0x1c] at 0002927d, the next local starting at EBP-0x8) and
+   scans the third into data_fdps_cdrom_path, whose Ghidra type is char[3].
+   The file is read here the same way main reads it -- "rt", three "%s" --
+   into buffers large enough that the test cannot overflow. */
+#define DISK_NO_DISCARD_BUFFER_BYTES 20
+
+static void disk_no_tokens_fit_the_buffers_main_scans_into(void)
+{
+    FILE *disk_no_file;
+    char first_token[64];
+    char second_token[64];
+    char third_token[64];
+    int scanned;
+
+    disk_no_file = fopen("Disk.no", "rt");
+    CHECK_EQ(disk_no_file != NULL, 1);
+    if (disk_no_file == NULL) {
+        return;
+    }
+    scanned = 0;
+    scanned += fscanf(disk_no_file, "%63s", first_token);
+    scanned += fscanf(disk_no_file, "%63s", second_token);
+    scanned += fscanf(disk_no_file, "%63s", third_token);
+    fclose(disk_no_file);
+
+    CHECK_EQ(scanned, 3);
+    CHECK_EQ(strcmp(first_token, "CDROM"), 0);
+    CHECK_EQ(strcmp(second_token, "at"), 0);
+    CHECK_EQ(strcmp(third_token, "e:"), 0);
+    CHECK_EQ(strlen(first_token) < DISK_NO_DISCARD_BUFFER_BYTES, 1);
+    CHECK_EQ(strlen(second_token) < DISK_NO_DISCARD_BUFFER_BYTES, 1);
+    CHECK_EQ(strlen(third_token) < sizeof(data_fdps_cdrom_path), 1);
+}
+
+static void cdrom_path_holds_a_drive_prefix_and_terminator(void)
+{
+    CHECK_EQ(sizeof(data_fdps_cdrom_path), 3);
+}
+
 void run_main_tests(void)
 {
     RUN_TEST(fills_every_table_pointer);
@@ -1650,4 +1697,7 @@ void run_main_tests(void)
     /* And out with every global this file touched back at null, so nothing
        downstream finds one of the dangling addresses the shutdown left. */
     shutdown_clear_everything();
+
+    RUN_TEST(disk_no_tokens_fit_the_buffers_main_scans_into);
+    RUN_TEST(cdrom_path_holds_a_drive_prefix_and_terminator);
 }

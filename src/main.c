@@ -1,5 +1,8 @@
 /* main.c -- entry point and global resource lifecycle.
  *
+ * main is the C entry the Watcom startup's __CMain calls; it runs the whole
+ * program from the installation check to the farewell line.
+ *
  * See main.h.  Nothing here owns state of its own: the data-table pointers it
  * fills at startup, the resource pointers it releases at shutdown and the
  * scene-layer arrays it walks are all gamedata.c's, and the container they are
@@ -10,12 +13,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <io.h>
+#include <i86.h>
 #include "fdpstype.h"
+#include "audio.h"
 #include "blit.h"
+#include "btlturn.h"
+#include "cd.h"
+#include "cdaudio.h"
+#include "chapter.h"
 #include "gamedata.h"
 #include "keybd.h"
 #include "palette.h"
+#include "title.h"
 #include "vfs.h"
+#include "village.h"
 #include "main.h"
 
 /* The party roster block: PUSH 0xa00 / CALL malloc / MOV [0x00064108],EAX at
@@ -557,4 +568,118 @@ void fdps_load_global_resources(void)
               cache_file);
         fclose(cache_file);
     }
+}
+
+/* The request codes the battle loop leaves in
+   data_fdps_chapter_event_or_battle_end_code for main to act on (CMP 1 / CMP 2
+   at 00029373-00029383); 0 is "nothing to do", and any code past 2 is treated
+   the same way. */
+#define END_CODE_GAME_OVER 1
+#define END_CODE_CHAPTER_CLEARED 2
+
+/* What fdps_cdrom_detect answers when the drive and the disc are both usable
+   (CMP dword ptr [EBP-0x8],0x1 / JZ at 000292e0). */
+#define CDROM_DETECT_OK 1
+
+/* Audio timer rate handed to fdps_audio_init: PUSH 0x19 at 0002930c. */
+#define AUDIO_TICK_RATE_HZ 25
+
+/* INT 10h AH=00h set-video-mode requests, loaded as the whole of AX
+   (MOV word ptr [EBP-0x38],0x13 at 0002931b and ,0x3 at 000293c7). */
+#define VIDEO_BIOS_INT 0x10
+#define VIDEO_MODE_VGA_320X200X256 0x13
+#define VIDEO_MODE_TEXT_80X25 0x03
+
+/* The program.  Installation check, CD check, start-up, the outer game loop,
+   shut-down -- in that order, with no return to an earlier step.
+
+   Called by the Watcom startup's __CMain at 0004df8f with argc and argv
+   pushed, and neither is read.  What it returns goes straight to exit() at
+   0004df98.  The original loads nothing into EAX after the farewell printf, so
+   the process's exit code is whatever that printf returned; `return printf`
+   below states that explicitly instead of leaving it to the register.  The two
+   failure paths end in exit(1) and never come back.
+
+   Disk.No is the file the installer writes ("CDROM at e:").  Its first two
+   tokens are scanned into one 20-byte stack buffer and dropped; the third is
+   scanned straight into data_fdps_cdrom_path, which is three bytes long -- a
+   drive letter, a colon and the terminator.  No width limit is given to either
+   scan and the fopen result is not tested, exactly as in the original.
+
+   The music-index global is set to -1 ("no track playing") between the file
+   read and the CD probe, before any audio code has run.
+
+   The mode switches reuse one register block for input and output, so the
+   text-mode request at the end goes in carrying whatever the mode-13h call
+   left in every register but AX.  INT 10h AH=00h reads only AL.
+
+   The loop body always runs one fdps_battle_player_phase_loop pass first and
+   clears the request code last, whichever arm ran.  A cleared chapter goes
+   through data_fdps_chapter_end_handler_table (chapter.h) at the current
+   chapter id, unchecked, and then into the village phase; a game over shows
+   the game-over screen and then goes back to the title screen. */
+int main(int argc, char **argv)
+{
+    FILE *disk_no_file;
+    char discarded_token[20];
+    int cdrom_status;
+    union REGS video_regs;
+
+    if (access("DISK.NO", 0) != 0) {
+        printf("\nCan't found file 'Disk.No' !!!\a\n");
+        printf("Please use install function.\n");
+        exit(1);
+    }
+
+    disk_no_file = fopen("Disk.no", "rt");
+    fscanf(disk_no_file, "%s", discarded_token);
+    fscanf(disk_no_file, "%s", discarded_token);
+    fscanf(disk_no_file, "%s", data_fdps_cdrom_path);
+    fclose(disk_no_file);
+
+    data_fdps_audio_cd_current_music_index = -1;
+
+    cdrom_status = fdps_cdrom_detect();
+    if (cdrom_status != CDROM_DETECT_OK) {
+        printf("Fatal error: CDROM is not install!!!\a\n");
+        printf("Check your CDROM please!!!\n");
+        exit(1);
+    }
+
+    fdps_audio_init(AUDIO_TICK_RATE_HZ);
+    fdps_load_global_resources();
+
+    video_regs.w.ax = VIDEO_MODE_VGA_320X200X256;
+    int386(VIDEO_BIOS_INT, &video_regs, &video_regs);
+
+    data_fdps_cel_sprite_cache_count = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_shared_quit_game_requested = 0;
+    data_fdps_chapter_event_or_battle_end_code = 0;
+
+    fdps_title_screen();
+    while (data_fdps_shared_quit_game_requested == 0) {
+        fdps_battle_player_phase_loop();
+        switch (data_fdps_chapter_event_or_battle_end_code) {
+        case END_CODE_GAME_OVER:
+            fdps_show_game_over();
+            fdps_title_screen();
+            break;
+        case END_CODE_CHAPTER_CLEARED:
+            (*data_fdps_chapter_end_handler_table
+                 [data_fdps_chapter_current_chapter_id])();
+            fdps_run_village_phase();
+            break;
+        }
+        data_fdps_chapter_event_or_battle_end_code = 0;
+    }
+
+    fdps_shutdown_free_resources();
+    fdps_audio_shutdown();
+    fdps_cd_stop_audio();
+
+    video_regs.w.ax = VIDEO_MODE_TEXT_80X25;
+    int386(VIDEO_BIOS_INT, &video_regs, &video_regs);
+
+    return printf("\nThank you for playing Flame Dragon Plus!! \n\n");
 }

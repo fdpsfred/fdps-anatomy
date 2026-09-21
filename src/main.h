@@ -112,4 +112,23 @@ extern void fdps_shutdown_free_resources(void);
 extern void fdps_load_global_resources(void);
 #pragma aux fdps_load_global_resources "*" parm caller [];
 
+/* The C entry point, called by the Watcom startup's __CMain, which pushes argc
+   and argv (neither is read) and hands the result to exit().  Checks that the
+   game was installed (DISK.NO exists) and that fdps_cdrom_detect answers 1,
+   ending the process with exit(1) and a two-line message otherwise; reads the
+   CD path prefix out of Disk.No's third token into data_fdps_cdrom_path;
+   starts audio at 25 Hz, loads the global resources, enters VGA mode 13h;
+   then runs the title screen and the outer battle loop until
+   data_fdps_shared_quit_game_requested is raised, dispatching each battle's
+   request code (1 game over, 2 chapter cleared); and finally shuts down,
+   returns to text mode 3 and prints the farewell line.  Returns that last
+   printf's result, which becomes the process exit code.
+
+   The symbol is literally `main` -- the CRT's contract, the one name in the
+   rebuild without the fdps_ prefix (rebuild_info/naming.md).  The unit-test
+   image compiles this file with main renamed away, because its own generated
+   entry is also main (rebuild_info/emit_pipeline.md). */
+extern int main(int argc, char **argv);
+#pragma aux main "*" parm caller [];
+
 #endif

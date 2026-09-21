@@ -77,3 +77,10 @@ MER2.TMP
 FIGHT.VFS
 FIGACT.VFS
 BACKGRND.VFS
+#
+# DISK.NO is the installer's "CDROM at e:" record that main reads with three
+# unbounded "%s" scans, the third straight into the three-byte
+# data_fdps_cdrom_path.  tests/main.c checks the shipped file's tokens fit the
+# buffers main scans them into; a fabricated one would only fit what the test
+# wrote.
+DISK.NO
