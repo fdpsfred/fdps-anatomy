@@ -132,6 +132,23 @@ extern void fdps_battle_unit_turn(int unit_index);
 extern void fdps_battle_advance_turn(void);
 #pragma aux fdps_battle_advance_turn "*" parm caller [];
 
+/* Runs the player phase on the battle map until the battle ends or the
+   system menu answers non-zero: one frame a pass, reading the latched make
+   code and moving the cursor with the arrows, cycling to the next player unit
+   that can still be given a turn on ESC, Z, keypad 5 or Delete, and on Enter
+   or Space handing the unit under the cursor its turn (a player unit that has
+   not acted and is not paralysed), its status window (any other unit) or, with
+   no unit there, the system menu.  F1 opens the map overview and F2 or Home
+   the status window, both only while a key is held between its second and
+   sixth frame.  Takes nothing, returns nothing; main is the only caller and
+   reads data_fdps_chapter_event_or_battle_end_code (gamedata.h) afterwards.
+
+   A battle-end code is tested only after each frame is drawn, and the system
+   menu's answer only at the top of the next pass, so either way one more
+   frame is drawn before the call returns. */
+extern void fdps_battle_player_phase_loop(void);
+#pragma aux fdps_battle_player_phase_loop "*" parm caller [];
+
 /* Ends the player phase if there is nobody left to move: when no unit on side
    2 has neither bit 0 (retired) nor bit 7 (already acted) of its status byte
    set and a zero paralysis counter, fdps_battle_advance_turn runs the battle

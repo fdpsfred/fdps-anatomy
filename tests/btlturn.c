@@ -2226,6 +2226,385 @@ static void end_walks_only_the_live_units(void)
     adv_unstage();
 }
 
+/* ---------------------------------------------------------------------- *
+ * 0002bae0 fdps_battle_player_phase_loop
+ *
+ * HOW A CASE DRIVES THE LOOP.  The loop reads the scancode latch once a pass
+ * and draws one frame with fdps_render_view_frame, whose tick wait is its only
+ * clock.  So, as for the unit turn above, the adapter goes to mode 13h and a
+ * timer interrupt is installed that advances the game's clock and, for the
+ * first ploop_key_ticks ticks, writes one make code into the latch the way
+ * fdps_keyboard_isr would while a key is held.  After that it sets
+ * data_fdps_chapter_event_or_battle_end_code, which the loop reads at the
+ * bottom of the pass (0002be91) and leaves on.
+ *
+ * How many passes land inside the held window depends on the machine, so no
+ * case asserts a pass count.  Every case instead holds its key long enough to
+ * run the cursor or the view into the clamp the assembly sets, and asserts
+ * where it stops -- a result that no number of extra passes can change.
+ *
+ * WHAT IS OUT OF REACH.  Enter and Space open the system menu, a unit's turn
+ * or a status window, each of which runs its own key loop; F1 and F2/Home do
+ * the same through the overview and the status window.  Those arms are
+ * settled row by row in the assembly in the comment above the function and
+ * are a playtest observation.  The rotation index the cycle saves between
+ * presses needs two presses a known number of passes apart, which a held key
+ * cannot give; the cases below use a single eligible unit so the answer does
+ * not depend on it.
+ *
+ * Expected values come from the assembly at 0002bae0 -- MOVSX word ptr [EAX]
+ * and [EAX+0x2] times 0x18 for the extent, CMP ...,0x18 / JGE and SUB
+ * EAX,0x18 / JG for the four cursor bounds, AND AL,0x85 and CMP EAX,0x2 for the
+ * cycle's test with the paralysis counter never read, the two IMUL ...,0x18 of
+ * record bytes +0 and +1 pushed as (x, y), and 0x108 / 0x90 / 0x138 / 0xc0 for
+ * the view -- and from the record layout ticket 17 settled.  None of them is
+ * read off the emitted C.
+ */
+
+#define PLOOP_MAX_MAP_W 20
+#define PLOOP_MAX_MAP_H 14
+#define PLOOP_TILE 24
+#define PLOOP_UNIT_COUNT 5
+#define PLOOP_NO_MAP_SPRITE 0x80
+
+#define PLOOP_MODE_13H 0x13
+#define PLOOP_MODE_TEXT 0x03
+#define PLOOP_TIMER_VECTOR 8
+
+#define PLOOP_SC_ESC 0x01
+#define PLOOP_SC_Z 0x2c
+#define PLOOP_SC_UP 0x48
+#define PLOOP_SC_LEFT 0x4b
+#define PLOOP_SC_KEYPAD_5 0x4c
+#define PLOOP_SC_RIGHT 0x4d
+#define PLOOP_SC_DOWN 0x50
+#define PLOOP_SC_DELETE 0x53
+#define PLOOP_SC_NONE 0xff
+
+/* Long enough for any case to reach its clamp: the farthest walk below is 19
+   tiles across, which takes the first pass plus 18 more from the sixth, and
+   the view one pass behind it. */
+#define PLOOP_HOLD_TICKS 50
+/* The unit cycle acts on the first pass a key is seen. */
+#define PLOOP_CYCLE_TICKS 10
+
+static unsigned char ploop_move_grid[4 + PLOOP_MAX_MAP_W * PLOOP_MAX_MAP_H * 2];
+static unsigned char ploop_units[PLOOP_UNIT_COUNT * 0x50];
+static unsigned char ploop_empty_wav_bank[0x40];
+
+static unsigned char *ploop_latch;
+static volatile int ploop_key;
+static volatile int ploop_key_ticks;
+static void (__interrupt __far *ploop_saved_timer)();
+static int ploop_saved_music_index;
+
+static void __interrupt __far ploop_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    if (ploop_key_ticks > 0) {
+        *ploop_latch = (unsigned char) ploop_key;
+        ploop_key_ticks--;
+    } else {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+    _chain_intr(ploop_saved_timer);
+}
+
+static void ploop_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static struct fdps_unit_record *ploop_unit(int unit_index)
+{
+    return (struct fdps_unit_record *) (ploop_units + unit_index * 0x50);
+}
+
+/* A map of map_w x map_h tiles in the movement grid header -- the only part
+   of the grid the loop and fdps_map_cursor_move_to read -- and a unit array
+   of PLOOP_UNIT_COUNT records, every one a retired enemy the cycle passes
+   over, for a case to overwrite.  Every record's portrait is 0x80, which the
+   map pass of each frame skips outright (mapdraw.c), so no sprite pack has to
+   be loaded for the frames to draw. */
+static void ploop_stage(int map_w, int map_h)
+{
+    int i;
+
+    memset(ploop_move_grid, 0, sizeof(ploop_move_grid));
+    *(short *) ploop_move_grid = (short) map_w;
+    *(short *) (ploop_move_grid + 2) = (short) map_h;
+    data_fdps_battle_move_grid_ptr = ploop_move_grid;
+
+    memset(ploop_units, 0, sizeof(ploop_units));
+    for (i = 0; i < PLOOP_UNIT_COUNT; i++) {
+        ploop_unit(i)->side = SIDE_ENEMY;
+        ploop_unit(i)->flags = 0x01;
+        ploop_unit(i)->portrait_id = PLOOP_NO_MAP_SPRITE;
+    }
+    data_fdps_map_unit_array_ptr = ploop_units;
+    data_fdps_map_unit_count = PLOOP_UNIT_COUNT;
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    memset(ploop_empty_wav_bank, 0, sizeof(ploop_empty_wav_bank));
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = ploop_empty_wav_bank;
+    ploop_saved_music_index = data_fdps_audio_cd_current_music_index;
+    data_fdps_audio_cd_current_music_index = -1;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_view_frame_last_tick = 100;
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    ploop_latch = fdps_keyboard_scancode_ptr();
+    ploop_key = PLOOP_SC_NONE;
+    ploop_key_ticks = 0;
+}
+
+static void ploop_run(int key, int ticks)
+{
+    ploop_key = key;
+    ploop_key_ticks = ticks;
+    ploop_set_mode(PLOOP_MODE_13H);
+    ploop_saved_timer = _dos_getvect(PLOOP_TIMER_VECTOR);
+    _dos_setvect(PLOOP_TIMER_VECTOR, ploop_timer_isr);
+    fdps_battle_player_phase_loop();
+    _dos_setvect(PLOOP_TIMER_VECTOR, ploop_saved_timer);
+    ploop_set_mode(PLOOP_MODE_TEXT);
+}
+
+static void ploop_unstage(void)
+{
+    *ploop_latch = (unsigned char) PLOOP_SC_NONE;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_audio_cd_current_music_index = ploop_saved_music_index;
+    data_fdps_chapter_event_or_battle_end_code = 0;
+}
+
+/* The displacements the loop reads: [EAX] and [EDX+0x1] for the tile the
+   cycle walks to (0002bccf, 0002bcc5), +0x5 and +0x6 for the status and side
+   bytes, +0x26 for the paralysis counter the Enter arm tests, and the 0x50
+   stride of every IMUL ...,0x50. */
+static void ploop_reads_the_fields_the_assembly_reads(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers) + 4, 0x26);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* The battle-end code is read only at the bottom of a pass, after the view
+   scroll and the frame, and the top of the loop tests only the local flag.
+   So a code already set on entry still runs one whole pass: here the cursor
+   sits on the view's top-left tile with the origin one tile in, and that pass
+   pulls the origin back to 0 on both axes (CMP ...,0x18 / JL at 0002be21 and
+   0002be5b).  The latch was left holding a down arrow before the call and
+   comes back holding the 0xff the loop primed it with at 0002bb13 -- which is
+   also why the cursor did not move. */
+static void ploop_runs_one_pass_when_the_battle_has_already_ended(void)
+{
+    ploop_stage(5, 3);
+    data_fdps_map_cursor_world_x = PLOOP_TILE;
+    data_fdps_map_cursor_world_y = PLOOP_TILE;
+    data_fdps_battle_view_window_origin_x = PLOOP_TILE;
+    data_fdps_battle_view_window_origin_y = PLOOP_TILE;
+    *ploop_latch = (unsigned char) PLOOP_SC_DOWN;
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    ploop_run(PLOOP_SC_NONE, 0);
+
+    CHECK_EQ((int) *ploop_latch, PLOOP_SC_NONE);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, PLOOP_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, PLOOP_TILE);
+    ploop_unstage();
+}
+
+/* Down stops one tile short of the map's height: SUB EAX,0x18 / CMP EAX,
+   [0x00069ccc] / JG at 0002bbad, with the height taken from the header's
+   SECOND word (MOVSX word ptr [EAX+0x2] at 0002bb29).  A 5 x 3 map puts the
+   last row at 48 and the last column at 96, so the two words cannot be
+   confused.  The other axis is not touched. */
+static void ploop_down_stops_on_the_last_row(void)
+{
+    ploop_stage(5, 3);
+    data_fdps_map_cursor_world_x = PLOOP_TILE;
+
+    ploop_run(PLOOP_SC_DOWN, PLOOP_HOLD_TICKS);
+
+    CHECK_EQ(data_fdps_map_cursor_world_y, (3 - 1) * PLOOP_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_x, PLOOP_TILE);
+    ploop_unstage();
+}
+
+/* Right stops one tile short of the width, the header's FIRST word
+   (MOVSX word ptr [EAX] at 0002bb1b; SUB EAX,0x18 / JG at 0002bc08). */
+static void ploop_right_stops_on_the_last_column(void)
+{
+    ploop_stage(5, 3);
+    data_fdps_map_cursor_world_y = PLOOP_TILE;
+
+    ploop_run(PLOOP_SC_RIGHT, PLOOP_HOLD_TICKS);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, (5 - 1) * PLOOP_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, PLOOP_TILE);
+    ploop_unstage();
+}
+
+/* Up and left step only while the cursor is at least a tile in (CMP
+   ...,0x18 / JGE at 0002bb7f and 0002bbda), so both stop at 0 and never go
+   negative. */
+static void ploop_up_and_left_stop_at_zero(void)
+{
+    ploop_stage(5, 3);
+    data_fdps_map_cursor_world_x = 3 * PLOOP_TILE;
+    data_fdps_map_cursor_world_y = 2 * PLOOP_TILE;
+
+    ploop_run(PLOOP_SC_UP, PLOOP_HOLD_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 3 * PLOOP_TILE);
+
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    ploop_run(PLOOP_SC_LEFT, PLOOP_HOLD_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 0);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 0);
+    ploop_unstage();
+}
+
+/* Down to the bottom of a 20 x 14 map: the cursor stops on row 13 (312) and
+   the view follows it one tile a pass while the cursor is more than 0x90 into
+   it, until the origin reaches height*24 - 0xc0 = 144 (SUB EAX,0xc0 / JG at
+   0002be76).  At 144 the cursor is 168 in, still past 0x90, so it is the map
+   clamp that stops the view and not the margin. */
+static void ploop_view_follows_down_to_the_map_clamp(void)
+{
+    ploop_stage(PLOOP_MAX_MAP_W, PLOOP_MAX_MAP_H);
+
+    ploop_run(PLOOP_SC_DOWN, PLOOP_HOLD_TICKS);
+
+    CHECK_EQ(data_fdps_map_cursor_world_y, (PLOOP_MAX_MAP_H - 1) * PLOOP_TILE);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y,
+             PLOOP_MAX_MAP_H * PLOOP_TILE - 0xc0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    ploop_unstage();
+}
+
+/* The same across: the cursor stops on column 19 (456) and the view on
+   width*24 - 0x138 = 168 (SUB EAX,0x138 / JG at 0002be3c), with the cursor
+   288 in, past 0x108. */
+static void ploop_view_follows_right_to_the_map_clamp(void)
+{
+    ploop_stage(PLOOP_MAX_MAP_W, PLOOP_MAX_MAP_H);
+
+    ploop_run(PLOOP_SC_RIGHT, PLOOP_HOLD_TICKS);
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, (PLOOP_MAX_MAP_W - 1) * PLOOP_TILE);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x,
+             PLOOP_MAX_MAP_W * PLOOP_TILE - 0x138);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    ploop_unstage();
+}
+
+/* Back up and left: once the cursor is less than a tile into the view the
+   origin steps back a tile a pass while it is at least a tile in (CMP
+   [0x00069ce0],0x18 / JL and CMP [EBP-0x14],0x18 / JL at 0002be52), so both
+   come to rest at 0 together with the cursor.  The axis not being moved has
+   its cursor exactly a tile into the view, which is not less than a tile, so
+   its origin stays put. */
+static void ploop_view_follows_back_to_the_origin(void)
+{
+    ploop_stage(PLOOP_MAX_MAP_W, PLOOP_MAX_MAP_H);
+    data_fdps_map_cursor_world_x = 7 * PLOOP_TILE;
+    data_fdps_map_cursor_world_y = 7 * PLOOP_TILE;
+    data_fdps_battle_view_window_origin_x = 6 * PLOOP_TILE;
+    data_fdps_battle_view_window_origin_y = 6 * PLOOP_TILE;
+
+    ploop_run(PLOOP_SC_UP, PLOOP_HOLD_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_y, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 6 * PLOOP_TILE);
+
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    ploop_run(PLOOP_SC_LEFT, PLOOP_HOLD_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_x, 0);
+    CHECK_EQ(data_fdps_battle_view_window_origin_x, 0);
+    ploop_unstage();
+}
+
+/* The unit cycle, on each of its four keys.  Of five records only record 2
+   qualifies: record 0 is a player unit with bit 2 set, which AND AL,0x85
+   rejects although the phase engine's own 0x81 would not; record 1 is an
+   enemy with a clear status byte; record 3 has acted (bit 7) and record 4 has
+   retired (bit 0).  Record 2 is paralysed, and still qualifies -- the cycle
+   never reads +0x26.  The cursor is walked onto its tile times 24, byte +0
+   across and byte +1 down. */
+static void ploop_cycle_walks_to_the_eligible_player_unit(void)
+{
+    static const int cycle_keys[4] = {
+        PLOOP_SC_ESC, PLOOP_SC_Z, PLOOP_SC_KEYPAD_5, PLOOP_SC_DELETE
+    };
+    int k;
+
+    for (k = 0; k < 4; k++) {
+        ploop_stage(5, 3);
+        ploop_unit(0)->side = SIDE_PLAYER;
+        ploop_unit(0)->flags = 0x04;
+        ploop_unit(1)->flags = 0x00;
+        ploop_unit(2)->side = SIDE_PLAYER;
+        ploop_unit(2)->flags = 0x00;
+        ploop_unit(2)->status_timers[4] = 2;
+        ploop_unit(2)->pos_x = 3;
+        ploop_unit(2)->pos_y = 2;
+        ploop_unit(3)->side = SIDE_PLAYER;
+        ploop_unit(3)->flags = 0x80;
+        ploop_unit(4)->side = SIDE_PLAYER;
+        ploop_unit(4)->flags = 0x01;
+
+        ploop_run(cycle_keys[k], PLOOP_CYCLE_TICKS);
+
+        CHECK_EQ(data_fdps_map_cursor_world_x, 3 * PLOOP_TILE);
+        CHECK_EQ(data_fdps_map_cursor_world_y, 2 * PLOOP_TILE);
+        ploop_unstage();
+    }
+}
+
+/* With no record qualifying the cycle tries every record once and moves
+   nothing; with a unit count of 0 it tries none, so the IDIV by the count
+   inside the loop is never reached. */
+static void ploop_cycle_with_nobody_eligible_moves_nothing(void)
+{
+    ploop_stage(5, 3);
+    data_fdps_map_cursor_world_x = PLOOP_TILE;
+    data_fdps_map_cursor_world_y = PLOOP_TILE;
+
+    ploop_run(PLOOP_SC_Z, PLOOP_CYCLE_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_x, PLOOP_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, PLOOP_TILE);
+
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    data_fdps_map_unit_count = 0;
+    ploop_run(PLOOP_SC_Z, PLOOP_CYCLE_TICKS);
+    CHECK_EQ(data_fdps_map_cursor_world_x, PLOOP_TILE);
+    CHECK_EQ(data_fdps_map_cursor_world_y, PLOOP_TILE);
+    ploop_unstage();
+}
+
 void run_btlturn_tests(void)
 {
     RUN_TEST(mark_record_layout_matches_the_assembly);
@@ -2292,6 +2671,17 @@ void run_btlturn_tests(void)
     RUN_TEST(end_tests_bits_zero_and_seven_only);
     RUN_TEST(end_passes_over_a_paralysed_unit_only);
     RUN_TEST(end_walks_only_the_live_units);
+
+    RUN_TEST(ploop_reads_the_fields_the_assembly_reads);
+    RUN_TEST(ploop_runs_one_pass_when_the_battle_has_already_ended);
+    RUN_TEST(ploop_down_stops_on_the_last_row);
+    RUN_TEST(ploop_right_stops_on_the_last_column);
+    RUN_TEST(ploop_up_and_left_stop_at_zero);
+    RUN_TEST(ploop_view_follows_down_to_the_map_clamp);
+    RUN_TEST(ploop_view_follows_right_to_the_map_clamp);
+    RUN_TEST(ploop_view_follows_back_to_the_origin);
+    RUN_TEST(ploop_cycle_walks_to_the_eligible_player_unit);
+    RUN_TEST(ploop_cycle_with_nobody_eligible_moves_nothing);
 
 
     /* Put the globals back before leaving.  stage() points them at this

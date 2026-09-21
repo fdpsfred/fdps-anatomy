@@ -3959,5 +3959,10 @@
       "emitted_against": "0x99",
       "rounds": 1
     }
+  },
+  "0002bae0": {
+    "status": "committed",
+    "emitted_against": "0x3cd",
+    "rounds": 0
   }
 }

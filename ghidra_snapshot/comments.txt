@@ -6927,7 +6927,7 @@ Boundary: 0002bae0-0002beac, Watcom prologue 53 56 57 55 89 e5 / SUB ESP,0x50 at
 Signature: void __cdecl f(void) -- no register or stack argument is read before being written, RET does not purge, and callees are called with pushed arguments and caller-side ADD ESP,n, so this unit uses the stack convention.
 
 Algorithm:
-Obtains the shared keyboard-state byte via the low-level key accessor FUN_00056799 and primes it to 0xFF. Reads map dimensions from the header pointed to by DAT_00060144 (word 0 = width, word 1 = height) and converts both to pixel extents by multiplying by the 24-pixel tile size. Then loops until the local exit flag becomes non-zero.
+Obtains the shared keyboard-state byte via fdps_keyboard_scancode_ptr and primes it to 0xFF. Reads map dimensions from the header pointed to by DAT_00060144 (word 0 = width, word 1 = height) and converts both to pixel extents by multiplying by the 24-pixel tile size. Then loops until the local exit flag becomes non-zero.
 
 Each iteration polls input (fdps_cd_music_repeat_poll), reads the current scancode and maintains an auto-repeat counter: the same scancode as last time increments it, a different one resets it and records the new code. The full dispatch runs only when the counter is 0 (first press) or greater than 5 (auto-repeat engaged); while it is 1..5 control goes to the reduced path that handles F1 and F2/Home only.
 
@@ -6939,12 +6939,13 @@ Scancode dispatch:
                           DAT_00060150 records of 0x50 bytes based at DAT_00069cd8 and stop at the first with
                           (flags[+5] & 0x85) == 0 and side[+6] == 2, centre on it via fdps_map_cursor_move_to
                           with its tile coordinates scaled by 24, and save the next index
-  0x1C/0x39 (Enter/Space) clear the key latch (FUN_000567b3), resolve the unit under the cursor
-                          (fdps_battle_find_unit_at_cursor); with no unit, open fdps_battle_system_menu and take
-                          its return as the exit flag; with a unit that is friendly (side[+6] == 2), not marked
-                          done (flags[+5] & 0x80) and with byte +0x26 clear, run fdps_battle_unit_turn and then,
-                          if DAT_00069da0 is still clear, fdps_battle_end_phase_if_all_units_done; otherwise show
-                          fdps_battle_show_unit_status_window
+  0x1C/0x39 (Enter/Space) flush the keyboard queue (fdps_flush_keyboard_queue; the latch byte itself is not
+                          cleared), resolve the unit under the cursor (fdps_battle_find_unit_at_cursor); with no
+                          unit, open fdps_battle_system_menu and take its return as the exit flag; with a unit,
+                          first zero data_fdps_battle_pending_xp_credit, then if it is friendly (side[+6] == 2),
+                          not marked done (flags[+5] & 0x80) and with byte +0x26 clear, run fdps_battle_unit_turn
+                          and then, if DAT_00069da0 is still clear, fdps_battle_end_phase_if_all_units_done;
+                          otherwise show fdps_battle_show_unit_status_window
   0x3B (F1)               fdps_battle_map_overview
   0x3C/0x47 (F2/Home)     resolve the unit under the cursor and show its status window
 

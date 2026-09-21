@@ -14,6 +14,7 @@
 #include "audio.h"
 #include "blit.h"
 #include "btlact.h"
+#include "btlmenu.h"
 #include "cdaudio.h"
 #include "chapter.h"
 #include "indicat.h"
@@ -23,7 +24,9 @@
 #include "mapdraw.h"
 #include "maptile.h"
 #include "movegrid.h"
+#include "overview.h"
 #include "sprite.h"
+#include "statwin.h"
 #include "table.h"
 #include "unit.h"
 #include "unititem.h"
@@ -913,6 +916,307 @@ void fdps_battle_advance_turn(void)
     }
     fdps_flush_keyboard_queue();
     data_fdps_ui_play_active_flag = 1;
+}
+
+/* ---- fdps_battle_player_phase_loop, 0002bae0 --------------------------- */
+
+/* The tile size the cursor steps, the view scrolls and the map extent is
+   scaled by: IMUL EAX,EAX,0x18 at 0002bb1e and 0002bb2d, the SUB/ADD
+   ...,0x18 of every cursor and view move, and the IMUL ...,0x18 of the unit
+   tile handed to fdps_map_cursor_move_to at 0002bcc8 and 0002bcd6. */
+#define PHASE_LOOP_TILE_PIXELS 0x18
+
+/* The make codes the loop dispatches on, each a CMP dword ptr [EBP-0x24],n. */
+#define PHASE_KEY_ESC 0x01
+#define PHASE_KEY_ENTER 0x1c
+#define PHASE_KEY_Z 0x2c
+#define PHASE_KEY_SPACE 0x39
+#define PHASE_KEY_F1 0x3b
+#define PHASE_KEY_F2 0x3c
+#define PHASE_KEY_HOME 0x47
+#define PHASE_KEY_UP 0x48
+#define PHASE_KEY_LEFT 0x4b
+#define PHASE_KEY_KEYPAD_5 0x4c
+#define PHASE_KEY_RIGHT 0x4d
+#define PHASE_KEY_DOWN 0x50
+#define PHASE_KEY_DELETE 0x53
+
+/* MOV byte ptr [EAX],0xff at 0002bb13: the "no key" value the latch is primed
+   with before the loop (keybd.h). */
+#define PHASE_KEY_NONE 0xff
+
+/* CMP dword ptr [EBP-0x2c],0x5 / JLE at 0002bb6f: how many passes of the same
+   held code after the first are sent to the reduced dispatch instead of the
+   full one.  Pass 0 of a code and pass 6 onwards take the full dispatch. */
+#define PHASE_HOLD_SUPPRESS_PASSES 5
+
+/* AND AL,0x85 at 0002bc89: the status-byte bits that make the unit cycle pass
+   a record over -- bit 0 retired, bit 7 acted this turn, and bit 2 as well.
+   This is NOT UNIT_BUSY_FLAGS_MASK: the phase engine's own eligibility test
+   is 0x81, and the cycle alone also skips bit 2. */
+#define PHASE_CYCLE_SKIP_FLAGS 0x85
+
+/* AND AL,0x80 at 0002bd7a: the only status bit the Enter arm tests before
+   handing a player unit its turn -- acted this turn. */
+#define PHASE_UNIT_ACTED_FLAG 0x80
+
+/* CMP dword ptr [EBP-0x8],-0x1 at 0002bd2f and 0002bdea:
+   fdps_battle_find_unit_at_cursor's "no unit on this tile" (unit.h). */
+#define PHASE_NO_UNIT_AT_CURSOR (-1)
+
+/* The view's edge margins.  The view is nudged back one tile once the cursor
+   is less than a tile from its left or top edge (CMP dword ptr [EBP-0x18],0x18
+   / JL at 0002be21, [EBP-0x14] at 0002be5b), and on one tile once it is more
+   than 0x108 across or 0x90 down (JLE at 0002be37 and 0002be71) -- the same
+   two limits fdps_map_cursor_select_loop uses (mapcur.c).  The far clamps keep
+   a 0x138 x 0xc0 window inside the map (SUB EAX,0x138 at 0002be3c, SUB
+   EAX,0xc0 at 0002be76), which is the view fdps_render_view_frame presents. */
+#define PHASE_VIEW_MAX_OFFSET_X 0x108
+#define PHASE_VIEW_MAX_OFFSET_Y 0x90
+#define PHASE_VIEW_WIDTH 0x138
+#define PHASE_VIEW_HEIGHT 0xc0
+
+/* The sound every accepted cursor step plays: MOV EAX,0x61e78 / PUSH EAX
+   ahead of all four calls, the same literal fdps_map_cursor_select_loop
+   pushes (mapcur.c).  fdps_play_sfx upper-cases what it is handed in place,
+   which the data segment a string literal lands in allows (audio.h). */
+#define PHASE_CURSOR_MOVE_SFX "Beep.wav"
+
+/* 0002bae0.  The player phase on the battle map: one pass per frame, reading
+   the latched make code, moving the cursor, cycling to the next unit that can
+   still be given a turn, and handing the unit under the cursor its turn, until
+   the battle ends or the system menu answers non-zero.  The plain -4s frame --
+   PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x50, nothing read above [EBP],
+   one epilogue at 0002bea6 with a bare RET -- and the one caller, main at
+   00029366, makes a bare CALL and reads data_fdps_chapter_event_or_battle_end_code
+   straight after it, never EAX.
+
+   ITS PACING IS ONE FRAME A PASS.  Every pass ends in fdps_render_view_frame
+   (0002be8c), whose tick wait is the only clock the loop has, so the hold
+   counter counts frames.
+
+   THE LATCH IS PRIMED ONCE, BEFORE THE LOOP.  0002bb13 stores 0xff through the
+   pointer fdps_keyboard_scancode_ptr answered; nothing in the loop stores it
+   again.  fdps_flush_keyboard_queue, which the Enter and F2 arms call, rewinds
+   the queue and leaves the latch alone (keybd.h), so after a unit's turn or a
+   status window the latch still holds whatever the ISR last wrote into it.
+
+   THE PREVIOUS CODE STARTS ON WHATEVER THE STACK HELD.  [EBP-0x30] is not
+   written before the first compare at 0002bb4f -- the four prologue stores
+   reach [EBP-0x2c], [EBP-0x28], [EBP-0x10] and [EBP-0xc] -- so the first pass
+   compares the freshly primed 0xff against garbage.  It settles on its own,
+   exactly as in fdps_map_cursor_select_loop (mapcur.c): 0xff matches no arm,
+   and the first real key differs from the previous code and resets the
+   counter.  Seeding it would be a store the original does not make.
+
+   THE TWO DISPATCHES ARE DISJOINT.  A code seen for the first time (hold
+   count 0) or held past five passes goes to the full dispatch: the arrows,
+   the unit cycle and Enter/Space.  Passes 1 to 5 of a held code go to the
+   reduced one, which knows only F1 (the overview) and F2/Home (the status
+   window of the unit under the cursor).  So an arrow moves on its first frame
+   and then repeats from the sixth, and F1, F2 and Home do nothing on the frame
+   they are first seen and fire on the second -- the JLE at 0002bb73 jumps
+   past the whole full chain to 0002bdc4, and the full chain has no F1, F2 or
+   Home arm.
+
+   AN ARROW THAT CANNOT MOVE FALLS THROUGH to the next test rather than
+   stopping the chain: up at the top edge is compared against down, left,
+   right and the rest in turn, and matches none of them.  So the chain is
+   written as one else-if ladder whose rungs each carry their bound.
+
+   THE UNIT CYCLE is ESC, Z, keypad 5 and Delete.  It starts at the index the
+   previous cycle saved ([EBP-0xc], 0 on entry) and tries at most
+   data_fdps_map_unit_count records, wrapping modulo that count (IDIV dword
+   ptr [0x00060150], so a count of 0 divides by zero -- but the loop runs no
+   iteration then, and the divide is only reached from inside it).  The first
+   record with none of PHASE_CYCLE_SKIP_FLAGS and side 2 has the cursor walked
+   onto it and the index after it saved; the paralysis counter is not
+   consulted, so a paralysed unit is cycled to.  If none qualifies the saved
+   index is left alone.
+
+   ENTER AND SPACE resolve the unit under the cursor.  No unit opens the
+   system menu, and its answer is the loop's own exit flag: the rest of the
+   pass still scrolls the view and draws a frame, and the flag is tested at the
+   top of the NEXT pass.  A unit zeroes data_fdps_battle_pending_xp_credit
+   first, whatever it is; then a player unit that has not acted and is not
+   paralysed takes its turn -- followed, if the battle did not end during it,
+   by the end-of-phase check -- and any other unit only has its status window
+   shown.
+
+   THE VIEW SCROLL is decided from the cursor's offsets into the view taken
+   once, before any of the four nudges, and each axis can move at most one
+   tile a pass.
+
+   THE BATTLE-END CODE IS READ ONLY AT THE BOTTOM OF A PASS (0002be91), after
+   the frame is drawn, and turned into the exit flag there; the top of the loop
+   tests only the flag.  So a code already set on entry still costs one full
+   pass and one frame.
+
+   The two record addresses are formed in-line, each through an
+   argument-shaped slot and a result slot ([EBP-0x3c]/[EBP-0x40]/[EBP-0x44] in
+   the cycle arm, [EBP-0x48]/[EBP-0x4c]/[EBP-0x50] in the Enter arm): that is
+   fdps_get_unit_record (0002d210) expanded in place, and there is no CALL, so
+   it is written here as the open-coded address.  The cycle arm forms its
+   record twice from the same index with nothing in between that could move
+   the array, so one pointer serves both reads. */
+void fdps_battle_player_phase_loop(void)
+{
+    /* EBP-0x38: the latched make code the keyboard ISR writes (keybd.h). */
+    unsigned char *scancode_latch;
+    /* EBP-0x20 / EBP-0x1c: the map's full extent in pixels, from the two
+       signed 16-bit tile dimensions at the head of the movement grid
+       (MOVSX word ptr [EAX] and [EAX+0x2], gamedata.h). */
+    int map_pixel_width;
+    int map_pixel_height;
+    /* EBP-0x28: non-zero once the loop is to end at the top of the next
+       pass -- the system menu's answer, or 1 for a battle-end code. */
+    int exit_requested;
+    /* EBP-0x24: what the latch held this pass, widened without sign
+       (XOR EAX,EAX / MOV AL,byte ptr [EDX]). */
+    int scancode;
+    /* EBP-0x30: what it held on the previous pass.  Deliberately left
+       uninitialised -- see above. */
+    int prev_scancode;
+    /* EBP-0x2c: how many passes in a row, after the first, have read the same
+       code.  Compared signed (JLE). */
+    int hold_count;
+    /* EBP-0xc: the index the next unit cycle starts from. */
+    int next_cycle_index;
+    /* EBP-0x10: the index the running unit cycle is looking at. */
+    int cycle_index;
+    /* EBP-0x8 in the cycle arm: how many records the cycle has tried. */
+    int cycle_tries;
+    /* EBP-0x8 in the Enter and F2 arms: the unit under the cursor, or
+       PHASE_NO_UNIT_AT_CURSOR. */
+    int cursor_unit_index;
+    /* EBP-0x34: the record the arm being taken is looking at. */
+    struct fdps_unit_record *unit;
+    /* EBP-0x18 / EBP-0x14: the cursor's offset from the view origin, taken
+       before the view is nudged. */
+    int view_offset_x;
+    int view_offset_y;
+
+    hold_count = 0;
+    exit_requested = 0;
+    cycle_index = 0;
+    next_cycle_index = 0;
+    scancode_latch = fdps_keyboard_scancode_ptr();
+    *scancode_latch = PHASE_KEY_NONE;
+    map_pixel_width = (int) *(short *) data_fdps_battle_move_grid_ptr
+                      * PHASE_LOOP_TILE_PIXELS;
+    map_pixel_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2)
+                       * PHASE_LOOP_TILE_PIXELS;
+
+    while (exit_requested == 0) {
+        fdps_cd_music_repeat_poll();
+        scancode = (int) *scancode_latch;
+        if (scancode == prev_scancode) {
+            hold_count++;
+        } else {
+            prev_scancode = scancode;
+            hold_count = 0;
+        }
+
+        if (hold_count == 0 || hold_count > PHASE_HOLD_SUPPRESS_PASSES) {
+            if (scancode == PHASE_KEY_UP &&
+                data_fdps_map_cursor_world_y >= PHASE_LOOP_TILE_PIXELS) {
+                data_fdps_map_cursor_world_y -= PHASE_LOOP_TILE_PIXELS;
+                fdps_play_sfx(PHASE_CURSOR_MOVE_SFX);
+            } else if (scancode == PHASE_KEY_DOWN &&
+                       map_pixel_height - PHASE_LOOP_TILE_PIXELS >
+                       data_fdps_map_cursor_world_y) {
+                data_fdps_map_cursor_world_y += PHASE_LOOP_TILE_PIXELS;
+                fdps_play_sfx(PHASE_CURSOR_MOVE_SFX);
+            } else if (scancode == PHASE_KEY_LEFT &&
+                       data_fdps_map_cursor_world_x >= PHASE_LOOP_TILE_PIXELS) {
+                data_fdps_map_cursor_world_x -= PHASE_LOOP_TILE_PIXELS;
+                fdps_play_sfx(PHASE_CURSOR_MOVE_SFX);
+            } else if (scancode == PHASE_KEY_RIGHT &&
+                       map_pixel_width - PHASE_LOOP_TILE_PIXELS >
+                       data_fdps_map_cursor_world_x) {
+                data_fdps_map_cursor_world_x += PHASE_LOOP_TILE_PIXELS;
+                fdps_play_sfx(PHASE_CURSOR_MOVE_SFX);
+            } else if (scancode == PHASE_KEY_ESC || scancode == PHASE_KEY_Z ||
+                       scancode == PHASE_KEY_KEYPAD_5 ||
+                       scancode == PHASE_KEY_DELETE) {
+                cycle_index = next_cycle_index;
+                for (cycle_tries = 0; cycle_tries < data_fdps_map_unit_count;
+                     cycle_tries++) {
+                    unit = (struct fdps_unit_record *)
+                           (data_fdps_map_unit_array_ptr +
+                            cycle_index * (int) sizeof(struct fdps_unit_record));
+                    if ((unit->flags & PHASE_CYCLE_SKIP_FLAGS) == 0 &&
+                        (int) unit->side == PLAYER_PHASE_SIDE) {
+                        fdps_map_cursor_move_to(
+                            (int) unit->pos_x * PHASE_LOOP_TILE_PIXELS,
+                            (int) unit->pos_y * PHASE_LOOP_TILE_PIXELS);
+                        next_cycle_index =
+                            (cycle_index + 1) % data_fdps_map_unit_count;
+                        break;
+                    }
+                    cycle_index = (cycle_index + 1) % data_fdps_map_unit_count;
+                }
+            } else if (scancode == PHASE_KEY_SPACE ||
+                       scancode == PHASE_KEY_ENTER) {
+                fdps_flush_keyboard_queue();
+                cursor_unit_index = fdps_battle_find_unit_at_cursor();
+                if (cursor_unit_index != PHASE_NO_UNIT_AT_CURSOR) {
+                    unit = (struct fdps_unit_record *)
+                           (data_fdps_map_unit_array_ptr +
+                            cursor_unit_index *
+                            (int) sizeof(struct fdps_unit_record));
+                    data_fdps_battle_pending_xp_credit = 0;
+                    if ((int) unit->side == PLAYER_PHASE_SIDE &&
+                        (unit->flags & PHASE_UNIT_ACTED_FLAG) == 0 &&
+                        unit->status_timers[STATUS_TIMER_PARALYSIS] == 0) {
+                        fdps_battle_unit_turn(cursor_unit_index);
+                        if (data_fdps_chapter_event_or_battle_end_code == 0) {
+                            fdps_battle_end_phase_if_all_units_done();
+                        }
+                    } else {
+                        fdps_battle_show_unit_status_window(cursor_unit_index);
+                    }
+                } else {
+                    exit_requested = fdps_battle_system_menu();
+                }
+            }
+        } else if (scancode == PHASE_KEY_F1) {
+            fdps_battle_map_overview();
+        } else if (scancode == PHASE_KEY_F2 || scancode == PHASE_KEY_HOME) {
+            fdps_flush_keyboard_queue();
+            cursor_unit_index = fdps_battle_find_unit_at_cursor();
+            if (cursor_unit_index != PHASE_NO_UNIT_AT_CURSOR) {
+                fdps_battle_show_unit_status_window(cursor_unit_index);
+            }
+        }
+
+        view_offset_x = data_fdps_map_cursor_world_x
+                        - data_fdps_battle_view_window_origin_x;
+        view_offset_y = data_fdps_map_cursor_world_y
+                        - data_fdps_battle_view_window_origin_y;
+        if (data_fdps_battle_view_window_origin_x >= PHASE_LOOP_TILE_PIXELS &&
+            view_offset_x < PHASE_LOOP_TILE_PIXELS) {
+            data_fdps_battle_view_window_origin_x -= PHASE_LOOP_TILE_PIXELS;
+        }
+        if (view_offset_x > PHASE_VIEW_MAX_OFFSET_X &&
+            map_pixel_width - PHASE_VIEW_WIDTH >
+            data_fdps_battle_view_window_origin_x) {
+            data_fdps_battle_view_window_origin_x += PHASE_LOOP_TILE_PIXELS;
+        }
+        if (data_fdps_battle_view_window_origin_y >= PHASE_LOOP_TILE_PIXELS &&
+            view_offset_y < PHASE_LOOP_TILE_PIXELS) {
+            data_fdps_battle_view_window_origin_y -= PHASE_LOOP_TILE_PIXELS;
+        }
+        if (view_offset_y > PHASE_VIEW_MAX_OFFSET_Y &&
+            map_pixel_height - PHASE_VIEW_HEIGHT >
+            data_fdps_battle_view_window_origin_y) {
+            data_fdps_battle_view_window_origin_y += PHASE_LOOP_TILE_PIXELS;
+        }
+        fdps_render_view_frame();
+        if (data_fdps_chapter_event_or_battle_end_code != 0) {
+            exit_requested = 1;
+        }
+    }
 }
 
 /* ---- fdps_battle_end_phase_if_all_units_done, 0002ea10 ----------------- */
