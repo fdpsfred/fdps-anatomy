@@ -110,4 +110,26 @@ extern int data_fdps_battle_action_cancel_ends_turn_flag;
 extern void fdps_battle_unit_turn(int unit_index);
 #pragma aux fdps_battle_unit_turn "*" parm caller [];
 
+/* Ends the player phase and runs the battle round to the start of the next
+   one.  Takes nothing and returns nothing.
+
+   In order: player units that are idle, unhurt by poison or paralysis and not
+   at exactly their maximum HP rest for a fifth of it, flashed white in one
+   presented frame with REST.WAV if anyone rested; then the NPC side's turn
+   events, status ticks and phase; the enemy banner, the acted-this-turn bit
+   cleared on everyone, the enemy side's events, ticks, music and phase; then
+   data_fdps_battle_turn_counter is bumped, the player banner shown, the bit
+   cleared again, the player music started and the player side's events and
+   ticks run.  Last comes the per-turn MP regeneration -- unit 4 with an
+   equipped 妖刀村正 or 妖刀正宗, unit 8 with an equipped 形見指環, and any unit
+   holding 魔精石碎片 -- after which the cursor is shown again over unit 0
+   (unless it has retired) and the play-active flag raised.
+
+   The play-active flag, data_fdps_ui_play_active_flag, is lowered on entry.
+   A non-zero data_fdps_chapter_event_or_battle_end_code seen after the NPC
+   ticks, the NPC phase, the enemy ticks or the enemy phase returns at once and
+   leaves it lowered and the turn counter unbumped. */
+extern void fdps_battle_advance_turn(void);
+#pragma aux fdps_battle_advance_turn "*" parm caller [];
+
 #endif

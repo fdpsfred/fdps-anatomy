@@ -5,18 +5,29 @@
  * data_fdps_map_unit_array_ptr and works in place on what it finds.
  */
 #include <stdlib.h>
+#include <conio.h>
+#include <i86.h>
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "aiscore.h"
+#include "anim.h"
+#include "audio.h"
+#include "blit.h"
 #include "btlact.h"
+#include "cdaudio.h"
 #include "chapter.h"
+#include "indicat.h"
 #include "keybd.h"
 #include "mapai.h"
 #include "mapcur.h"
+#include "mapdraw.h"
 #include "maptile.h"
 #include "movegrid.h"
+#include "sprite.h"
 #include "table.h"
 #include "unit.h"
+#include "unititem.h"
+#include "unitstat.h"
 #include "walk.h"
 #include "btlturn.h"
 
@@ -580,4 +591,326 @@ void fdps_battle_unit_turn(int unit_index)
     }
     data_fdps_chapter_post_action_handler_table
         [data_fdps_chapter_current_chapter_id]();
+}
+
+/* ---- fdps_battle_advance_turn, 0001e3f0 -------------------------------- */
+
+/* The side the end-of-turn rest applies to, CMP EAX,0x2 at 0001e477 on record
+   byte +6: the player's units.  It is also the side argument of the two calls
+   that open the next player phase, PUSH 0x2 at 0001e630 and 0001e63a. */
+#define PLAYER_PHASE_SIDE 2
+
+/* The rest's two status-timer tests, CMP byte ptr [EAX+0x25],0x0 at 0001e492
+   and CMP byte ptr [EAX+0x26],0x0 at 0001e49d: status_timers[3] is the poison
+   counter fdps_battle_tick_status_effects bleeds HP from (unitstat.h) and
+   status_timers[4] the paralysis counter STATUS_TIMER_PARALYSIS above names. */
+#define STATUS_TIMER_POISON 3
+
+/* MOV EBX,0x5 / IDIV EBX at 0001e4af: a resting unit gets back a fifth of its
+   maximum, the same fraction fdps_unit_rest (unitatk.h) gives. */
+#define ADVANCE_REST_DIVISOR 5
+
+/* The page the rest flashes are composed on and how it is presented: the
+   0x15180 pushed to malloc at 0001e40e, a whole 360 by 240 page at a 0x168
+   pitch, of which 312 by 192 from page byte 0x21d8 -- page pixel (24,24) -- is
+   put down at screen byte 0x504 -- screen pixel (4,4) -- of the 320-pitch
+   mode 13h page; the six pushes at 0001e51b through 0001e53c.  The screen base
+   stays a literal: 0xa0000 is where the display adapter answers, not the
+   address of anything the linker places (contract E). */
+#define ADVANCE_SCENE_BYTES 0x15180
+#define ADVANCE_SCENE_PITCH 0x168
+#define ADVANCE_SCENE_WINDOW_AT 0x21d8
+#define ADVANCE_VGA_SCREEN_BASE 0x000a0000
+#define ADVANCE_SCREEN_WINDOW_AT 0x504
+#define ADVANCE_VGA_SCREEN_PITCH 0x140
+#define ADVANCE_VIEW_WIDTH 0x138
+#define ADVANCE_VIEW_ROWS 0xc0
+
+/* VGA input status register 1; bit 3 is set while the vertical retrace is in
+   progress, which the one present straddles (0001e4f9 and 0001e50a). */
+#define ADVANCE_VGA_INPUT_STATUS_1 0x3da
+#define ADVANCE_VGA_STATUS_VERTICAL_RETRACE 0x08
+
+/* fdps_blit_unit_sprite's kernel selector and mode operand for the rest flash:
+   mode 3, the recolour kernel, with 0xff00 -- offset 0, base 0xff, mask 0 --
+   which paints the whole sprite in the one palette index 0xff, a flat white
+   silhouette (rlecolor.h).  The same pair fdps_unit_rest flashes with. */
+#define ADVANCE_REST_FLASH_BLIT_MODE 3
+#define ADVANCE_REST_FLASH_RECOLOR 0xff00
+
+/* MOV EAX,0x61784 / CALL fdps_play_sfx at 0001e54b.  A plain writable literal,
+   already upper case as the original's copy is: the lookup upper-cases the
+   caller's own storage in place (audio.h, rebuild_info/pitfalls.md). */
+#define ADVANCE_REST_SOUND "REST.WAV"
+
+/* PUSH 0x28 / CALL delay at 0001e559: how long the flashed frame is held. */
+#define ADVANCE_REST_HOLD_MS 0x28
+
+/* The two phase banners, MOV EAX,0x61790 at 0001e5a7 and MOV EAX,0x617a0 at
+   0001e603.  They stay in the original's MIXED case: fdps_play_vfs_animation
+   only recognises the player-phase clip after its loader has upper-cased the
+   caller's buffer in place, and it needs a writable buffer to do that
+   (anim.h). */
+#define ADVANCE_ENEMY_PHASE_BANNER "EnyPhase.saf"
+#define ADVANCE_PLAYER_PHASE_BANNER "PlyPhase.saf"
+
+/* The track_slot of fdps_cd_verify_disc_and_play_track: PUSH 0x1 at 0001e5db,
+   just before the enemy phase runs, and PUSH 0x0 at 0001e620 as the player
+   phase opens (cdaudio.h). */
+#define ADVANCE_CD_TRACK_ENEMY_PHASE 1
+#define ADVANCE_CD_TRACK_PLAYER_PHASE 0
+
+/* The two values stored into data_fdps_map_cursor_draw_mode: 0 at 0001e611,
+   the overlay put away while the player phase is being opened, and 1 at
+   0001e807, the plain cursor box handed back to the player. */
+#define ADVANCE_CURSOR_HIDDEN 0
+#define ADVANCE_CURSOR_NORMAL 1
+
+/* The per-turn MP regeneration the player phase opens with.  Four ITEM.DAT
+   ids -- 妖刀村正 0xa6 and 妖刀正宗 0xa7 looked for on unit index 4 only
+   (PUSH 0xa6 / PUSH 0x4 at 0001e644, PUSH 0xa7 / PUSH 0x4 at 0001e65c), 形見指環
+   0xb1 on unit index 8 only (0001e6e6), and 魔精石碎片 0xb3 on every unit
+   (0001e79e) -- assets/items.md lists all four as the items whose per-turn
+   recovery is not in the item table. */
+#define REGEN_ITEM_MURAMASA 0xa6
+#define REGEN_ITEM_MASAMUNE 0xa7
+#define REGEN_ITEM_KATAMI_RING 0xb1
+#define REGEN_ITEM_MANA_SHARD 0xb3
+#define REGEN_SWORD_UNIT_INDEX 4
+#define REGEN_RING_UNIT_INDEX 8
+
+/* fdps_unit_find_item_slot's "not held" answer, CMP ...,-0x1 at 0001e656,
+   0001e66e, 0001e6f8 and 0001e7af. */
+#define REGEN_ITEM_NOT_HELD (-1)
+
+/* The equipped bit of an inventory entry's flag byte, AND AL,0x40 at 0001e690
+   and 0001e71a (unititem.h).  The two single-unit items need it; the shard
+   does not -- the per-unit sweep has no such test. */
+#define REGEN_ITEM_EQUIPPED 0x40
+
+/* PUSH 0xf at 0001e6b8, 0001e742 and 0001e7d1: the restore requested of
+   fdps_unit_restore_mp, which rolls 13 or 14 of it (unitstat.h). */
+#define REGEN_MP_AMOUNT 0x0f
+
+/* PUSH 0xd at 0001e6d3, 0001e75d and 0001e7f2: the Number.cel digit set the
+   restored figure floats in, the MP set (indicat.h). */
+#define REGEN_MP_GLYPH_BASE 0x0d
+
+/* PUSH 0x0 at 0001e811 and 0001e81f: the unit the view is brought back to
+   once the regeneration is done, unless fdps_unit_is_retired says it has
+   left the field. */
+#define ADVANCE_FOCUS_UNIT_INDEX 0
+
+/* 0001e3f0.  Closes the player phase and runs one whole battle turn round to
+   the next player phase.  The plain -4s frame: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x1c, no argument read above [EBP], one epilogue at
+   0001e835 with a bare RET, and all three call sites -- 00014d42 and 00014e3d
+   in fdps_battle_system_menu, 0002ea9d in
+   fdps_battle_end_phase_if_all_units_done -- a bare CALL whose EAX nobody
+   reads afterwards.
+
+   THE REST.  Every unit on side 2 that is neither retired nor already acted
+   (flags & 0x81), neither poisoned nor paralysed, and whose HP is not EQUAL
+   to its maximum (CMP / JNZ at 0001e4a8, so a unit above its maximum rests
+   too and is clamped down), gets a fifth of its maximum back and is flashed
+   white into the page.  Both HP words are MOVSX-widened and the ceiling test
+   is JLE, so the sums are signed (contract C).  The page is presented ONCE,
+   after the sweep, straddling one retrace; the sound plays only if somebody
+   rested; the frame is held, the page freed and the view repainted whether or
+   not anybody did.
+
+   THE PHASES.  NPC events and status ticks, the NPC phase, the enemy banner,
+   the bit-7 clear, enemy events and ticks, the enemy-phase music, the enemy
+   phase, then the turn counter bump, the player banner, the cursor put away,
+   a second bit-7 clear, the player-phase music and player events and ticks.
+   The battle-end code in data_fdps_chapter_event_or_battle_end_code is tested
+   four times -- after the NPC ticks, after the NPC phase, after the enemy
+   ticks and after the enemy phase -- and a non-zero one returns at once,
+   leaving the play-active flag at the 0 this function put there and the
+   counter where it was.  After the player ticks it is NOT tested.
+
+   THE REGENERATION.  Unit 4 is asked for 妖刀村正 and, failing that, 妖刀正宗;
+   unit 8 for 形見指環; both need the found entry equipped.  Then every unit is
+   asked for 魔精石碎片, merely held.  Each also needs its whole status byte
+   zero -- CMP byte ptr [EAX+0x5],0x0, not the 0x81 mask -- and its MP not
+   equal to its maximum (a 16-bit compare, equality only).  A unit that
+   qualifies has MP restored, the view scrolled to it, the rolled figure
+   floated in the MP digits and the popup played; a unit carrying both an
+   equipped sword or ring and a shard regenerates twice.
+
+   THE CALLS' ANSWERS.  malloc's page (0001e41b) is composed into and freed
+   without a NULL test.  fdps_get_unit_record's pointer (0001e455, 0001e682,
+   0001e70c, 0001e79b) is where every field comes from and the healed HP goes
+   back to; in the per-unit sweep it is fetched BEFORE the shard lookup, in the
+   two single-unit blocks AFTER it, and nothing between moves the array.  inp's
+   byte is the retrace bit.  fdps_unit_find_item_slot's slot (0001e653,
+   0001e66b, 0001e6f5) indexes the inventory, and in the sweep (0001e7af) is
+   only compared with -1.  fdps_unit_restore_mp's roll (0001e6c4, 0001e74e,
+   0001e7df) is the figure floated -- the roll, not the MP gained.
+   fdps_unit_is_retired's answer (0001e81b) decides the last scroll.  Nothing
+   else called returns anything the original reads. */
+void fdps_battle_advance_turn(void)
+{
+    /* EBP-0x4: set once any unit has rested, which is what decides the
+       sound. */
+    unsigned char any_unit_rested;
+    /* EBP-0x8: fdps_blit_unit_sprite's mode operand, parked in a stack slot
+       on entry (MOV dword ptr [EBP-0x8],0xff00 at 0001e400) rather than
+       pushed as a literal. */
+    unsigned int rest_flash_recolor;
+    /* EBP-0xc: the page the rest flashes are composed on. */
+    unsigned char *scene;
+    /* EBP-0x14: the unit the rest sweep and the shard sweep are on. */
+    int unit_index;
+    /* EBP-0x1c: that unit's record, or unit 4's or unit 8's. */
+    struct fdps_unit_record *unit;
+    /* EBP-0x10: the unit's HP as found, and then the rested figure written
+       back. */
+    int current_hp;
+    /* EBP-0x18: its maximum, the figure the fifth is taken of and the
+       ceiling. */
+    int hp_max;
+    /* EBP-0x14 again in the original: the inventory entry
+       fdps_unit_find_item_slot found the sword or ring in. */
+    int item_slot;
+    /* EBP-0x14 / EBP-0x10 in the original: fdps_unit_restore_mp's roll, the
+       figure floated over the unit. */
+    int mp_restored;
+
+    any_unit_rested = 0;
+    rest_flash_recolor = ADVANCE_REST_FLASH_RECOLOR;
+    data_fdps_ui_play_active_flag = 0;
+    scene = (unsigned char *) malloc((size_t) ADVANCE_SCENE_BYTES);
+    fdps_draw_scene_layers(scene);
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        current_hp = (int) unit->hp_current;
+        hp_max = (int) unit->hp_max;
+        if ((int) unit->side == PLAYER_PHASE_SIDE &&
+            (unit->flags & UNIT_BUSY_FLAGS_MASK) == 0 &&
+            unit->status_timers[STATUS_TIMER_POISON] == 0 &&
+            unit->status_timers[STATUS_TIMER_PARALYSIS] == 0 &&
+            current_hp != hp_max) {
+            current_hp += hp_max / ADVANCE_REST_DIVISOR;
+            if (current_hp > hp_max) {
+                current_hp = hp_max;
+            }
+            unit->hp_current = (short) current_hp;
+            fdps_blit_unit_sprite(scene, unit_index, rest_flash_recolor,
+                                  ADVANCE_REST_FLASH_BLIT_MODE);
+            any_unit_rested = 1;
+        }
+    }
+
+    while ((inp(ADVANCE_VGA_INPUT_STATUS_1) &
+            ADVANCE_VGA_STATUS_VERTICAL_RETRACE) == 0) {
+        /* Spin until the retrace begins. */
+    }
+    while ((inp(ADVANCE_VGA_INPUT_STATUS_1) &
+            ADVANCE_VGA_STATUS_VERTICAL_RETRACE) != 0) {
+        /* And until it ends, so the present starts clear of it. */
+    }
+    fdps_blit_rect((unsigned int) (scene + ADVANCE_SCENE_WINDOW_AT),
+                   ADVANCE_SCENE_PITCH,
+                   (void *) (ADVANCE_VGA_SCREEN_BASE +
+                             ADVANCE_SCREEN_WINDOW_AT),
+                   ADVANCE_VGA_SCREEN_PITCH, ADVANCE_VIEW_WIDTH,
+                   ADVANCE_VIEW_ROWS);
+    if (any_unit_rested != 0) {
+        fdps_play_sfx(ADVANCE_REST_SOUND);
+    }
+    delay(ADVANCE_REST_HOLD_MS);
+    free(scene);
+    fdps_render_view_frame();
+
+    fdps_battle_run_turn_events(NPC_PHASE_SIDE);
+    fdps_battle_tick_status_effects(NPC_PHASE_SIDE);
+    if (data_fdps_chapter_event_or_battle_end_code != 0) {
+        return;
+    }
+    fdps_battle_npc_turn_phase();
+    if (data_fdps_chapter_event_or_battle_end_code != 0) {
+        return;
+    }
+
+    fdps_play_vfs_animation(ADVANCE_ENEMY_PHASE_BANNER);
+    fdps_units_clear_status_bit7();
+    fdps_battle_run_turn_events(ENEMY_PHASE_SIDE);
+    fdps_battle_tick_status_effects(ENEMY_PHASE_SIDE);
+    if (data_fdps_chapter_event_or_battle_end_code != 0) {
+        return;
+    }
+    fdps_cd_verify_disc_and_play_track(data_fdps_chapter_current_chapter_id,
+                                       ADVANCE_CD_TRACK_ENEMY_PHASE);
+    fdps_battle_enemy_turn_phase();
+    if (data_fdps_chapter_event_or_battle_end_code != 0) {
+        return;
+    }
+
+    data_fdps_battle_turn_counter++;
+    fdps_play_vfs_animation(ADVANCE_PLAYER_PHASE_BANNER);
+    data_fdps_map_cursor_draw_mode = ADVANCE_CURSOR_HIDDEN;
+    fdps_units_clear_status_bit7();
+    fdps_cd_verify_disc_and_play_track(data_fdps_chapter_current_chapter_id,
+                                       ADVANCE_CD_TRACK_PLAYER_PHASE);
+    fdps_battle_run_turn_events(PLAYER_PHASE_SIDE);
+    fdps_battle_tick_status_effects(PLAYER_PHASE_SIDE);
+
+    item_slot = fdps_unit_find_item_slot(REGEN_SWORD_UNIT_INDEX,
+                                         REGEN_ITEM_MURAMASA);
+    if (item_slot == REGEN_ITEM_NOT_HELD) {
+        item_slot = fdps_unit_find_item_slot(REGEN_SWORD_UNIT_INDEX,
+                                             REGEN_ITEM_MASAMUNE);
+    }
+    if (item_slot != REGEN_ITEM_NOT_HELD) {
+        unit = fdps_get_unit_record(REGEN_SWORD_UNIT_INDEX);
+        if ((unit->inventory_slots[item_slot * 2] & REGEN_ITEM_EQUIPPED) != 0 &&
+            unit->flags == 0 &&
+            unit->mp_current != unit->mp_max) {
+            mp_restored = fdps_unit_restore_mp(REGEN_SWORD_UNIT_INDEX,
+                                               REGEN_MP_AMOUNT);
+            fdps_map_cursor_move_to_unit(REGEN_SWORD_UNIT_INDEX);
+            fdps_show_number_indicator(mp_restored, REGEN_MP_GLYPH_BASE,
+                                       REGEN_SWORD_UNIT_INDEX);
+            fdps_play_indicator_queue();
+        }
+    }
+
+    item_slot = fdps_unit_find_item_slot(REGEN_RING_UNIT_INDEX,
+                                         REGEN_ITEM_KATAMI_RING);
+    if (item_slot != REGEN_ITEM_NOT_HELD) {
+        unit = fdps_get_unit_record(REGEN_RING_UNIT_INDEX);
+        if ((unit->inventory_slots[item_slot * 2] & REGEN_ITEM_EQUIPPED) != 0 &&
+            unit->flags == 0 &&
+            unit->mp_current != unit->mp_max) {
+            mp_restored = fdps_unit_restore_mp(REGEN_RING_UNIT_INDEX,
+                                               REGEN_MP_AMOUNT);
+            fdps_map_cursor_move_to_unit(REGEN_RING_UNIT_INDEX);
+            fdps_show_number_indicator(mp_restored, REGEN_MP_GLYPH_BASE,
+                                       REGEN_RING_UNIT_INDEX);
+            fdps_play_indicator_queue();
+        }
+    }
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if (fdps_unit_find_item_slot(unit_index, REGEN_ITEM_MANA_SHARD) !=
+                REGEN_ITEM_NOT_HELD &&
+            unit->flags == 0 &&
+            unit->mp_current != unit->mp_max) {
+            mp_restored = fdps_unit_restore_mp(unit_index, REGEN_MP_AMOUNT);
+            fdps_map_cursor_move_to_unit(unit_index);
+            fdps_show_number_indicator(mp_restored, REGEN_MP_GLYPH_BASE,
+                                       unit_index);
+            fdps_play_indicator_queue();
+        }
+    }
+
+    data_fdps_map_cursor_draw_mode = ADVANCE_CURSOR_NORMAL;
+    if (fdps_unit_is_retired(ADVANCE_FOCUS_UNIT_INDEX) == 0) {
+        fdps_map_cursor_move_to_unit(ADVANCE_FOCUS_UNIT_INDEX);
+    }
+    fdps_flush_keyboard_queue();
+    data_fdps_ui_play_active_flag = 1;
 }

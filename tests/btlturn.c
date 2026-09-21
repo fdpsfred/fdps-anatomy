@@ -1738,6 +1738,315 @@ static void turn_exit_fires_a_pending_event_with_the_unit(void)
     turn_unstage();
 }
 
+/* fdps_battle_advance_turn at 0001e3f0, from here down.
+ *
+ * Only the stretch up to the first battle-end test can be run here: past it
+ * the function calls fdps_play_vfs_animation, which loads a clip out of the
+ * animation pack, and fdps_cd_verify_disc_and_play_track, which holds the
+ * game until the right disc answers.  So every case below ends the call at
+ * one of the first two tests of data_fdps_chapter_event_or_battle_end_code --
+ * either by planting a non-zero code before the call (the test at 0001e588
+ * returns) or by having the chapter's post-action handler raise it on its
+ * second call, which is the first unit of the NPC phase (the test at 0001e59a
+ * returns).  The chapter's post-action handler is reached once before that,
+ * from fdps_battle_tick_status_effects(1).
+ *
+ * That stretch holds the whole rest sweep, the present, the NPC side's turn
+ * events and status ticks and, in the second shape, the NPC phase.  The page
+ * composition runs for real: no scene layer, a cursor mode that draws
+ * nothing, the terrain panel off, every unit's portrait 0x80 so the map pass
+ * skips it and its tile row 9 so the flash -- sprite origin y 9 * 24 + 18 =
+ * 234, past the 0xd8 limit (sprite.h) -- is dropped too.  No unit's HP is 0,
+ * so the death pass in the status tick finds nobody.  The rest sound is looked
+ * up in an empty pack and plays nothing.
+ *
+ * Expected values come from the assembly at 0001e3f0 -- CMP EAX,0x2 on +6 at
+ * 0001e477, AND AL,0x81 on +5 at 0001e482, CMP byte ptr [EAX+0x25] / [EAX+0x26]
+ * at 0001e492 / 0001e49d, CMP / JNZ of the two MOVSX'd HP words at 0001e4a8,
+ * IDIV by 5 at 0001e4bd, JLE at 0001e4c8, the word store at 0001e4d6, MOV byte
+ * ptr [0x00060159],0x0 at 0001e407, PUSH 0x1 into 0002e0c0 at 0001e574, the two
+ * CMP dword ptr [0x00069da0],0x0 at 0001e588 / 0001e59a, and INC dword ptr
+ * [0x00069ce8] at 0001e5fd only after the enemy phase -- and from the record
+ * layout ticket 17 settled.  None of them is read off the emitted C.
+ */
+
+#define ADV_UNIT_COUNT 14
+#define ADV_CHAPTER_ID 3
+#define ADV_TURN 4
+#define ADV_SIDE_ENEMY 0
+#define ADV_SIDE_NPC 1
+#define ADV_SIDE_PLAYER 2
+#define ADV_NO_MAP_SPRITE 0x80
+#define ADV_OFFSCREEN_ROW 9
+#define ADV_FLAG_RETIRED 0x01
+#define ADV_FLAG_ACTED 0x80
+#define ADV_POISON_TIMER 3
+#define ADV_PARALYSIS_TIMER 4
+
+/* Values nothing on the reached stretch is meant to leave in place, planted so
+   that finding one afterwards is evidence.  The cursor mode is outside the
+   0..6 fdps_draw_map_cursor dispatches on, so it draws nothing either. */
+#define ADV_PLAY_FLAG_SENTINEL 0x5a
+#define ADV_CURSOR_MODE_SENTINEL 0x2a
+
+#define ADV_MODE_13H 0x13
+#define ADV_MODE_TEXT 0x03
+#define ADV_TIMER_VECTOR 8
+
+static void (__interrupt __far *adv_saved_timer)();
+static unsigned char adv_empty_wav_bank[0x40];
+static int adv_post_calls;
+/* Which call of the post-action handler raises the battle-end code; 0 never
+   does. */
+static int adv_end_on_post_call;
+static int adv_saved_music_index;
+
+/* The timer has to run: fdps_render_view_frame spins until the tick counter
+   moves. */
+static void __interrupt __far adv_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(adv_saved_timer);
+}
+
+static void adv_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static void adv_post_action(void)
+{
+    adv_post_calls++;
+    if (adv_post_calls == adv_end_on_post_call) {
+        data_fdps_chapter_event_or_battle_end_code = 1;
+    }
+}
+
+/* Read through the global every time: the NPC phase relocates the array. */
+static struct fdps_unit_record *adv_unit(int unit_index)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + unit_index * 0x50);
+}
+
+static void adv_set_unit(int unit_index, int side, int flags, int hp_current,
+                         int hp_max)
+{
+    struct fdps_unit_record *unit;
+
+    unit = adv_unit(unit_index);
+    unit->side = (unsigned char) side;
+    unit->flags = (unsigned char) flags;
+    unit->hp_current = (short) hp_current;
+    unit->hp_max = (short) hp_max;
+}
+
+/* The fourteen units the rest sweep is run over.  Each row of the table in
+   adv_rest_* below names what the unit tests. */
+static void adv_stage(void)
+{
+    unsigned char *bytes;
+    int i;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *)
+        malloc((size_t) ((ADV_UNIT_COUNT + 1) * 0x50));
+    data_fdps_map_unit_count = ADV_UNIT_COUNT;
+    bytes = data_fdps_map_unit_array_ptr;
+    for (i = 0; i < (ADV_UNIT_COUNT + 1) * 0x50; i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < ADV_UNIT_COUNT; i++) {
+        adv_unit(i)->portrait_id = ADV_NO_MAP_SPRITE;
+        adv_unit(i)->pos_y = ADV_OFFSCREEN_ROW;
+        adv_set_unit(i, ADV_SIDE_PLAYER, 0, 50, 100);
+    }
+    adv_set_unit(1, ADV_SIDE_PLAYER, 0, 95, 100);
+    adv_set_unit(2, ADV_SIDE_PLAYER, 0, 120, 100);
+    adv_set_unit(3, ADV_SIDE_PLAYER, 0, -10, 100);
+    adv_set_unit(4, ADV_SIDE_PLAYER, 0, 3, 9);
+    adv_set_unit(5, ADV_SIDE_ENEMY, 0, 50, 100);
+    adv_set_unit(6, ADV_SIDE_PLAYER, ADV_FLAG_ACTED, 50, 100);
+    adv_set_unit(7, ADV_SIDE_PLAYER, ADV_FLAG_RETIRED, 50, 100);
+    adv_unit(8)->status_timers[ADV_POISON_TIMER] = 2;
+    adv_unit(9)->status_timers[ADV_PARALYSIS_TIMER] = 2;
+    adv_set_unit(10, ADV_SIDE_PLAYER, 0, 100, 100);
+    adv_set_unit(11, ADV_SIDE_PLAYER, 0x02, 50, 100);
+    adv_unit(12)->status_timers[0] = 3;
+    adv_set_unit(13, ADV_SIDE_NPC, 0, 50, 100);
+
+    data_fdps_scene_layer_count = 0;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_map_cursor_draw_mode = ADV_CURSOR_MODE_SENTINEL;
+    data_fdps_ui_play_active_flag = ADV_PLAY_FLAG_SENTINEL;
+    memset(adv_empty_wav_bank, 0, sizeof(adv_empty_wav_bank));
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = adv_empty_wav_bank;
+    adv_saved_music_index = data_fdps_audio_cd_current_music_index;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_view_frame_last_tick = 100;
+
+    /* The turn-event table: filler everywhere, from events_stage, which also
+       sets the counter to 4 and installs the logging handlers. */
+    events_stage();
+    data_fdps_battle_turn_counter = ADV_TURN;
+
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    adv_post_calls = 0;
+    adv_end_on_post_call = 0;
+    data_fdps_chapter_current_chapter_id = ADV_CHAPTER_ID;
+    data_fdps_chapter_post_action_handler_table[ADV_CHAPTER_ID] =
+        adv_post_action;
+}
+
+static void adv_run(void)
+{
+    adv_set_mode(ADV_MODE_13H);
+    adv_saved_timer = _dos_getvect(ADV_TIMER_VECTOR);
+    _dos_setvect(ADV_TIMER_VECTOR, adv_timer_isr);
+    fdps_battle_advance_turn();
+    _dos_setvect(ADV_TIMER_VECTOR, adv_saved_timer);
+    adv_set_mode(ADV_MODE_TEXT);
+}
+
+static void adv_unstage(void)
+{
+    events_unstage();
+    free(data_fdps_map_unit_array_ptr);
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_chapter_post_action_handler_table[ADV_CHAPTER_ID] = NULL;
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_chapter_event_or_battle_end_code = 0;
+    data_fdps_chapter_pending_event_idx = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_audio_basewav_sfx_bank_buf_ptr = NULL;
+    data_fdps_audio_cd_current_music_index = adv_saved_music_index;
+}
+
+/* The displacements the function reads: +5 and +6 for the status and side
+   bytes, +0x0a for the inventory entries' flag bytes (ADD EAX,EAX / MOV
+   AL,byte ptr [EAX+0xa]), +0x25 and +0x26 for the poison and paralysis
+   counters, +0x40/+0x42 for HP and +0x44/+0x46 for MP. */
+static void adv_reads_the_fields_the_assembly_reads(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 5);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 6);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, inventory_slots), 0x0a);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers)
+             + ADV_POISON_TIMER, 0x25);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers)
+             + ADV_PARALYSIS_TIMER, 0x26);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_current), 0x44);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, mp_max), 0x46);
+}
+
+/* The rest.  A fifth of the maximum, IDIV by 5, added and clamped with JLE:
+   50/100 gains 20; 95/100 is clamped at 100; 3/9 gains 9/5 = 1.  The HP test
+   is CMP / JNZ, inequality -- a unit ABOVE its maximum rests too and comes
+   back down to it (120 -> 100), and one at exactly its maximum is left alone.
+   MOVSX makes the current HP signed: -10 gains 20 and lands on 10, where an
+   unsigned read would have clamped it to 100. */
+static void adv_rest_heals_a_fifth_of_the_maximum(void)
+{
+    adv_stage();
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    adv_run();
+
+    CHECK_EQ((int) adv_unit(0)->hp_current, 70);
+    CHECK_EQ((int) adv_unit(1)->hp_current, 100);
+    CHECK_EQ((int) adv_unit(2)->hp_current, 100);
+    CHECK_EQ((int) adv_unit(3)->hp_current, 10);
+    CHECK_EQ((int) adv_unit(4)->hp_current, 4);
+    CHECK_EQ((int) adv_unit(10)->hp_current, 100);
+    adv_unstage();
+}
+
+/* Who does not rest: another side (an enemy, 5, and an NPC, 13 -- the test is
+   equality with 2), a unit with bit 7 or bit 0 of the status byte (6 and 7),
+   a poisoned one (8) and a paralysed one (9).  The mask is 0x81 and not the
+   whole byte, so bit 1 (11) rests; and the timers tested are +0x25 and +0x26
+   only, so a unit with status_timers[0] running (12) rests. */
+static void adv_rest_skips_the_ineligible(void)
+{
+    adv_stage();
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    adv_run();
+
+    CHECK_EQ((int) adv_unit(5)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(13)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(6)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(7)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(8)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(9)->hp_current, 50);
+    CHECK_EQ((int) adv_unit(11)->hp_current, 70);
+    CHECK_EQ((int) adv_unit(12)->hp_current, 70);
+    adv_unstage();
+}
+
+/* A battle-end code already standing: the NPC side's turn events fire
+   (0002e0c0 with PUSH 0x1, at the unbumped turn) and its status tick runs --
+   that is the post-action handler's one call -- and the test at 0001e588
+   returns.  The NPC phase, which would call the handler again, does not run;
+   the side-0 event at the same turn does not fire; the play-active flag is
+   left at the 0 stored on entry, not raised; the turn counter is not bumped;
+   and the cursor mode, which only the later stages write, is untouched. */
+static void adv_stops_after_the_npc_ticks_on_a_battle_end_code(void)
+{
+    adv_stage();
+    set_entry(stage_block, 0, ADV_TURN, 2, ADV_SIDE_NPC);
+    set_entry(stage_block, 1, ADV_TURN, 5, ADV_SIDE_ENEMY);
+    set_entry(stage_block, 2, ADV_TURN, 1, ADV_SIDE_PLAYER);
+    data_fdps_chapter_event_or_battle_end_code = 1;
+
+    adv_run();
+
+    CHECK_EQ(handler_calls, 1);
+    CHECK_EQ(handler_slots[0], 2);
+    CHECK_EQ(adv_post_calls, 1);
+    CHECK_EQ((int) data_fdps_ui_play_active_flag, 0);
+    CHECK_EQ(data_fdps_battle_turn_counter, ADV_TURN);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, ADV_CURSOR_MODE_SENTINEL);
+    CHECK_EQ((int) adv_unit(6)->flags, ADV_FLAG_ACTED);
+    adv_unstage();
+}
+
+/* With no code standing the NPC phase runs: its first iteration relocates the
+   array and calls the post-action handler a second time, which raises the
+   code, and the test at 0001e59a returns before the enemy banner.  So the
+   array has moved, the handler ran twice, the acted bit is still on unit 6
+   (fdps_units_clear_status_bit7 comes after the banner), the enemy-side event
+   has not fired, the counter is not bumped and the flag is left lowered. */
+static void adv_stops_after_the_npc_phase_on_a_battle_end_code(void)
+{
+    unsigned char *staged;
+
+    adv_stage();
+    set_entry(stage_block, 0, ADV_TURN, 5, ADV_SIDE_ENEMY);
+    adv_end_on_post_call = 2;
+    staged = data_fdps_map_unit_array_ptr;
+
+    adv_run();
+
+    CHECK_EQ(data_fdps_map_unit_array_ptr != staged, 1);
+    CHECK_EQ(adv_post_calls, 2);
+    CHECK_EQ(handler_calls, 0);
+    CHECK_EQ((int) adv_unit(6)->flags, ADV_FLAG_ACTED);
+    CHECK_EQ(data_fdps_battle_turn_counter, ADV_TURN);
+    CHECK_EQ((int) data_fdps_ui_play_active_flag, 0);
+    CHECK_EQ((int) adv_unit(0)->hp_current, 70);
+    adv_unstage();
+}
+
 void run_btlturn_tests(void)
 {
     RUN_TEST(mark_record_layout_matches_the_assembly);
@@ -1792,6 +2101,12 @@ void run_btlturn_tests(void)
     RUN_TEST(turn_takes_the_start_tile_from_the_cursor);
     RUN_TEST(turn_resets_the_grid_after_the_cursor);
     RUN_TEST(turn_exit_fires_a_pending_event_with_the_unit);
+
+    RUN_TEST(adv_reads_the_fields_the_assembly_reads);
+    RUN_TEST(adv_rest_heals_a_fifth_of_the_maximum);
+    RUN_TEST(adv_rest_skips_the_ineligible);
+    RUN_TEST(adv_stops_after_the_npc_ticks_on_a_battle_end_code);
+    RUN_TEST(adv_stops_after_the_npc_phase_on_a_battle_end_code);
 
 
     /* Put the globals back before leaving.  stage() points them at this
