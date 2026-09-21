@@ -16,10 +16,15 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <dos.h>
+#include <i86.h>
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "chapter.h"
+#include "keybd.h"
+#include "mapdraw.h"
 #include "vfs.h"
 #include "btlturn.h"
 
@@ -1342,6 +1347,397 @@ static void npc_phase_rereads_the_unit_count_every_iteration(void)
     phase_unstage();
 }
 
+/* ---------------------------------------------------------------------- *
+ * 00015470 fdps_battle_unit_turn
+ *
+ * WHICH OF THE TURN'S ARMS A TEST CAN REACH.  Every pass of the turn loop
+ * goes through fdps_map_cursor_select_loop before anything else is decided,
+ * and that loop only returns on a key: it throws the scancode latch away on
+ * entry (0002b5c8) and then reads it once a pass, drawing a whole frame with
+ * fdps_render_view_frame between reads (mapcur.h).  So the cases below put
+ * the adapter in mode 13h, install a timer interrupt that advances the game's
+ * clock -- which is what lets the frame's pacing spin finish -- and writes ESC
+ * into the latch on every tick, the way fdps_keyboard_isr would on a
+ * keypress.  The select loop reads it on its next pass and answers -1.
+ *
+ * That is the one arm reachable from here: backing out of the range cursor.
+ * Everything behind a confirm -- the path trace, the walk, the action menu
+ * and the take-back -- needs the select loop to answer 1, which in mode 4
+ * takes a SPACE with the cursor on a marked tile, and then fdps_battle_action_menu
+ * running to an answer as well, with its sheets, its text block and a second
+ * key script (tests/btlact.c).  Those arms are settled in the assembly, row by
+ * row, in the comment above the function, and are a playtest observation.
+ *
+ * WHAT THE FIXTURE STAGES, AND WHY SO LITTLE OF THE SCENE.  The range flood
+ * and the tile lookups it makes read the slot-0 tile map, the slot-0 attribute
+ * table, the movement grid, the cell event layer and the PROMAP.DAT row, so a
+ * 4x4 map of each is staged.  Every terrain costs 20 against a move of 2, so
+ * the flood marks the start cell and nothing else.  The scene layer count is
+ * 0, the cursor overlay mode 0 and the terrain panel off, so a frame draws
+ * nothing but still blits and paces -- and, because the marked-tile pulse only
+ * steps inside a drawn layer, the phase this function writes is still readable
+ * afterwards.  The unit count is 1 and record 0 is RETIRED, which every unit
+ * sweep on the way passes over (the zone marks, the tile blocking and the unit
+ * draw); the acting unit is record 1.  The function resolves unit_index by
+ * address and never reads the count, and fdps_relocate_unit_array carries
+ * count + 1 records, so record 1 survives the move.  Index 1 rather than 0 is
+ * so that the argument the exit hands an event handler is told apart from a
+ * literal 0.
+ *
+ * Expected values come from the assembly at 00015470 -- MOV dword ptr
+ * [0x0006015c],0x14 at 000154cc, CALL 0x0002df90 at 000154e0 inside the loop,
+ * MOV dword ptr [0x00069d90],0xff at 000154f4, the two IDIV EBX by 0x18 of
+ * 00069cd4 and 00069ccc at 0001551d / 00015535 feeding the start tile, CALL
+ * 0x00010b20 at 0001557f right after the select loop, the cancel arm at
+ * 0001558a (IMUL by 0x18 of the start tile, CALL 0x0002d7c0, MOV byte ptr
+ * [EBP-0x4],0x1 and nothing else), and the exit at 00015806 (MOV dword ptr
+ * [0x00069cd0],0x1, then the pending-event call with PUSH EAX of the unit
+ * index, then the post-action call) -- and from the record layout ticket 17
+ * settled.  None of them is read off the emitted C.
+ */
+
+#define TURN_MAP_W 4
+#define TURN_MAP_H 4
+#define TURN_MAP_CELLS (TURN_MAP_W * TURN_MAP_H)
+#define TURN_TILE_PIXELS 24
+#define TURN_ATTR_HEADER 0x11
+#define TURN_CLASS_ROW_BYTES 10
+#define TURN_IMPASSABLE_COST 20
+
+/* The acting unit: record 1, standing on tile (1, 2) with a move of 2.
+   Record 0 is a retired filler; see the block comment above. */
+#define TURN_UNIT_INDEX 1
+#define TURN_UNIT_COUNT 1
+#define TURN_UNIT_FLAG_RETIRED 0x01
+#define TURN_UNIT_TILE_X 1
+#define TURN_UNIT_TILE_Y 2
+#define TURN_UNIT_MOVE 2
+#define TURN_UNIT_CHAR_ID 0x33
+
+/* What the function writes: the pulse phase at 000154cc, the "no event" seed
+   at 000154f4 and the overlay mode at 00015806. */
+#define TURN_BLEND_PHASE_START 0x14
+#define TURN_NO_EVENT 0xff
+#define TURN_CURSOR_NORMAL 1
+
+/* Values nothing on the cancel path writes, planted so that finding one still
+   in place is evidence. */
+#define TURN_PLAY_FLAG_SENTINEL 0x5a
+#define TURN_PENDING_SENTINEL 0x2a
+#define TURN_BLEND_SENTINEL 3
+#define TURN_GRID_MARKER_SENTINEL 0x33
+
+#define TURN_CHAPTER_ID 3
+#define TURN_MODE_13H 0x13
+#define TURN_MODE_TEXT 0x03
+#define TURN_TIMER_VECTOR 8
+#define TURN_SCANCODE_ESC 0x01
+#define TURN_SCANCODE_NONE 0xff
+
+static unsigned char turn_tile_map[0x0b + TURN_MAP_CELLS * 2];
+static unsigned char turn_move_grid[4 + TURN_MAP_CELLS * 2];
+static unsigned char turn_tile_attr[TURN_ATTR_HEADER + TURN_MAP_CELLS * 4];
+static unsigned char turn_event_layer[sizeof(struct fdps_map_cell_code_layer)
+                                      + TURN_MAP_CELLS];
+static unsigned char turn_class_table[2 * TURN_CLASS_ROW_BYTES];
+
+static unsigned char *turn_latch;
+/* -1 leaves the pending-event slot alone; anything else is written into it on
+   every tick, which is how a case reaches the exit's event dispatch. */
+static int turn_isr_pending_slot;
+static void (__interrupt __far *turn_saved_timer)();
+
+static int turn_post_calls;
+static int turn_post_cursor_mode;
+static int turn_post_after_handler;
+static int turn_saved_music_index;
+
+static void __interrupt __far turn_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    *turn_latch = (unsigned char) TURN_SCANCODE_ESC;
+    if (turn_isr_pending_slot >= 0) {
+        data_fdps_chapter_pending_event_idx =
+            (unsigned int) turn_isr_pending_slot;
+    }
+    _chain_intr(turn_saved_timer);
+}
+
+static void turn_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static void turn_post_action(void)
+{
+    turn_post_calls++;
+    turn_post_cursor_mode = data_fdps_map_cursor_draw_mode;
+    turn_post_after_handler = handler_calls;
+}
+
+static struct fdps_unit_record *turn_unit(void)
+{
+    return (struct fdps_unit_record *)
+           (data_fdps_map_unit_array_ptr + TURN_UNIT_INDEX * 0x50);
+}
+
+static void turn_stage(void)
+{
+    struct fdps_map_cell_code_layer *event_layer;
+    struct fdps_unit_record *unit;
+    unsigned char *bytes;
+    int i;
+
+    *(short *) (turn_tile_map + 7) = TURN_MAP_W;
+    *(short *) (turn_tile_map + 9) = TURN_MAP_H;
+    *(short *) turn_move_grid = TURN_MAP_W;
+    *(short *) (turn_move_grid + 2) = TURN_MAP_H;
+    for (i = 0; i < TURN_MAP_CELLS; i++) {
+        *(short *) (turn_tile_map + 0x0b + i * 2) = (short) i;
+        turn_move_grid[4 + i * 2] = 0;
+        turn_move_grid[4 + i * 2 + 1] = TURN_GRID_MARKER_SENTINEL;
+    }
+    memset(turn_tile_attr, 0, sizeof(turn_tile_attr));
+    memset(turn_event_layer, 0, sizeof(turn_event_layer));
+    event_layer = (struct fdps_map_cell_code_layer *) turn_event_layer;
+    event_layer->width = TURN_MAP_W;
+    event_layer->height = TURN_MAP_H;
+    memset(turn_class_table, TURN_IMPASSABLE_COST, sizeof(turn_class_table));
+
+    data_fdps_scene_layer_tile_map_ptrs[0] = turn_tile_map;
+    data_fdps_scene_layer_tile_attr_ptr[0] = turn_tile_attr;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_battle_move_grid_ptr = turn_move_grid;
+    data_fdps_map_cell_event_code_layer_ptr = turn_event_layer;
+    data_fdps_class_table_ptr = turn_class_table;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *)
+        malloc((size_t) ((TURN_UNIT_COUNT + 1) * 0x50));
+    data_fdps_map_unit_count = TURN_UNIT_COUNT;
+    bytes = data_fdps_map_unit_array_ptr;
+    for (i = 0; i < (TURN_UNIT_COUNT + 1) * 0x50; i++) {
+        bytes[i] = 0;
+    }
+    ((struct fdps_unit_record *) bytes)->flags = TURN_UNIT_FLAG_RETIRED;
+    ((struct fdps_unit_record *) bytes)->side = SIDE_ENEMY;
+    unit = turn_unit();
+    for (i = 0; i < 8; i++) {
+        unit->inventory_slots[i * 2] = 0x80;
+    }
+    unit->pos_x = TURN_UNIT_TILE_X;
+    unit->pos_y = TURN_UNIT_TILE_Y;
+    unit->side = SIDE_PLAYER;
+    unit->char_id = TURN_UNIT_CHAR_ID;
+    unit->move = TURN_UNIT_MOVE;
+    unit->clazz = 0;
+
+    data_fdps_map_cursor_world_x = TURN_UNIT_TILE_X * TURN_TILE_PIXELS;
+    data_fdps_map_cursor_world_y = TURN_UNIT_TILE_Y * TURN_TILE_PIXELS;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = TURN_PLAY_FLAG_SENTINEL;
+    data_fdps_marked_tile_blend_phase = TURN_BLEND_SENTINEL;
+    data_fdps_chapter_pending_event_idx = TURN_PENDING_SENTINEL;
+    turn_saved_music_index = data_fdps_audio_cd_current_music_index;
+    data_fdps_audio_cd_current_music_index = -1;
+    data_fdps_timer_tick_counter = 100;
+    data_fdps_view_frame_last_tick = 100;
+
+    turn_post_calls = 0;
+    turn_post_cursor_mode = -1;
+    turn_post_after_handler = -1;
+    turn_isr_pending_slot = -1;
+    handler_calls = 0;
+    for (i = 0; i < EVENT_LOG_MAX; i++) {
+        handler_slots[i] = -1;
+        handler_args[i] = -1;
+    }
+    data_fdps_chapter_event_handler_table[1] = handler_in_slot_1;
+    data_fdps_chapter_current_chapter_id = TURN_CHAPTER_ID;
+    data_fdps_chapter_post_action_handler_table[TURN_CHAPTER_ID] =
+        turn_post_action;
+}
+
+static void turn_run(void)
+{
+    turn_latch = fdps_keyboard_scancode_ptr();
+    turn_set_mode(TURN_MODE_13H);
+    turn_saved_timer = _dos_getvect(TURN_TIMER_VECTOR);
+    _dos_setvect(TURN_TIMER_VECTOR, turn_timer_isr);
+    fdps_battle_unit_turn(TURN_UNIT_INDEX);
+    _dos_setvect(TURN_TIMER_VECTOR, turn_saved_timer);
+    turn_set_mode(TURN_MODE_TEXT);
+    *turn_latch = (unsigned char) TURN_SCANCODE_NONE;
+}
+
+static void turn_unstage(void)
+{
+    free(data_fdps_map_unit_array_ptr);
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_scene_layer_tile_map_ptrs[0] = NULL;
+    data_fdps_scene_layer_tile_attr_ptr[0] = NULL;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_map_cell_event_code_layer_ptr = NULL;
+    data_fdps_class_table_ptr = NULL;
+    data_fdps_chapter_event_handler_table[1] = NULL;
+    data_fdps_chapter_post_action_handler_table[TURN_CHAPTER_ID] = NULL;
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_chapter_pending_event_idx = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_marked_tile_blend_phase = 0;
+    data_fdps_audio_cd_current_music_index = turn_saved_music_index;
+}
+
+/* The five record bytes the function reads by displacement: [EDX+0x3b] for
+   the move at 000154ac, [EDX+0x20] for the class code at 000154c6, [EAX+0x8]
+   for the character at 00015649, [EDX] and [EDX+0x1] for the tile written back
+   at 000156cf / 000156d7 -- and the 0x50 stride of IMUL EDX,...,0x50 at
+   000156bb. */
+static void turn_reads_the_fields_the_assembly_reads(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, move), 0x3b);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, clazz), 0x20);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, char_id), 0x08);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_x), 0);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, pos_y), 1);
+    CHECK_EQ((int) sizeof(struct fdps_unit_record), 0x50);
+}
+
+/* Backing out of the range cursor ends the call after one pass, with the turn
+   NOT spent: the arm at 0001558a sets only the loop flag, so bit 7 of the
+   status byte stays clear and the unit is left where it stood.  The exit
+   still runs whole: the overlay goes back to mode 1 -- the post-action handler
+   already sees it -- the pending slot is left at the 0xff the pass seeded it
+   with, so no event fires, and the chapter's post-action handler runs exactly
+   once.  The play-active flag is written only after a confirm, so its
+   sentinel survives. */
+static void turn_cancel_ends_the_call_with_nothing_spent(void)
+{
+    turn_stage();
+
+    turn_run();
+
+    CHECK_EQ(turn_post_calls, 1);
+    CHECK_EQ(handler_calls, 0);
+    CHECK_EQ(turn_post_cursor_mode, TURN_CURSOR_NORMAL);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TURN_CURSOR_NORMAL);
+    CHECK_EQ((int) data_fdps_chapter_pending_event_idx, TURN_NO_EVENT);
+    CHECK_EQ((int) turn_unit()->flags, 0);
+    CHECK_EQ((int) turn_unit()->pos_x, TURN_UNIT_TILE_X);
+    CHECK_EQ((int) turn_unit()->pos_y, TURN_UNIT_TILE_Y);
+    CHECK_EQ((int) data_fdps_ui_play_active_flag, TURN_PLAY_FLAG_SENTINEL);
+    turn_unstage();
+}
+
+/* MOV dword ptr [0x0006015c],0x14 at 000154cc: the pulse is restarted once
+   before the loop.  With no scene layer drawn nothing steps it afterwards, so
+   it comes back as exactly 0x14. */
+static void turn_restarts_the_marked_tile_pulse(void)
+{
+    turn_stage();
+
+    turn_run();
+
+    CHECK_EQ(data_fdps_marked_tile_blend_phase, TURN_BLEND_PHASE_START);
+    turn_unstage();
+}
+
+/* CALL 0x0002df90 at 000154e0 is inside the loop, so even a turn that is
+   backed out of at once publishes a new block -- and the record has to come
+   through the move, because the function re-resolves it afterwards. */
+static void turn_relocates_the_array_each_pass(void)
+{
+    unsigned char *staged;
+
+    turn_stage();
+    staged = data_fdps_map_unit_array_ptr;
+
+    turn_run();
+
+    CHECK_EQ(data_fdps_map_unit_array_ptr != staged, 1);
+    CHECK_EQ((int) turn_unit()->char_id, TURN_UNIT_CHAR_ID);
+    CHECK_EQ((int) turn_unit()->move, TURN_UNIT_MOVE);
+    turn_unstage();
+}
+
+/* The start tile is the CURSOR's pixel divided by 24 (the two IDIVs at
+   0001552b and 00015543), not the record's pos_x/pos_y, and the cancel arm
+   walks the cursor back to that tile times 24.  With the record placed
+   somewhere else entirely, a body that took the record's tile would walk the
+   cursor off to (72, 72); a body that swapped the two quotients would send it
+   to (48, 24).  Taken from the cursor, the target is where the cursor already
+   is and fdps_map_cursor_move_to returns without moving it. */
+static void turn_takes_the_start_tile_from_the_cursor(void)
+{
+    turn_stage();
+    turn_unit()->pos_x = 3;
+    turn_unit()->pos_y = 3;
+
+    turn_run();
+
+    CHECK_EQ(data_fdps_map_cursor_world_x, TURN_UNIT_TILE_X * TURN_TILE_PIXELS);
+    CHECK_EQ(data_fdps_map_cursor_world_y, TURN_UNIT_TILE_Y * TURN_TILE_PIXELS);
+    CHECK_EQ((int) turn_unit()->pos_x, 3);
+    CHECK_EQ((int) turn_unit()->pos_y, 3);
+    turn_unstage();
+}
+
+/* CALL 0x00010b20 at 0001557f follows the select loop on every pass: the
+   flood marked the start cell 0 and nothing else (every terrain costs 20
+   against a move of 2), and the reset then puts every marker in the grid to
+   0xff -- including the cells planted with a sentinel the flood never
+   reached. */
+static void turn_resets_the_grid_after_the_cursor(void)
+{
+    int i;
+    int all_reset;
+
+    turn_stage();
+
+    turn_run();
+
+    all_reset = 1;
+    for (i = 0; i < TURN_MAP_CELLS; i++) {
+        if (turn_move_grid[4 + i * 2 + 1] != 0xff) {
+            all_reset = 0;
+        }
+    }
+    CHECK_EQ(all_reset, 1);
+    turn_unstage();
+}
+
+/* The exit's event dispatch, CMP dword ptr [0x00069d90],0xff / PUSH EAX /
+   CALL dword ptr [EDX+0x601c4] at 0001581c: a slot that is no longer 0xff
+   when the loop ends fires its handler with the acting unit's index, and it
+   fires BEFORE the post-action handler.  Nothing on the cancel arm itself
+   writes the slot, so the timer interrupt writes slot 1 into it on every tick
+   -- after the pass's own 0xff seed, since the frame the select loop draws
+   waits for a tick. */
+static void turn_exit_fires_a_pending_event_with_the_unit(void)
+{
+    turn_stage();
+    turn_isr_pending_slot = 1;
+
+    turn_run();
+
+    CHECK_EQ(handler_calls, 1);
+    CHECK_EQ(handler_slots[0], 1);
+    CHECK_EQ(handler_args[0], TURN_UNIT_INDEX);
+    CHECK_EQ(turn_post_calls, 1);
+    CHECK_EQ(turn_post_after_handler, 1);
+    turn_unstage();
+}
+
 void run_btlturn_tests(void)
 {
     RUN_TEST(mark_record_layout_matches_the_assembly);
@@ -1388,6 +1784,14 @@ void run_btlturn_tests(void)
     RUN_TEST(npc_phase_calls_no_scorer);
     RUN_TEST(npc_phase_stops_on_a_battle_end_code);
     RUN_TEST(npc_phase_rereads_the_unit_count_every_iteration);
+
+    RUN_TEST(turn_reads_the_fields_the_assembly_reads);
+    RUN_TEST(turn_cancel_ends_the_call_with_nothing_spent);
+    RUN_TEST(turn_restarts_the_marked_tile_pulse);
+    RUN_TEST(turn_relocates_the_array_each_pass);
+    RUN_TEST(turn_takes_the_start_tile_from_the_cursor);
+    RUN_TEST(turn_resets_the_grid_after_the_cursor);
+    RUN_TEST(turn_exit_fires_a_pending_event_with_the_unit);
 
 
     /* Put the globals back before leaving.  stage() points them at this

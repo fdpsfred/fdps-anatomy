@@ -82,4 +82,32 @@ extern void fdps_battle_enemy_turn_phase(void);
 extern void fdps_battle_npc_turn_phase(void);
 #pragma aux fdps_battle_npc_turn_phase "*" parm caller [];
 
+/* 00060004.  Battle rule flag read by fdps_battle_unit_turn below, the only
+   function that references it (two reads, CMP dword ptr [0x00060004],0x0 at
+   000156b2 and 000157ae, each straight after fdps_battle_action_menu answered
+   -1).  Zero makes a cancelled action menu a take-back: a unit that walked is
+   put back on its start tile and the turn loop runs again.  Non-zero makes the
+   cancel spend the turn where the unit stands.  No instruction in the image
+   writes it. */
+extern int data_fdps_battle_action_cancel_ends_turn_flag;
+
+/* Runs one player-controlled unit's whole turn: the movement range and the
+   destination cursor, the walk, and the action menu, looping on every
+   take-back until the turn is spent or the player backs out of the range
+   cursor.  unit_index is the unit's index in the battle unit array; nothing
+   is returned.  fdps_battle_player_phase_loop is the only caller.
+
+   Backing out of the range cursor ends the call with the turn NOT spent --
+   bit 7 of the status byte is left clear, so the phase will offer the unit
+   again.  Every other way out goes through fdps_battle_mark_unit_done.
+   Whichever way it ends, the cursor overlay is left in mode 1, a pending
+   chapter event fires with unit_index, and the chapter's post-action handler
+   runs.
+
+   The start tile is read off the map cursor, not the record: the range is
+   flooded, the path traced back to and every take-back returned to whatever
+   tile the cursor is on when the call is made. */
+extern void fdps_battle_unit_turn(int unit_index);
+#pragma aux fdps_battle_unit_turn "*" parm caller [];
+
 #endif
