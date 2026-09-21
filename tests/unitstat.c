@@ -49,6 +49,7 @@
  * could produce makes both the accumulate and the untouched cases visible.
  */
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dos.h>
@@ -56,6 +57,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "chapter.h"
 #include "unitstat.h"
 
 /* The stride fdps_get_unit_record multiplies by. */
@@ -3301,6 +3303,476 @@ static void awd_the_label_follows_the_view_scroll(void)
     awd_unstage();
 }
 
+/* ------------------------------------------------------------------
+ * fdps_battle_tick_status_effects @ 0001fa30
+ *
+ * Every expected value below is read off the assembly at 0001fa30 -- CMP byte
+ * ptr [EAX+0x25],0x0 at 0001fa6d for which timer is poison; MOV AL,byte ptr
+ * [EAX+0x6] / AND EAX,0xff / CMP EAX,dword ptr [EBP+0x14] for the side test and
+ * AND AL,0x1 on byte +0x5 for the retired test, both at 0001fa76 and again
+ * inside the six-slot loop at 0001fb9e; XOR EAX,EAX / MOV AX,word ptr
+ * [EBX+0x40] and [EBX+0x42] at 0001fa9b..0001faac, which make both HP reads
+ * UNSIGNED; MOV EBX,0xa / IDIV EBX at 0001fab3 for the tenth; the store into
+ * [0x00064038] at 0001fac3 and the re-reads of it; CMP dword ptr
+ * [EBP-0x10],0x0 / JGE at 0001fad0 for the floor; the two stores of 0 and 1
+ * into [0x00069cd0] around the poison presentation and the lone store of 0 at
+ * 0001fbdb on expiry; CALL 0x0001d6c0 and CALL dword ptr [EAX+0x6028c] at
+ * 0001fb3f..0001fb50, BETWEEN the two sweeps; CMP dword ptr [EBP-0x18],0x6 for
+ * the six slots from +0x22; DEC byte ptr [EAX+0x22] then CMP ...,0x0 / JNZ for
+ * the expiry test; and CALL 0x00024d70, fdps_unit_recompute_combat_stats,
+ * whose effect on a record with nothing equipped is ap = ap_base and dp =
+ * dp_base (covered in tests/unit.c).  None of them is read off the emitted C.
+ *
+ * TWO GROUPS.  The countdown cases never have a poison timer running on a
+ * live unit of the ticked side, so they reach no animation and run anywhere.
+ * The poison cases play PosEff.saf out of the shipped MISC.VFS -- the
+ * container's name is a literal inside fdps_play_vfs_animation_over_units and
+ * a member it cannot find ends the process -- so they stage what the game
+ * stages, mode 13h and an IRQ0 handler advancing data_fdps_timer_tick_counter,
+ * and skip themselves when the container is not staged (tests/gamefile.lst).
+ * Every unit sits at tile 100,100 with the cursor already parked there and the
+ * view at the map origin: fdps_map_cursor_move_to returns at once, every copy
+ * of the clip and every map sprite fails its placement test, and
+ * fdps_show_number_indicator culls the popup, so the queue drains at once
+ * (tests/item.c gives the same reasoning for the heal clip).
+ *
+ * WHAT IS NOT COVERED.  The floor at 0: a unit the poison brings to exactly 0
+ * is one fdps_play_death_animation_and_mark_dead then settles, and that routine
+ * reads the resident BaseAni.vfs image this fixture does not build; the death
+ * settlement is covered against a synthetic container in tests/death.c.  The
+ * popup's figure and glyph base reach the queue only for a unit inside the
+ * cull window; the figure is pinned here through the scratch global it is read
+ * back out of instead.
+ * ------------------------------------------------------------------ */
+
+/* Five records, so a sweep that strayed past the count would be visible. */
+#define TSE_UNITS 5
+#define TSE_SIDE 2
+#define TSE_OTHER_SIDE 1
+
+/* The chapter whose handler the fixture installs, and a second one that must
+   not be the one called. */
+#define TSE_CHAPTER_ID 3
+#define TSE_OTHER_CHAPTER_ID 7
+
+/* Record +0x25, status_timers[3], and the two bits of +0x05 in play. */
+#define TSE_POISON_SLOT 3
+#define TSE_FLAG_RETIRED 0x01
+#define TSE_FLAG_ACTED 0x80
+
+/* A value no staged path writes into the cursor mode. */
+#define TSE_CURSOR_SENTINEL 0x5a
+
+/* Derived stats that do not match the base stats, so a recompute shows. */
+#define TSE_AP_BASE 50
+#define TSE_DP_BASE 40
+#define TSE_STALE_AP 77
+#define TSE_STALE_DP 66
+
+#define TSE_START_HP 80
+#define TSE_MAX_HP 95
+#define TSE_MAX_HP_TENTH 9
+
+/* Far off the view, where every drawer's placement test fails. */
+#define TSE_FAR_TILE 100
+#define TSE_TILE_PX 24
+#define TSE_MAP_TILES 120
+
+/* The portrait id fdps_draw_map_unit drops a unit on. */
+#define TSE_NO_MAP_SPRITE 0x80
+
+#define TSE_TIMER_VECTOR 8
+#define TSE_MODE_TEXT 0x03
+#define TSE_MODE_320X200X256 0x13
+#define TSE_ARCHIVE "MISC.VFS"
+
+static struct fdps_unit_record tse_units[TSE_UNITS];
+static short tse_grid_header[2];
+static int tse_handler_calls;
+static int tse_other_handler_calls;
+static int tse_timer_at_handler;
+static int tse_hp_at_handler;
+static int tse_watched_unit;
+static void (__interrupt __far *tse_saved_timer)();
+
+static void __interrupt __far tse_timer_isr(void)
+{
+    ++data_fdps_timer_tick_counter;
+    _chain_intr(tse_saved_timer);
+}
+
+/* The post-action handler: counts the call and snapshots the watched unit, so
+   a case can say what the first sweep had done and what the second had not
+   yet. */
+static void tse_post_action(void)
+{
+    tse_handler_calls++;
+    tse_timer_at_handler =
+        (int) tse_units[tse_watched_unit].status_timers[0];
+    tse_hp_at_handler = (int) tse_units[tse_watched_unit].hp_current;
+}
+
+static void tse_post_action_other(void)
+{
+    tse_other_handler_calls++;
+}
+
+/* Every record on the ticked side, alive, far off the view, with no timer
+   running and derived stats that disagree with the base ones.  The count
+   stops one short of the array. */
+static void tse_stage(void)
+{
+    int unit_index;
+
+    memset(tse_units, 0, sizeof(tse_units));
+    for (unit_index = 0; unit_index < TSE_UNITS; unit_index++) {
+        tse_units[unit_index].side = (unsigned char) TSE_SIDE;
+        tse_units[unit_index].portrait_id = (unsigned char) TSE_NO_MAP_SPRITE;
+        tse_units[unit_index].pos_x = (unsigned char) TSE_FAR_TILE;
+        tse_units[unit_index].pos_y = (unsigned char) TSE_FAR_TILE;
+        tse_units[unit_index].hp_current = (short) TSE_START_HP;
+        tse_units[unit_index].hp_max = (short) TSE_MAX_HP;
+        tse_units[unit_index].ap_base = (short) TSE_AP_BASE;
+        tse_units[unit_index].dp_base = (short) TSE_DP_BASE;
+        tse_units[unit_index].ap = (short) TSE_STALE_AP;
+        tse_units[unit_index].dp = (short) TSE_STALE_DP;
+    }
+    tse_grid_header[0] = (short) TSE_MAP_TILES;
+    tse_grid_header[1] = (short) TSE_MAP_TILES;
+
+    tse_handler_calls = 0;
+    tse_other_handler_calls = 0;
+    tse_timer_at_handler = -1;
+    tse_hp_at_handler = -1;
+    tse_watched_unit = 0;
+
+    data_fdps_map_unit_array_ptr = (unsigned char *) tse_units;
+    data_fdps_map_unit_count = TSE_UNITS - 1;
+    data_fdps_battle_move_grid_ptr = (unsigned char *) tse_grid_header;
+    data_fdps_chapter_current_chapter_id = TSE_CHAPTER_ID;
+    data_fdps_chapter_post_action_handler_table[TSE_CHAPTER_ID] =
+        tse_post_action;
+    data_fdps_chapter_post_action_handler_table[TSE_OTHER_CHAPTER_ID] =
+        tse_post_action_other;
+    data_fdps_map_cursor_draw_mode = TSE_CURSOR_SENTINEL;
+    data_fdps_map_cursor_world_x = TSE_FAR_TILE * TSE_TILE_PX;
+    data_fdps_map_cursor_world_y = TSE_FAR_TILE * TSE_TILE_PX;
+    data_fdps_battle_view_window_origin_x = 0;
+    data_fdps_battle_view_window_origin_y = 0;
+    data_fdps_cel_sprite_cache_ptr = NULL;
+    data_fdps_map_unit_walk_anim_counter = 0;
+    data_fdps_scene_layer_count = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_indicator_queue_count = 0;
+    data_fdps_dialog_last_action_value_param = -1;
+}
+
+/* Put the staged globals back the way a freshly started program has them, for
+   the reason tests/anim.c gives. */
+static void tse_unstage(void)
+{
+    data_fdps_map_unit_array_ptr = NULL;
+    data_fdps_map_unit_count = 0;
+    data_fdps_battle_move_grid_ptr = NULL;
+    data_fdps_chapter_post_action_handler_table[TSE_CHAPTER_ID] = NULL;
+    data_fdps_chapter_post_action_handler_table[TSE_OTHER_CHAPTER_ID] = NULL;
+    data_fdps_chapter_current_chapter_id = 0;
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_map_cursor_world_x = 0;
+    data_fdps_map_cursor_world_y = 0;
+    data_fdps_dialog_last_action_value_param = 0;
+}
+
+static void tse_set_timers(int unit_index, int t0, int t1, int t2, int t3,
+                           int t4, int t5)
+{
+    tse_units[unit_index].status_timers[0] = (unsigned char) t0;
+    tse_units[unit_index].status_timers[1] = (unsigned char) t1;
+    tse_units[unit_index].status_timers[2] = (unsigned char) t2;
+    tse_units[unit_index].status_timers[3] = (unsigned char) t3;
+    tse_units[unit_index].status_timers[4] = (unsigned char) t4;
+    tse_units[unit_index].status_timers[5] = (unsigned char) t5;
+}
+
+static void tse_timers_are(int unit_index, int t0, int t1, int t2, int t3,
+                           int t4, int t5)
+{
+    CHECK_EQ(tse_units[unit_index].status_timers[0], t0);
+    CHECK_EQ(tse_units[unit_index].status_timers[1], t1);
+    CHECK_EQ(tse_units[unit_index].status_timers[2], t2);
+    CHECK_EQ(tse_units[unit_index].status_timers[3], t3);
+    CHECK_EQ(tse_units[unit_index].status_timers[4], t4);
+    CHECK_EQ(tse_units[unit_index].status_timers[5], t5);
+}
+
+static void tse_set_mode(int mode)
+{
+    union REGS regs;
+
+    memset(&regs, 0, sizeof(regs));
+    regs.x.eax = (unsigned) mode;
+    int386(0x10, &regs, &regs);
+}
+
+static int tse_archive_present(void)
+{
+    FILE *fp;
+
+    fp = fopen(TSE_ARCHIVE, "rb");
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
+
+/* A call that reaches the poison presentation, in mode 13h with the tick
+   moving under it. */
+static void tse_run_animated(int side)
+{
+    tse_set_mode(TSE_MODE_320X200X256);
+    tse_saved_timer = _dos_getvect(TSE_TIMER_VECTOR);
+    _dos_setvect(TSE_TIMER_VECTOR, tse_timer_isr);
+    fdps_battle_tick_status_effects(side);
+    _dos_setvect(TSE_TIMER_VECTOR, tse_saved_timer);
+    tse_set_mode(TSE_MODE_TEXT);
+}
+
+/* The record offsets the literal displacements name: +0x05, +0x06, +0x22,
+   +0x25, +0x40, +0x42. */
+static void tse_the_record_fields_sit_where_the_loads_read(void)
+{
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, flags), 0x05);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, side), 0x06);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers), 0x22);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, status_timers)
+             + TSE_POISON_SLOT, 0x25);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_current), 0x40);
+    CHECK_EQ((int) offsetof(struct fdps_unit_record, hp_max), 0x42);
+}
+
+/* DEC byte ptr [EAX+0x22] over slots 0..5, each only when non-zero: every
+   running timer loses one, and a stopped one stays 0 rather than wrapping to
+   0xff.  No timer reaches 0, so the cursor mode is never written. */
+static void tse_every_running_timer_counts_down_by_one(void)
+{
+    tse_stage();
+    tse_set_timers(1, 5, 4, 3, 0, 2, 7);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    tse_timers_are(1, 4, 3, 2, 0, 1, 6);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TSE_CURSOR_SENTINEL);
+    CHECK_EQ(tse_units[1].ap, TSE_STALE_AP);
+    CHECK_EQ(tse_units[1].hp_current, TSE_START_HP);
+    tse_unstage();
+}
+
+/* The side and retired tests gate the countdown; the acted bit, 0x80 in the
+   same flags byte, does not.  A record past data_fdps_map_unit_count is never
+   reached. */
+static void tse_only_live_units_of_the_side_count_down(void)
+{
+    tse_stage();
+    tse_set_timers(0, 3, 3, 3, 0, 3, 3);
+    tse_units[0].side = (unsigned char) TSE_OTHER_SIDE;
+    tse_set_timers(1, 3, 3, 3, 0, 3, 3);
+    tse_units[1].flags = (unsigned char) TSE_FLAG_RETIRED;
+    tse_set_timers(2, 3, 3, 3, 0, 3, 3);
+    tse_units[2].flags = (unsigned char) TSE_FLAG_ACTED;
+    tse_set_timers(4, 3, 3, 3, 0, 3, 3);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    tse_timers_are(0, 3, 3, 3, 0, 3, 3);
+    tse_timers_are(1, 3, 3, 3, 0, 3, 3);
+    tse_timers_are(2, 2, 2, 2, 0, 2, 2);
+    tse_timers_are(4, 3, 3, 3, 0, 3, 3);
+    tse_unstage();
+}
+
+/* The side byte is compared whole against the argument: side 0, the enemy,
+   is ticked by a call for side 0 and a side 2 unit is not. */
+static void tse_the_argument_names_the_side_ticked(void)
+{
+    tse_stage();
+    tse_units[1].side = 0;
+    tse_set_timers(1, 2, 0, 0, 0, 0, 0);
+    tse_set_timers(2, 2, 0, 0, 0, 0, 0);
+
+    fdps_battle_tick_status_effects(0);
+
+    tse_timers_are(1, 1, 0, 0, 0, 0, 0);
+    tse_timers_are(2, 2, 0, 0, 0, 0, 0);
+    tse_unstage();
+}
+
+/* A timer that reaches 0 switches the cursor overlay off and calls
+   fdps_unit_recompute_combat_stats for the unit, which drops the blessing out
+   of the derived stats: with nothing equipped ap and dp fall back to their
+   bases.  NOTHING SETS THE MODE BACK, so it is still 0 on return. */
+static void tse_an_expiring_timer_recomputes_and_leaves_the_cursor_off(void)
+{
+    tse_stage();
+    tse_set_timers(1, 1, 1, 0, 0, 0, 0);
+    tse_set_timers(2, 2, 0, 0, 0, 0, 0);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    tse_timers_are(1, 0, 0, 0, 0, 0, 0);
+    CHECK_EQ(tse_units[1].ap, TSE_AP_BASE);
+    CHECK_EQ(tse_units[1].dp, TSE_DP_BASE);
+    CHECK_EQ(tse_units[2].ap, TSE_STALE_AP);
+    CHECK_EQ(tse_units[2].dp, TSE_STALE_DP);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    tse_unstage();
+}
+
+/* The ailment slots expire the same way: paralysis at +0x26 running out also
+   recomputes and leaves the overlay off. */
+static void tse_an_expiring_ailment_also_recomputes(void)
+{
+    tse_stage();
+    tse_set_timers(3, 0, 0, 0, 0, 1, 0);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    tse_timers_are(3, 0, 0, 0, 0, 0, 0);
+    CHECK_EQ(tse_units[3].ap, TSE_AP_BASE);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    tse_unstage();
+}
+
+/* CALL dword ptr [EAX+0x6028c] indexed by the chapter id, once, and BEFORE the
+   countdown: the handler still sees the watched timer at its starting 4. */
+static void tse_the_chapter_handler_runs_once_before_the_countdown(void)
+{
+    tse_stage();
+    tse_watched_unit = 1;
+    tse_set_timers(1, 4, 0, 0, 0, 0, 0);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    CHECK_EQ(tse_handler_calls, 1);
+    CHECK_EQ(tse_other_handler_calls, 0);
+    CHECK_EQ(tse_timer_at_handler, 4);
+    CHECK_EQ(tse_units[1].status_timers[0], 3);
+    tse_unstage();
+}
+
+/* Nothing gates the settlement and the handler: an empty battle still makes
+   the call, and touches no record. */
+static void tse_an_empty_battle_still_calls_the_handler(void)
+{
+    tse_stage();
+    data_fdps_map_unit_count = 0;
+    tse_set_timers(0, 2, 0, 0, 0, 0, 0);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    CHECK_EQ(tse_handler_calls, 1);
+    tse_timers_are(0, 2, 0, 0, 0, 0, 0);
+    tse_unstage();
+}
+
+/* A poison timer on another side's unit, or on a retired unit of this side,
+   deals nothing and is not ticked.  Neither reaches the animation, so this
+   runs without the container: a rebuild that did reach it would fail loudly
+   either way. */
+static void tse_poison_off_the_side_or_retired_deals_nothing(void)
+{
+    tse_stage();
+    tse_units[0].side = (unsigned char) TSE_OTHER_SIDE;
+    tse_set_timers(0, 0, 0, 0, 2, 0, 0);
+    tse_units[1].flags = (unsigned char) TSE_FLAG_RETIRED;
+    tse_set_timers(1, 0, 0, 0, 2, 0, 0);
+
+    fdps_battle_tick_status_effects(TSE_SIDE);
+
+    CHECK_EQ(tse_units[0].hp_current, TSE_START_HP);
+    CHECK_EQ(tse_units[1].hp_current, TSE_START_HP);
+    tse_timers_are(0, 0, 0, 0, 2, 0, 0);
+    tse_timers_are(1, 0, 0, 0, 2, 0, 0);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, -1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, TSE_CURSOR_SENTINEL);
+    tse_unstage();
+}
+
+/* Poison takes max_hp / 10, truncated -- 95 gives 9 -- publishes it in the
+   scratch global, and is dealt BEFORE the handler runs while the poison timer
+   is decremented only after it.  The overlay is switched back to 1 after the
+   presentation and, with no timer expiring, stays 1. */
+static void tse_poison_takes_a_tenth_of_the_maximum_hp(void)
+{
+    if (!tse_archive_present()) {
+        return;
+    }
+    tse_stage();
+    tse_watched_unit = 2;
+    tse_set_timers(2, 0, 0, 0, 2, 0, 0);
+
+    tse_run_animated(TSE_SIDE);
+
+    CHECK_EQ(tse_units[2].hp_current, TSE_START_HP - TSE_MAX_HP_TENTH);
+    CHECK_EQ(tse_hp_at_handler, TSE_START_HP - TSE_MAX_HP_TENTH);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, TSE_MAX_HP_TENTH);
+    tse_timers_are(2, 0, 0, 0, 1, 0, 0);
+    CHECK_EQ(tse_units[1].hp_current, TSE_START_HP);
+    CHECK_EQ(tse_units[3].hp_current, TSE_START_HP);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 1);
+    CHECK_EQ(data_fdps_indicator_queue_count, 0);
+    CHECK_EQ(tse_handler_calls, 1);
+    tse_unstage();
+}
+
+/* Both HP words are zero-extended.  A current HP word of -16 is 65520, loses
+   its tenth of 100 and is stored back as -26 instead of being floored to 0.  A
+   maximum word of -10 is 65526, whose tenth is 6552, so 7000 HP falls to 448;
+   read signed it would be a tenth of -10, -1, and the unit would gain one. */
+static void tse_poison_reads_both_hp_words_unsigned(void)
+{
+    if (!tse_archive_present()) {
+        return;
+    }
+    tse_stage();
+    tse_units[1].hp_current = (short) -16;
+    tse_units[1].hp_max = (short) 100;
+    tse_set_timers(1, 0, 0, 0, 3, 0, 0);
+    tse_units[2].hp_current = (short) 7000;
+    tse_units[2].hp_max = (short) -10;
+    tse_set_timers(2, 0, 0, 0, 3, 0, 0);
+
+    tse_run_animated(TSE_SIDE);
+
+    CHECK_EQ(tse_units[1].hp_current, -26);
+    CHECK_EQ(tse_units[2].hp_current, 448);
+    CHECK_EQ(data_fdps_dialog_last_action_value_param, 6552);
+    tse_timers_are(1, 0, 0, 0, 2, 0, 0);
+    tse_timers_are(2, 0, 0, 0, 2, 0, 0);
+    tse_unstage();
+}
+
+/* A poison of one turn still hits once, then runs out in the countdown: the
+   recompute follows and the overlay the poison arm had put back to 1 is left
+   at 0. */
+static void tse_a_last_turn_of_poison_hits_then_leaves_the_cursor_off(void)
+{
+    if (!tse_archive_present()) {
+        return;
+    }
+    tse_stage();
+    tse_set_timers(3, 0, 0, 0, 1, 0, 0);
+
+    tse_run_animated(TSE_SIDE);
+
+    CHECK_EQ(tse_units[3].hp_current, TSE_START_HP - TSE_MAX_HP_TENTH);
+    tse_timers_are(3, 0, 0, 0, 0, 0, 0);
+    CHECK_EQ(tse_units[3].ap, TSE_AP_BASE);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, 0);
+    tse_unstage();
+}
+
 void run_unitstat_tests(void)
 {
     RUN_TEST(the_record_layout_matches_the_offsets_read);
@@ -3428,4 +3900,17 @@ void run_unitstat_tests(void)
     RUN_TEST(awd_the_cursor_is_parked_on_the_unit);
     RUN_TEST(awd_the_label_floats_over_the_unit);
     RUN_TEST(awd_the_label_follows_the_view_scroll);
+
+    RUN_TEST(tse_the_record_fields_sit_where_the_loads_read);
+    RUN_TEST(tse_every_running_timer_counts_down_by_one);
+    RUN_TEST(tse_only_live_units_of_the_side_count_down);
+    RUN_TEST(tse_the_argument_names_the_side_ticked);
+    RUN_TEST(tse_an_expiring_timer_recomputes_and_leaves_the_cursor_off);
+    RUN_TEST(tse_an_expiring_ailment_also_recomputes);
+    RUN_TEST(tse_the_chapter_handler_runs_once_before_the_countdown);
+    RUN_TEST(tse_an_empty_battle_still_calls_the_handler);
+    RUN_TEST(tse_poison_off_the_side_or_retired_deals_nothing);
+    RUN_TEST(tse_poison_takes_a_tenth_of_the_maximum_hp);
+    RUN_TEST(tse_poison_reads_both_hp_words_unsigned);
+    RUN_TEST(tse_a_last_turn_of_poison_hits_then_leaves_the_cursor_off);
 }

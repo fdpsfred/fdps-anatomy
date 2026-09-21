@@ -12,16 +12,21 @@
  * rand comes from <stdlib.h>; it is a real call in the original -- CALL
  * 00042cf8 -- and not an inline expansion.  memset and the port read inp are
  * the only other library calls, both reached by fdps_unit_award_exp_and_level_up
- * at the bottom of the file, which is also the one routine here that draws,
- * paces itself on the timer and blocks.
+ * near the bottom of the file.  That routine and fdps_battle_tick_status_effects
+ * after it are the two here that draw, pace themselves on the timer and block;
+ * the tick does all of it through callees and makes no library call itself.
  */
 #include <stdlib.h>
 #include <string.h>
 #include <conio.h>
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "anim.h"
 #include "audio.h"
 #include "blit.h"
+#include "chapter.h"
+#include "death.h"
+#include "indicat.h"
 #include "keybd.h"
 #include "mapcur.h"
 #include "mapdraw.h"
@@ -1131,4 +1136,128 @@ void fdps_unit_award_exp_and_level_up(int unit_index)
     data_fdps_battle_pending_xp_credit = 0;
     data_fdps_map_cursor_draw_mode = MAP_CURSOR_PLAIN;
     fdps_flush_keyboard_queue();
+}
+
+/* The six status timers, record +0x22 .. +0x27: the three 神之祝福 buff slots
+   fdps_unit_recompute_combat_stats reads, then poison, paralysis and 封魔咒術.
+   CMP dword ptr [EBP-0x18],0x6 / JL at 0001fb8b bounds the countdown. */
+#define STATUS_TIMER_SLOTS 6
+
+/* Bit 0 of the flags byte at record +0x05, the one fdps_unit_is_retired
+   tests: AND AL,0x1 at 0001fa8b and again at 0001fbb1, inlined here rather
+   than called. */
+#define UNIT_FLAG_RETIRED 0x01
+
+/* Poison takes a tenth of the maximum HP: MOV EBX,0xa / IDIV EBX at
+   0001fab3. */
+#define POISON_DAMAGE_DIVISOR 10
+
+/* The clip played over a poisoned unit, MOV EDX,0x617dc at 0001fb03, and the
+   one unit it is played over, PUSH 0x1 at 0001fb0d.  The literal is handed
+   straight to fdps_play_vfs_animation_over_units, which lets the VFS lookup
+   upper-case it in place, exactly as the item and chapter callers' clip
+   literals are. */
+#define POISON_EFFECT_CLIP "PosEff.saf"
+#define POISON_EFFECT_UNITS 1
+
+/* The damage digit set in Number.cel, PUSH 0x0 at 0001fb1b -- the same glyph
+   base every damage popup uses (indicat.h). */
+#define POISON_GLYPH_BASE 0
+
+/* 0001fa30.  The frame is the plain -4s one: PUSH EBX/ESI/EDI/EBP, MOV
+   EBP,ESP, SUB ESP,0x18, the one argument read from [EBP+0x14] and a bare RET.
+   All three call sites in fdps_battle_advance_turn -- 0001e580, 0001e5c6 and
+   0001e63c -- push one dword, CALL, then ADD ESP,0x4, so the caller cleans;
+   none of them reads EAX, and nothing here sets it.
+
+   Every CALL but one returns nothing the body reads.  The exception is
+   fdps_get_unit_record at 0001fa5f and 0001fb79, whose EAX is stored straight
+   into [EBP-0x14] and is the record pointer for the rest of that pass.
+
+   THE FIRST SWEEP READS BOTH HP WORDS UNSIGNED.  XOR EAX,EAX / MOV AX,word ptr
+   [EBX+0x40] and the same for +0x42, so a word driven negative by an earlier
+   drain is a number near 65535 here: the floor at 0 (CMP / JGE at 0001fad0,
+   the signed test on the 32-bit difference) never fires for it, and the
+   subtraction leaves a smaller negative word standing.  The damage is
+   published in data_fdps_dialog_last_action_value_param and READ BACK from it
+   for both the subtraction and the popup (MOV EAX,[0x00064038] at 0001fac8,
+   PUSH dword ptr [0x00064038] at 0001fb1d).
+
+   THE CURSOR MODE IS NOT PUT BACK BY THE COUNTDOWN.  The poison arm sets
+   data_fdps_map_cursor_draw_mode to 0 and back to 1 around its presentation,
+   but the expiry arm at 0001fbdb stores 0 and nothing after it stores
+   anything, so once any timer of the side runs out the map cursor stays
+   undrawn until some later routine sets the mode.  The store looks pointless
+   -- fdps_unit_recompute_combat_stats draws nothing -- and it is what the
+   next phase looks like.
+
+   THE COUNTDOWN TESTS THE UNIT ONCE PER TIMER, NOT ONCE PER UNIT.  The side
+   and retired checks sit inside the six-slot loop at 0001fb9b, so they are
+   re-read for every slot; the C keeps them there.  The poison timer is one of
+   the six, so it is decremented AFTER its damage has been dealt in the same
+   call, and a poison of one turn still hits once.
+
+   Between the sweeps come the death settlement and the chapter's win/lose
+   test, unconditionally: CALL 0x0001d6c0 at 0001fb3f, then CALL dword ptr
+   [EAX + 0x6028c] indexed by the chapter id at 0001fb50.  No range check on
+   the chapter id. */
+void fdps_battle_tick_status_effects(int side)
+{
+    /* The record of the unit the sweep is on, fdps_get_unit_record's answer. */
+    struct fdps_unit_record *unit;
+    int unit_index;
+    /* The poisoned unit's HP after the damage, before the floor at 0. */
+    int remaining_hp;
+    int max_hp;
+    int timer_slot;
+    /* The one-entry unit list the poison clip is played over. */
+    unsigned char poisoned_unit_id;
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        if (unit->status_timers[POISON_TIMER_SLOT] != 0
+            && (int) unit->side == side
+            && (unit->flags & UNIT_FLAG_RETIRED) == 0) {
+            remaining_hp = (int) (unsigned short) unit->hp_current;
+            max_hp = (int) (unsigned short) unit->hp_max;
+            data_fdps_dialog_last_action_value_param =
+                max_hp / POISON_DAMAGE_DIVISOR;
+            remaining_hp -= data_fdps_dialog_last_action_value_param;
+            if (remaining_hp < 0) {
+                remaining_hp = 0;
+            }
+            unit->hp_current = (short) remaining_hp;
+
+            data_fdps_map_cursor_draw_mode = MAP_CURSOR_HIDDEN;
+            fdps_map_cursor_move_to_unit(unit_index);
+            poisoned_unit_id = (unsigned char) unit_index;
+            fdps_play_vfs_animation_over_units(POISON_EFFECT_UNITS,
+                                               &poisoned_unit_id,
+                                               POISON_EFFECT_CLIP);
+            fdps_show_number_indicator(
+                data_fdps_dialog_last_action_value_param,
+                POISON_GLYPH_BASE, unit_index);
+            fdps_play_indicator_queue();
+            data_fdps_map_cursor_draw_mode = MAP_CURSOR_PLAIN;
+        }
+    }
+
+    fdps_play_death_animation_and_mark_dead();
+    data_fdps_chapter_post_action_handler_table
+        [data_fdps_chapter_current_chapter_id]();
+
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = fdps_get_unit_record(unit_index);
+        for (timer_slot = 0; timer_slot < STATUS_TIMER_SLOTS; timer_slot++) {
+            if ((int) unit->side == side
+                && (unit->flags & UNIT_FLAG_RETIRED) == 0
+                && unit->status_timers[timer_slot] != 0) {
+                unit->status_timers[timer_slot]--;
+                if (unit->status_timers[timer_slot] == 0) {
+                    data_fdps_map_cursor_draw_mode = MAP_CURSOR_HIDDEN;
+                    fdps_unit_recompute_combat_stats(unit_index);
+                }
+            }
+        }
+    }
 }

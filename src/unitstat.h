@@ -14,9 +14,11 @@
  * handed the field and the growth pair directly, because its caller has
  * already resolved both.
  *
- * fdps_unit_award_exp_and_level_up is the exception to everything else here
- * being arithmetic: it is the one blocking, frame-paced routine in the file,
- * and it is where a unit's level actually goes up.
+ * fdps_unit_award_exp_and_level_up and fdps_battle_tick_status_effects are
+ * the exceptions to everything else here being arithmetic: they are the two
+ * blocking, frame-paced routines in the file.  The first is where a unit's
+ * level actually goes up; the second is the once-a-phase poison and
+ * status-timer tick, which walks a whole side rather than one unit index.
  */
 #ifndef UNITSTAT_H
 #define UNITSTAT_H
@@ -380,5 +382,41 @@ extern void fdps_level_up_apply_stat_gain(short *stat,
    does not return until Levup.wav has finished playing. */
 extern void fdps_unit_award_exp_and_level_up(int unit_index);
 #pragma aux fdps_unit_award_exp_and_level_up "*" parm caller [];
+
+/* Ticks the status effects of every unit on one side, once per phase:
+   fdps_battle_advance_turn calls it for side 1 (NPCs), then 0 (enemies), then
+   2 (the player), each right after that side's turn events.
+
+   First, POISON.  Every unit of the side whose poison timer --
+   status_timers[3], record +0x25 -- is running and whose retired bit (flags
+   bit 0, the test fdps_unit_is_retired makes) is clear loses a tenth of its
+   maximum HP, truncated.  Both HP words are read UNSIGNED and the result is
+   floored at 0 as a signed 32-bit value, so a unit whose hp_current word has
+   been driven negative loses its tenth again and is left more negative rather
+   than floored.  The damage is published in
+   data_fdps_dialog_last_action_value_param (gamedata.h) and left there.  Each
+   hit is presented on its own, unit by unit and blocking: the cursor overlay
+   is switched off (data_fdps_map_cursor_draw_mode 0), the cursor is walked
+   onto the unit, PosEff.saf out of MISC.VFS is played over it, the damage
+   figure is queued and played, and the overlay is switched back to 1.
+
+   Then, unconditionally, fdps_play_death_animation_and_mark_dead settles any
+   unit at exactly 0 HP -- on any side, not only this one -- and the current
+   chapter's post-action handler (chapter.h) is called, so a poison death can
+   end the battle from here.  The call does not look at the outcome itself: the
+   caller tests data_fdps_chapter_event_or_battle_end_code afterwards.
+
+   Then, the COUNTDOWN.  For every unit of the side whose retired bit is clear,
+   each of the six status_timers that is non-zero is decremented, poison's
+   included -- so a poison of one turn still hits once.  A timer that reaches 0
+   sets data_fdps_map_cursor_draw_mode to 0 and calls
+   fdps_unit_recompute_combat_stats for that unit, once per expiring timer, and
+   NOTHING PUTS THE CURSOR MODE BACK: after any effect of the side runs out the
+   overlay stays off until some later routine sets it.
+
+   Nothing is returned.  Units are named by index through fdps_get_unit_record
+   and the walk is bounded by data_fdps_map_unit_count, re-read every pass. */
+extern void fdps_battle_tick_status_effects(int side);
+#pragma aux fdps_battle_tick_status_effects "*" parm caller [];
 
 #endif
