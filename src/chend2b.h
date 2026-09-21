@@ -14,8 +14,9 @@
  * before the village phase that follows it.
  *
  * Nothing here owns state.  The roster and the revive are roster.h's, the
- * cut-scene interpreter is icon.h's, the map sweep is btlend.h's and the
- * chapter index is a gamedata.h global.
+ * cut-scene interpreter is icon.h's, the map sweep is btlend.h's, the bag
+ * edits are unititem.h's, the message draw is text.h's and the chapter index
+ * is a gamedata.h global.
  */
 #ifndef CHEND2B_H
 #define CHEND2B_H
@@ -38,5 +39,21 @@
    Table slot 24. */
 extern void fdps_chapter_25_end(void);
 #pragma aux fdps_chapter_25_end "*" parm caller [];
+
+/* Chapter 26's end handler: closes chapter 26 out and hands the game to
+   chapter 27.  Takes nothing and returns nothing.
+
+   First the gift: when 蘭迪斯 (battle unit 0) does not carry 真炎龍劍 (item
+   0xa2) and his bag is not full, text entry 0x18 of the loaded chapter's
+   block is drawn in the standard message colours and 炎龍劍 (item 0x62) goes
+   into his first empty entry.  Either condition failing skips the draw and
+   the add together.  Then, unconditionally and in this order: the enemy side
+   is swept, the battle party is banked (carrying the gift onto the roster),
+   the victory cut-scene Win25.dat is interpreted, the fallen are revived and
+   billed, and the chapter index is set to 26, chapter 27.
+
+   Table slot 25. */
+extern void fdps_chapter_26_end(void);
+#pragma aux fdps_chapter_26_end "*" parm caller [];
 
 #endif

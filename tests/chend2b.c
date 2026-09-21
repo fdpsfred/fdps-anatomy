@@ -25,6 +25,8 @@
  * WIN25.DAT -- the members a slip in either direction would open -- each
  * writing a marker of its own into a different status-timer slot, so a wrong
  * name is a failed assertion rather than a missing member and a silent pass.
+ * WIN25.DAT is also the real member for chapter 26's handler, which is
+ * covered at the end of the file, and WIN26.DAT is its high-side decoy.
  *
  * HOW THE ORDER IS PINNED DOWN RATHER THAN ASSUMED.  Each of the first three
  * steps leaves a mark the step after it would erase or miss:
@@ -91,7 +93,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 3
+#define FIXTURE_MEMBERS 4
 
 /* How many records each staged array holds.  Two of the battle array are all
    the run needs; the spares behind them are there so a write past the end of
@@ -155,6 +157,13 @@
 #define WIN25_MARKER_SLOT 5
 #define WIN25_MARKER_VALUE 97
 
+/* WIN26.DAT's marker: status_timers[3], the slot WIN23.DAT also writes, with
+   a value of its own.  Both members are wrong for both handlers, so a
+   non-zero status_timers[3] is a failure either way. */
+#define WIN26_MARKER_OPERAND 0
+#define WIN26_MARKER_SLOT 3
+#define WIN26_MARKER_VALUE 71
+
 /* The retired bit in the flags byte at record +5, which WIN24.DAT's first
    opcode raises on unit 0 and which the staging raises on the enemy. */
 #define UNIT_FLAG_RETIRED 1
@@ -214,17 +223,26 @@ static unsigned char fixture_win25_dat[] = {
     0x00
 };
 
+/* WIN26.DAT: the right member for neither handler here.  It is what a
+   chapter 26 handler that named the chapter it hands ON to would open, and it
+   writes a value of its own into status_timers[3]. */
+static unsigned char fixture_win26_dat[] = {
+    0x12, RANDIS_UNIT, WIN26_MARKER_OPERAND, WIN26_MARKER_VALUE,
+    0x00
+};
+
 static char *fixture_names[FIXTURE_MEMBERS] = {
-    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT"
+    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT", "WIN26.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
-    fixture_win23_dat, fixture_win24_dat, fixture_win25_dat
+    fixture_win23_dat, fixture_win24_dat, fixture_win25_dat,
+    fixture_win26_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_win23_dat), sizeof(fixture_win24_dat),
-    sizeof(fixture_win25_dat)
+    sizeof(fixture_win25_dat), sizeof(fixture_win26_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -233,6 +251,9 @@ static int run_state = 0;
 
 /* Whether this file created the container, and so whether it may remove it. */
 static int fixture_owned = 0;
+
+/* 0 not attempted, 1 staged by this file, 2 could not be staged. */
+static int fixture_state = 0;
 
 /* Everything the cases assert, captured the instant the handler returned. */
 static unsigned char seen_unit_spells[SPELL_BITMAP_BYTES];
@@ -331,6 +352,16 @@ static int stage_fixture_archive(void)
     return 1;
 }
 
+/* Stages the container once for every run in this file; each later caller
+   gets the first answer. */
+static int ensure_fixture(void)
+{
+    if (fixture_state == 0) {
+        fixture_state = stage_fixture_archive() ? 1 : 2;
+    }
+    return fixture_state == 1;
+}
+
 static int file_present(char *name)
 {
     FILE *fp;
@@ -418,7 +449,7 @@ static void run_handler(void)
     }
     run_state = 2;
 
-    if (!stage_fixture_archive()) {
+    if (!ensure_fixture()) {
         return;
     }
 
@@ -557,6 +588,252 @@ static void chapter_25_advances_the_chapter_index_to_chapter_twenty_six(void)
     CHECK_EQ(seen_chapter_id, CHAPTER_ID_AFTER);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_26_end at 0003b800.
+ *
+ * The handler is chapter 25's four closing steps and store behind a gift with
+ * two gates, so the cases below run it three times, once per way through the
+ * gates, and assert every run against the assembly:
+ *
+ *   0003b80c  PUSH 0xa2 / PUSH 0x0 / CALL 0x00034520   search for 真炎龍劍
+ *   0003b81e  CMP [EBP-0x4],-0x1 / JNZ -> 0003b833 JMP 0003b864
+ *   0003b824  PUSH 0x0 / CALL 0x00025240 / CMP EAX,0x8 / JNZ 0003b835
+ *   0003b835  seven pushes / CALL 0x0001ff60            text entry 0x18
+ *   0003b858  PUSH 0x62 / PUSH 0x0 / CALL 0x00025d20    炎龍劍 into the bag
+ *   0003b864  sweep, writeback, "Win25.dat", revive
+ *   0003b881  MOV dword ptr [0x00069cf4],0x1a
+ *
+ * Runs:
+ *   GIFT     one carried item that is not 真炎龍劍 and seven empty entries:
+ *            both gates pass, 炎龍劍 lands in entry 1.
+ *   HAS_TRUE 真炎龍劍 carried in entry 0 and seven empty entries: the first
+ *            gate fails with room to spare, so an add here is the search gate
+ *            missing, not the count gate.
+ *   FULL     eight carried items, none of them 真炎龍劍: the second gate fails
+ *            and the bag is unchanged.
+ *
+ * WHETHER THE LINE IS DRAWN IS NOT ASSERTED.  fdps_draw_text takes its whole
+ * effect through pixels at the VGA aperture; the staged text block gives every
+ * entry one lone terminator so the draw walks it and paints nothing, the
+ * protocol the chapter event covers use.  The FULL run therefore pins only
+ * that the count gate refuses the add and that its jump lands on the closing
+ * steps rather than past them.
+ *
+ * The gift is asserted on the ROSTER copy as well as on the live record: the
+ * writeback copies the record whole, so 炎龍劍 on the roster is the gift having
+ * run before the writeback.  Every run also asserts the closing steps -- the
+ * enemy swept, Win25.dat interpreted and neither neighbour, nobody billed and
+ * the index left at 26 -- because the two skip paths share them with the gift
+ * path.
+ * ------------------------------------------------------------------------ */
+
+#define CH26_GIFT_RUN 0
+#define CH26_HAS_TRUE_RUN 1
+#define CH26_FULL_RUN 2
+#define CH26_RUNS 3
+
+/* The inventory entry encoding (src/unititem.c): flag byte then item id; an
+   empty entry is 0x80 / 0xff, a carried, unequipped one has flag 0 -- the
+   flag fdps_unit_add_item stores. */
+#define CH26_INVENTORY_ENTRIES 8
+#define CH26_EMPTY_FLAG 0x80
+#define CH26_EMPTY_ID 0xff
+#define CH26_CARRIED_FLAG 0x00
+
+/* assets/items.md: 0x62 炎龍劍, 0xa2 真炎龍劍, and 0xa3 an item that is
+   neither, so the search has something to walk past. */
+#define CH26_DRAGON_SWORD 0x62
+#define CH26_TRUE_DRAGON_SWORD 0xa2
+#define CH26_OTHER_ITEM 0xa3
+
+/* The entry the gift lands in on the GIFT run: the add takes the first entry
+   flagged empty, and entry 0 is carried. */
+#define CH26_GIFT_ENTRY 1
+
+/* The index chapter 26's handler leaves: 0x1a at 0003b881, chapter 27. */
+#define CH26_CHAPTER_ID_AFTER 26
+
+/* A text block whose every entry up to 0x18 names one lone terminator. */
+#define CH26_TEXT_IDS 0x19
+#define CH26_TEXT_EMPTY_AT 0x40
+#define CH26_TEXT_BLOCK_BYTES (CH26_TEXT_EMPTY_AT + 2)
+#define CH26_TEXT_END (-1)
+
+struct ch26_snapshot {
+    int state;
+    unsigned char unit_bag[CH26_INVENTORY_ENTRIES * 2];
+    unsigned char slot_bag[CH26_INVENTORY_ENTRIES * 2];
+    unsigned char unit_timers[STATUS_TIMER_COUNT];
+    int unit_flags;
+    int enemy_hp_current;
+    int chapter_id;
+    int party_gold;
+};
+
+static struct ch26_snapshot ch26_seen[CH26_RUNS];
+static unsigned char ch26_text_block[CH26_TEXT_BLOCK_BYTES];
+
+static void ch26_stage_text(void)
+{
+    int text_id;
+
+    memset(ch26_text_block, 0, sizeof(ch26_text_block));
+    *(short *) (ch26_text_block + CH26_TEXT_EMPTY_AT) = (short) CH26_TEXT_END;
+    for (text_id = 0; text_id < CH26_TEXT_IDS; text_id++) {
+        *(short *) (ch26_text_block + text_id * 2) =
+            (short) CH26_TEXT_EMPTY_AT;
+    }
+    data_fdps_current_chapter_text_ptr = ch26_text_block;
+}
+
+static void ch26_set_entry(int entry, int flag, int item_id)
+{
+    unit_image[RANDIS_UNIT].inventory_slots[entry * 2] = (unsigned char) flag;
+    unit_image[RANDIS_UNIT].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+static void ch26_stage_bag(int run)
+{
+    int entry;
+
+    for (entry = 0; entry < CH26_INVENTORY_ENTRIES; entry++) {
+        ch26_set_entry(entry, CH26_EMPTY_FLAG, CH26_EMPTY_ID);
+    }
+    if (run == CH26_GIFT_RUN) {
+        ch26_set_entry(0, CH26_CARRIED_FLAG, CH26_OTHER_ITEM);
+    } else if (run == CH26_HAS_TRUE_RUN) {
+        ch26_set_entry(0, CH26_CARRIED_FLAG, CH26_TRUE_DRAGON_SWORD);
+    } else {
+        for (entry = 0; entry < CH26_INVENTORY_ENTRIES; entry++) {
+            ch26_set_entry(entry, CH26_CARRIED_FLAG, CH26_OTHER_ITEM);
+        }
+    }
+}
+
+/* Runs chapter 26's handler once for the given bag and records what it left
+   behind; a second call for the same run returns the first answer. */
+static struct ch26_snapshot *ch26_run(int run)
+{
+    struct ch26_snapshot *seen;
+    int i;
+
+    seen = &ch26_seen[run];
+    if (seen->state != 0) {
+        return seen;
+    }
+    seen->state = 2;
+
+    if (!ensure_fixture()) {
+        return seen;
+    }
+
+    stage_globals();
+    ch26_stage_text();
+    ch26_stage_bag(run);
+
+    fdps_chapter_26_end();
+
+    for (i = 0; i < CH26_INVENTORY_ENTRIES * 2; i++) {
+        seen->unit_bag[i] = unit_image[RANDIS_UNIT].inventory_slots[i];
+        seen->slot_bag[i] =
+            roster_image[RANDIS_ROSTER_SLOT].inventory_slots[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        seen->unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+    }
+    seen->unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    seen->enemy_hp_current = (int) unit_image[ENEMY_UNIT].hp_current;
+    seen->chapter_id = data_fdps_chapter_current_chapter_id;
+    seen->party_gold = data_fdps_shared_party_total_gold;
+    seen->state = 1;
+    return seen;
+}
+
+/* The closing steps every run shares: the enemy swept, WIN25.DAT's marker on
+   the live record and neither neighbour's (WIN24.DAT would also have retired
+   unit 0), nobody billed, the index at 26 and not the 25 the script name
+   would suggest. */
+static void ch26_check_closing_steps(struct ch26_snapshot *seen)
+{
+    CHECK_EQ(seen->enemy_hp_current, 0);
+    CHECK_EQ(seen->unit_timers[WIN25_MARKER_SLOT], WIN25_MARKER_VALUE);
+    CHECK_EQ(seen->unit_timers[WIN24_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_timers[WIN26_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_flags, 0);
+    CHECK_EQ(seen->party_gold, PARTY_GOLD_BEFORE);
+    CHECK_EQ(seen->chapter_id, CH26_CHAPTER_ID_AFTER);
+}
+
+/* Both gates pass: 炎龍劍 goes into entry 1, the first empty one, carried
+   and unequipped, on the live record AND on the roster copy -- the latter
+   only because the gift runs before the writeback.  Entry 0 keeps its item
+   and entry 2 stays empty. */
+static void chapter_26_gives_the_dragon_sword_when_randis_lacks_the_true_one(void)
+{
+    struct ch26_snapshot *seen;
+
+    seen = ch26_run(CH26_GIFT_RUN);
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->unit_bag[CH26_GIFT_ENTRY * 2], CH26_CARRIED_FLAG);
+    CHECK_EQ(seen->unit_bag[CH26_GIFT_ENTRY * 2 + 1], CH26_DRAGON_SWORD);
+    CHECK_EQ(seen->slot_bag[CH26_GIFT_ENTRY * 2], CH26_CARRIED_FLAG);
+    CHECK_EQ(seen->slot_bag[CH26_GIFT_ENTRY * 2 + 1], CH26_DRAGON_SWORD);
+    CHECK_EQ(seen->unit_bag[1], CH26_OTHER_ITEM);
+    CHECK_EQ(seen->unit_bag[(CH26_GIFT_ENTRY + 1) * 2], CH26_EMPTY_FLAG);
+    ch26_check_closing_steps(seen);
+}
+
+/* 真炎龍劍 carried, seven entries free: the search gate alone refuses the
+   gift, so every entry behind it is still empty on both copies -- no 炎龍劍
+   in entry 1 -- and the closing steps still run. */
+static void chapter_26_gives_nothing_when_randis_carries_the_true_sword(void)
+{
+    struct ch26_snapshot *seen;
+    int entry;
+
+    seen = ch26_run(CH26_HAS_TRUE_RUN);
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->unit_bag[0], CH26_CARRIED_FLAG);
+    CHECK_EQ(seen->unit_bag[1], CH26_TRUE_DRAGON_SWORD);
+    for (entry = 1; entry < CH26_INVENTORY_ENTRIES; entry++) {
+        CHECK_EQ(seen->unit_bag[entry * 2], CH26_EMPTY_FLAG);
+        CHECK_EQ(seen->unit_bag[entry * 2 + 1], CH26_EMPTY_ID);
+        CHECK_EQ(seen->slot_bag[entry * 2], CH26_EMPTY_FLAG);
+    }
+    ch26_check_closing_steps(seen);
+}
+
+/* A full bag without 真炎龍劍: the count gate refuses, no entry on either
+   copy holds 炎龍劍, and the jump lands on the closing steps rather than past
+   them. */
+static void chapter_26_gives_nothing_when_the_bag_is_full(void)
+{
+    struct ch26_snapshot *seen;
+    int entry;
+
+    seen = ch26_run(CH26_FULL_RUN);
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    for (entry = 0; entry < CH26_INVENTORY_ENTRIES; entry++) {
+        CHECK_EQ(seen->unit_bag[entry * 2], CH26_CARRIED_FLAG);
+        CHECK_EQ(seen->unit_bag[entry * 2 + 1], CH26_OTHER_ITEM);
+        CHECK_EQ(seen->slot_bag[entry * 2 + 1], CH26_OTHER_ITEM);
+    }
+    ch26_check_closing_steps(seen);
+}
+
 /* The fixture container goes again, so that nothing this file wrote outlives
    its run and the next file that wants that name finds it free. */
 static void the_fixture_container_is_removed(void)
@@ -578,5 +855,8 @@ void run_chend2b_tests(void)
     RUN_TEST(chapter_25_victory_cutscene_is_win24_dat);
     RUN_TEST(chapter_25_revive_charges_nothing_when_nobody_fell);
     RUN_TEST(chapter_25_advances_the_chapter_index_to_chapter_twenty_six);
+    RUN_TEST(chapter_26_gives_the_dragon_sword_when_randis_lacks_the_true_one);
+    RUN_TEST(chapter_26_gives_nothing_when_randis_carries_the_true_sword);
+    RUN_TEST(chapter_26_gives_nothing_when_the_bag_is_full);
     RUN_TEST(the_fixture_container_is_removed);
 }
