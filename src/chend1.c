@@ -1,7 +1,7 @@
 /* chend1.c -- the per-chapter end handlers, chapters 1 to 11: what the game
  * does at the moment a chapter's battle has been won, before the village
- * phase that follows it.  Chapters 12 to 15 are chend1b.c and chapters 16 to
- * 30 are chend2.c.
+ * phase that follows it.  Chapters 12 to 15 are chend1b.c, 16 to 24 are
+ * chend2.c and 25 to 30 are chend2b.c.
  *
  * These are slots of the handler table based at 00060304, indexed by the
  * 0-based chapter id and called only through it, so the dispatcher in main.c

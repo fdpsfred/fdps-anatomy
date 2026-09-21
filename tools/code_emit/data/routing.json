@@ -3120,7 +3120,7 @@
     },
     "0003b720": {
       "name": "fdps_chapter_25_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 41,
       "body_size": 56,
       "status": "pending"
@@ -3134,7 +3134,7 @@
     },
     "0003b800": {
       "name": "fdps_chapter_26_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 77,
       "body_size": 146,
       "status": "pending"
@@ -3148,7 +3148,7 @@
     },
     "0003b8f0": {
       "name": "fdps_chapter_27_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 92,
       "body_size": 159,
       "status": "pending"
@@ -3162,7 +3162,7 @@
     },
     "0003b9b0": {
       "name": "fdps_chapter_28_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 44,
       "body_size": 56,
       "status": "pending"
@@ -3176,7 +3176,7 @@
     },
     "0003ba10": {
       "name": "fdps_chapter_29_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 42,
       "body_size": 56,
       "status": "pending"
@@ -3190,7 +3190,7 @@
     },
     "0003ba80": {
       "name": "fdps_chapter_30_end",
-      "target": "chend2.c",
+      "target": "chend2b.c",
       "est_lines": 70,
       "body_size": 94,
       "status": "pending"
@@ -3829,7 +3829,7 @@
       "ref_count": 122,
       "reader_files": [
         "btlend.c",
-        "chend2.c",
+        "chend2b.c",
         "chevt1.c",
         "chevt2.c",
         "chevt2b.c",
@@ -3849,7 +3849,7 @@
         "vilmenu.c",
         "vilshop.c"
       ],
-      "reason": "read from 20 files: btlend.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, ending.c, icon.c, main.c, rsrc.c, vilbar.c, vilmenu.c, vilshop.c",
+      "reason": "read from 20 files: btlend.c, chend2b.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost1.c, chpost2.c, death.c, ending.c, icon.c, main.c, rsrc.c, vilbar.c, vilmenu.c, vilshop.c",
       "status": "pending"
     },
     "00060131": {
@@ -4047,7 +4047,7 @@
       "ref_count": 13,
       "reader_files": [
         "btlmenu.c",
-        "chend2.c",
+        "chend2b.c",
         "mapcur.c",
         "menu.c",
         "save.c",
@@ -4055,7 +4055,7 @@
         "title.c",
         "village.c"
       ],
-      "reason": "read from 8 files: btlmenu.c, chend2.c, mapcur.c, menu.c, save.c, savefile.c, title.c, village.c",
+      "reason": "read from 8 files: btlmenu.c, chend2b.c, mapcur.c, menu.c, save.c, savefile.c, title.c, village.c",
       "status": "pending"
     },
     "00060159": {
@@ -4070,13 +4070,13 @@
         "btlact.c",
         "btlmenu.c",
         "btlturn.c",
-        "chend2.c",
+        "chend2b.c",
         "icon.c",
         "mapcur.c",
         "statwin.c",
         "title.c"
       ],
-      "reason": "read from 8 files: btlact.c, btlmenu.c, btlturn.c, chend2.c, icon.c, mapcur.c, statwin.c, title.c",
+      "reason": "read from 8 files: btlact.c, btlmenu.c, btlturn.c, chend2b.c, icon.c, mapcur.c, statwin.c, title.c",
       "status": "pending"
     },
     "0006015c": {
@@ -5671,13 +5671,13 @@
       "ref_count": 10,
       "reader_files": [
         "btlmenu.c",
-        "chend2.c",
+        "chend2b.c",
         "main.c",
         "title.c",
         "vilbar.c",
         "village.c"
       ],
-      "reason": "read from 6 files: btlmenu.c, chend2.c, main.c, title.c, vilbar.c, village.c",
+      "reason": "read from 6 files: btlmenu.c, chend2b.c, main.c, title.c, vilbar.c, village.c",
       "status": "pending"
     },
     "000643ec": {
@@ -6203,6 +6203,7 @@
         "chend1.c",
         "chend1b.c",
         "chend2.c",
+        "chend2b.c",
         "chevt1.c",
         "chevt2.c",
         "chevt2b.c",
@@ -6229,7 +6230,7 @@
         "village.c",
         "vilmenu.c"
       ],
-      "reason": "read from 32 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend1b.c, chend2.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, ending.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
+      "reason": "read from 33 files: btlend.c, btlmenu.c, btlturn.c, chapter.c, chend1.c, chend1b.c, chend2.c, chend2b.c, chevt1.c, chevt2.c, chevt2b.c, chevt3.c, chevt4.c, chevt5.c, chevt5b.c, chevt6.c, chpost2.c, ending.c, icon.c, main.c, menu.c, palcycle.c, roster.c, rsrc.c, save.c, savefile.c, shop.c, shopdraw.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c",
       "status": "pending"
     },
     "00069cf8": {
@@ -9722,7 +9723,7 @@
         "fdps_chapter_25_end"
       ],
       "carried_in": [
-        "chend2.c"
+        "chend2b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"
@@ -9736,7 +9737,7 @@
         "fdps_chapter_26_end"
       ],
       "carried_in": [
-        "chend2.c"
+        "chend2b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"
@@ -9750,7 +9751,7 @@
         "fdps_chapter_29_end"
       ],
       "carried_in": [
-        "chend2.c"
+        "chend2b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"
@@ -9764,7 +9765,7 @@
         "fdps_chapter_30_end"
       ],
       "carried_in": [
-        "chend2.c"
+        "chend2b.c"
       ],
       "reason": "A string literal, not a named global. It comes back as the literal in the statement that uses it; naming it would invent a symbol the original never had. See rebuild_info/naming.md.",
       "status": "skip"

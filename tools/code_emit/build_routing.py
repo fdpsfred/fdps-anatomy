@@ -159,12 +159,29 @@ def chapter_end_file(n):
     It is not chend3.c, because chend2.c is already chapters 16 to 30: the
     letter keeps the family in chapter order, as it does for chevt2b.c,
     chevt5b.c, chinit1b.c and chinit2b.c.
+
+    chend2b.c is that same cut made a second time, after the chapter the
+    chinit2b.c and chpost3.c cuts fall after.  Chapters 16 to 30 were one file,
+    which reached 1015 emitted lines with chapter 24's handler and six more
+    still to come.  Chapters 25 to 30 are the run-in to the ending and the only
+    handlers in the family that can end the game: chapter 27's gates the hidden
+    chapters on two carried items and, without them, plays the ending sequence
+    and raises the return-to-title request instead of storing a next index;
+    chapter 30's does the same unconditionally, because there is no chapter 31.
+    Chapters 16 to 24 are the ones that only ever hand the game on, and the cut
+    keeps their one pair together: chapters 19 and 24 are the second and third
+    妖刀 duels, the only two of chapters 16 to 30 that put the party back on
+    its maxima before banking it, and they share that recovery's shape and its
+    note.  The nine already emitted stay where they are, so the cut moves no
+    code.
     """
     if n <= 11:
         return "chend1.c"
     if n <= 15:
         return "chend1b.c"
-    return "chend2.c"
+    if n <= 24:
+        return "chend2.c"
+    return "chend2b.c"
 
 
 def chapter_post_action_file(n):

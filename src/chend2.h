@@ -1,5 +1,8 @@
-/* chend2.h -- the per-chapter end handlers, chapters 16 to 30.  Chapters 1 to
- * 11 are chend1.h and chapters 12 to 15 are chend1b.h.
+/* chend2.h -- the per-chapter end handlers, chapters 16 to 24.  Chapters 1 to
+ * 11 are chend1.h, 12 to 15 are chend1b.h and 25 to 30 are chend2b.h.
+ * Chapter 24 is where this file ends because every handler here only ever
+ * hands the game on to the next chapter; chapters 27 and 30, in chend2b.h, are
+ * the two that can end the game instead.
  *
  * Every entry point here is a slot of the handler table based at 00060304, and
  * the slot number is the 0-based chapter id.  The table is reached indirectly:

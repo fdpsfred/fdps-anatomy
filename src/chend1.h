@@ -1,5 +1,5 @@
 /* chend1.h -- the per-chapter end handlers, chapters 1 to 11.  Chapters 12 to
- * 15 are chend1b.h and chapters 16 to 30 are chend2.h.
+ * 15 are chend1b.h, 16 to 24 are chend2.h and 25 to 30 are chend2b.h.
  *
  * Every entry point here is a slot of the handler table based at 00060304, and
  * the slot number is the 0-based chapter id.  The table is reached indirectly:

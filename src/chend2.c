@@ -1,7 +1,10 @@
-/* chend2.c -- the per-chapter end handlers, chapters 16 to 30: what the game
+/* chend2.c -- the per-chapter end handlers, chapters 16 to 24: what the game
  * does at the moment a chapter's battle has been won, before the village phase
- * that follows it.  Chapters 1 to 11 are chend1.c and chapters 12 to 15 are
- * chend1b.c.
+ * that follows it.  Chapters 1 to 11 are chend1.c, 12 to 15 are chend1b.c and
+ * 25 to 30 are chend2b.c.  Chapter 24 is where this file ends because every
+ * handler here only ever hands the game on to the next chapter, while two of
+ * the six after it can end the game, and because it keeps the second and third
+ * duel-recovery handlers, chapters 19 and 24, in one file.
  *
  * These are slots of the handler table based at 00060304, indexed by the
  * 0-based chapter id and called only through it, so the dispatcher in main.c
