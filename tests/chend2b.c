@@ -26,7 +26,8 @@
  * writing a marker of its own into a different status-timer slot, so a wrong
  * name is a failed assertion rather than a missing member and a silent pass.
  * WIN25.DAT is also the real member for chapter 26's handler, which is
- * covered at the end of the file, and WIN26.DAT is its high-side decoy.
+ * covered further down, and WIN26.DAT is its high-side decoy.  WINGA26.DAT,
+ * the fifth member, is chapter 27's hidden-route scene, covered last.
  *
  * HOW THE ORDER IS PINNED DOWN RATHER THAN ASSUMED.  Each of the first three
  * steps leaves a mark the step after it would erase or miss:
@@ -93,7 +94,7 @@
 #define VFS_ENTRY_BYTES 26
 #define VFS_NAME_FIELD_BYTES 13
 #define VFS_SIGNATURE_BYTES 24
-#define FIXTURE_MEMBERS 4
+#define FIXTURE_MEMBERS 5
 
 /* How many records each staged array holds.  Two of the battle array are all
    the run needs; the spares behind them are there so a write past the end of
@@ -231,18 +232,31 @@ static unsigned char fixture_win26_dat[] = {
     0x00
 };
 
+/* WINGA26.DAT, chapter 27's hidden-route scene: a marker of its own in
+   status_timers[4], a value none of the other four members writes.  It
+   retires nobody, so the marker is its only trace. */
+#define WINGA26_MARKER_OPERAND 1
+#define WINGA26_MARKER_SLOT 4
+#define WINGA26_MARKER_VALUE 61
+
+static unsigned char fixture_winga26_dat[] = {
+    0x12, RANDIS_UNIT, WINGA26_MARKER_OPERAND, WINGA26_MARKER_VALUE,
+    0x00
+};
+
 static char *fixture_names[FIXTURE_MEMBERS] = {
-    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT", "WIN26.DAT"
+    "WIN23.DAT", "WIN24.DAT", "WIN25.DAT", "WIN26.DAT", "WINGA26.DAT"
 };
 
 static unsigned char *fixture_bytes[FIXTURE_MEMBERS] = {
     fixture_win23_dat, fixture_win24_dat, fixture_win25_dat,
-    fixture_win26_dat
+    fixture_win26_dat, fixture_winga26_dat
 };
 
 static int fixture_lengths[FIXTURE_MEMBERS] = {
     sizeof(fixture_win23_dat), sizeof(fixture_win24_dat),
-    sizeof(fixture_win25_dat), sizeof(fixture_win26_dat)
+    sizeof(fixture_win25_dat), sizeof(fixture_win26_dat),
+    sizeof(fixture_winga26_dat)
 };
 
 /* 0 not attempted, 1 the run happened and the snapshot below is good,
@@ -834,6 +848,243 @@ static void chapter_26_gives_nothing_when_the_bag_is_full(void)
     ch26_check_closing_steps(seen);
 }
 
+/* ------------------------------------------------------------------------
+ * fdps_chapter_27_end at 0003b8f0.
+ *
+ *   0003b8fc  CALL 0x00039e10                         sweep
+ *   0003b901  PUSH 0xb3 / PUSH 0x0 / CALL 0x00034520  -> [EBP-0x8]
+ *   0003b913  PUSH 0xdc / PUSH 0x3 / CALL 0x00034520  -> [EBP-0x4]
+ *   0003b925  either == -1 -> ending route at 0003b96e
+ *   0003b933  remove (0, [EBP-0x8]), remove (3, [EBP-0x4]),
+ *             "WinGA26.dat", CALL 0x00039e70, [0x00069cf4] = 0x1b
+ *   0003b96e  "Win26.dat", CALL 0x0001ba40, byte [0x000643eb] = 1
+ *
+ * ONLY THE HIDDEN ROUTE IS RUN.  The ending route calls
+ * fdps_play_ending_credit_roll, which reads the blend tables from disk
+ * without checking the handle and then plays the whole character gallery and
+ * the End movie through the VGA aperture and the CD; none of that can run in a
+ * test image, so the three runs that would take the ending route -- either
+ * item missing, or both -- are not made here.  What this file pins down for
+ * the hidden route is that both removals, the scene, the revive and the store
+ * happened, with the right units and the right items.
+ *
+ * THE BAGS ARE BUILT SO A WRONG UNIT OR A WRONG ITEM SHOWS.  蘭迪斯 carries
+ * [0xa3, 魔精石碎片, 反禁制器] and 法蓮娜 carries [反禁制器, 魔精石碎片], so a
+ * handler that searched each unit for the other's item, or swapped the unit
+ * indices, removes a different entry and leaves a different bag behind than
+ * the one asserted:
+ *
+ *   right   蘭迪斯 [0xa3, 反禁制器, empty]   法蓮娜 [魔精石碎片, empty]
+ *
+ * Units 1 and 2 stand between them so index 3 is really the fourth record.
+ * ------------------------------------------------------------------------ */
+
+#define CH27_FARENA_UNIT 3
+#define CH27_UNIT_COUNT 4
+
+#define CH27_MANA_SHARD 0xb3
+#define CH27_SEAL_BREAKER 0xdc
+
+/* The index the hidden route leaves: 0x1b at 0003b962, chapter 28. */
+#define CH27_CHAPTER_ID_AFTER 27
+
+/* The hit points given to the filler party units 2 and 3.  Not 0, because the
+   death pass at the end of the sweep collects every unretired unit at 0 HP
+   whatever its side, and its animation cannot run in a test image. */
+#define CH27_FILLER_HP 30
+
+struct ch27_snapshot {
+    int state;
+    unsigned char randis_bag[CH26_INVENTORY_ENTRIES * 2];
+    unsigned char farena_bag[CH26_INVENTORY_ENTRIES * 2];
+    unsigned char unit_timers[STATUS_TIMER_COUNT];
+    int unit_flags;
+    int enemy_hp_current;
+    int roster_slot_level;
+    int chapter_id;
+    int quit_requested;
+    int party_gold;
+};
+
+static struct ch27_snapshot ch27_seen;
+
+static void ch27_set_entry(int unit_index, int entry, int flag, int item_id)
+{
+    unit_image[unit_index].inventory_slots[entry * 2] = (unsigned char) flag;
+    unit_image[unit_index].inventory_slots[entry * 2 + 1] =
+        (unsigned char) item_id;
+}
+
+static void ch27_stage(void)
+{
+    int entry;
+
+    unit_image[2].side = PLAYER_SIDE;
+    unit_image[2].char_id = ENEMY_CHAR_ID + 1;
+    unit_image[2].hp_current = CH27_FILLER_HP;
+    unit_image[CH27_FARENA_UNIT].side = PLAYER_SIDE;
+    unit_image[CH27_FARENA_UNIT].char_id = ENEMY_CHAR_ID + 2;
+    unit_image[CH27_FARENA_UNIT].hp_current = CH27_FILLER_HP;
+    data_fdps_map_unit_count = CH27_UNIT_COUNT;
+
+    for (entry = 0; entry < CH26_INVENTORY_ENTRIES; entry++) {
+        ch27_set_entry(RANDIS_UNIT, entry, CH26_EMPTY_FLAG, CH26_EMPTY_ID);
+        ch27_set_entry(CH27_FARENA_UNIT, entry, CH26_EMPTY_FLAG,
+                       CH26_EMPTY_ID);
+    }
+    ch27_set_entry(RANDIS_UNIT, 0, CH26_CARRIED_FLAG, CH26_OTHER_ITEM);
+    ch27_set_entry(RANDIS_UNIT, 1, CH26_CARRIED_FLAG, CH27_MANA_SHARD);
+    ch27_set_entry(RANDIS_UNIT, 2, CH26_CARRIED_FLAG, CH27_SEAL_BREAKER);
+    ch27_set_entry(CH27_FARENA_UNIT, 0, CH26_CARRIED_FLAG, CH27_SEAL_BREAKER);
+    ch27_set_entry(CH27_FARENA_UNIT, 1, CH26_CARRIED_FLAG, CH27_MANA_SHARD);
+
+    data_fdps_shared_quit_game_requested = 0;
+}
+
+/* Runs chapter 27's handler once, down the hidden route, and records what it
+   left behind. */
+static struct ch27_snapshot *ch27_run(void)
+{
+    struct ch27_snapshot *seen;
+    int i;
+
+    seen = &ch27_seen;
+    if (seen->state != 0) {
+        return seen;
+    }
+    seen->state = 2;
+
+    if (!ensure_fixture()) {
+        return seen;
+    }
+
+    stage_globals();
+    ch27_stage();
+
+    fdps_chapter_27_end();
+
+    for (i = 0; i < CH26_INVENTORY_ENTRIES * 2; i++) {
+        seen->randis_bag[i] = unit_image[RANDIS_UNIT].inventory_slots[i];
+        seen->farena_bag[i] = unit_image[CH27_FARENA_UNIT].inventory_slots[i];
+    }
+    for (i = 0; i < STATUS_TIMER_COUNT; i++) {
+        seen->unit_timers[i] = unit_image[RANDIS_UNIT].status_timers[i];
+    }
+    seen->unit_flags = (int) unit_image[RANDIS_UNIT].flags;
+    seen->enemy_hp_current = (int) unit_image[ENEMY_UNIT].hp_current;
+    seen->roster_slot_level = (int) roster_image[RANDIS_ROSTER_SLOT].level;
+    seen->chapter_id = data_fdps_chapter_current_chapter_id;
+    seen->quit_requested = (int) data_fdps_shared_quit_game_requested;
+    seen->party_gold = data_fdps_shared_party_total_gold;
+    seen->state = 1;
+    return seen;
+}
+
+/* The sweep runs on the hidden route too: the enemy's hit points are 0. */
+static void chapter_27_sweeps_the_enemy_side(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->enemy_hp_current, 0);
+}
+
+/* 魔精石碎片 leaves 蘭迪斯's bag from the slot the first search found (entry
+   1), the 反禁制器 behind it closes up into entry 1 and entry 2 goes empty;
+   the 0xa3 in entry 0 is untouched.  The 反禁制器 he also carries is NOT
+   taken: the second search is on unit 3. */
+static void chapter_27_spends_the_mana_shard_from_randis(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->randis_bag[1], CH26_OTHER_ITEM);
+    CHECK_EQ(seen->randis_bag[2], CH26_CARRIED_FLAG);
+    CHECK_EQ(seen->randis_bag[3], CH27_SEAL_BREAKER);
+    CHECK_EQ(seen->randis_bag[4], CH26_EMPTY_FLAG);
+}
+
+/* 反禁制器 leaves 法蓮娜's bag (unit 3) from entry 0, the slot the second
+   search returned, and the 魔精石碎片 she also carries closes up into entry 0
+   and is kept; entry 1 goes empty. */
+static void chapter_27_spends_the_seal_breaker_from_farena(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->farena_bag[0], CH26_CARRIED_FLAG);
+    CHECK_EQ(seen->farena_bag[1], CH27_MANA_SHARD);
+    CHECK_EQ(seen->farena_bag[2], CH26_EMPTY_FLAG);
+}
+
+/* The hidden route's scene is WinGA26.dat: its marker 61 is in
+   status_timers[4], and neither Win26.dat's 71 in status_timers[3] -- the
+   ending route's scene -- nor any other member's mark is there. */
+static void chapter_27_hidden_route_plays_winga26_dat(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->unit_timers[WINGA26_MARKER_SLOT], WINGA26_MARKER_VALUE);
+    CHECK_EQ(seen->unit_timers[WIN26_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_timers[WIN25_MARKER_SLOT], 0);
+    CHECK_EQ(seen->unit_flags, 0);
+}
+
+/* No roster write-back runs anywhere in this handler: roster slot 0 still
+   carries the 0xa5 filler as its level where a write-back would have copied
+   the battle record's 3. */
+static void chapter_27_does_not_bank_the_party(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->roster_slot_level, ROSTER_FILLER);
+}
+
+/* The hidden route hands the game on to chapter 28 -- the index is the store's
+   27, from a start of 4 -- and does not raise the return-to-title flag.  The
+   revive finds no roster member at 0 HP and bills nothing. */
+static void chapter_27_hidden_route_advances_to_chapter_twenty_eight(void)
+{
+    struct ch27_snapshot *seen;
+
+    seen = ch27_run();
+    CHECK_EQ(seen->state, 1);
+    if (seen->state != 1) {
+        return;
+    }
+
+    CHECK_EQ(seen->chapter_id, CH27_CHAPTER_ID_AFTER);
+    CHECK_EQ(seen->quit_requested, 0);
+    CHECK_EQ(seen->party_gold, PARTY_GOLD_BEFORE);
+}
+
 /* The fixture container goes again, so that nothing this file wrote outlives
    its run and the next file that wants that name finds it free. */
 static void the_fixture_container_is_removed(void)
@@ -858,5 +1109,11 @@ void run_chend2b_tests(void)
     RUN_TEST(chapter_26_gives_the_dragon_sword_when_randis_lacks_the_true_one);
     RUN_TEST(chapter_26_gives_nothing_when_randis_carries_the_true_sword);
     RUN_TEST(chapter_26_gives_nothing_when_the_bag_is_full);
+    RUN_TEST(chapter_27_sweeps_the_enemy_side);
+    RUN_TEST(chapter_27_spends_the_mana_shard_from_randis);
+    RUN_TEST(chapter_27_spends_the_seal_breaker_from_farena);
+    RUN_TEST(chapter_27_hidden_route_plays_winga26_dat);
+    RUN_TEST(chapter_27_does_not_bank_the_party);
+    RUN_TEST(chapter_27_hidden_route_advances_to_chapter_twenty_eight);
     RUN_TEST(the_fixture_container_is_removed);
 }

@@ -15,8 +15,9 @@
  *
  * Nothing here owns state.  The roster and the revive are roster.h's, the
  * cut-scene interpreter is icon.h's, the map sweep is btlend.h's, the bag
- * edits are unititem.h's, the message draw is text.h's and the chapter index
- * is a gamedata.h global.
+ * edits are unititem.h's, the message draw is text.h's, the ending sequence is
+ * ending.h's, and the chapter index and the return-to-title flag are
+ * gamedata.h globals.
  */
 #ifndef CHEND2B_H
 #define CHEND2B_H
@@ -55,5 +56,27 @@ extern void fdps_chapter_25_end(void);
    Table slot 25. */
 extern void fdps_chapter_26_end(void);
 #pragma aux fdps_chapter_26_end "*" parm caller [];
+
+/* Chapter 27's end handler, and the gate on the hidden chapters.  Takes
+   nothing and returns nothing.
+
+   The enemy side is swept first, always.  Then 蘭迪斯 (battle unit 0) is
+   searched for 魔精石碎片 (item 0xb3) and 法蓮娜 (battle unit 3) for 反禁制器
+   (item 0xdc) -- both searches before either result is looked at.
+
+   With both carried: both items are removed from their bags, the alternative
+   cut-scene WinGA26.dat is interpreted, the fallen are revived and billed, and
+   the chapter index is set to 27, chapter 28.
+
+   With either missing: neither item is touched, the cut-scene Win26.dat is
+   interpreted, the ending sequence (ending.h) plays, and
+   data_fdps_shared_quit_game_requested is raised, sending the game back to
+   the title screen.  The chapter index is left alone.
+
+   The only handler of the table with no roster write-back call.
+
+   Table slot 26. */
+extern void fdps_chapter_27_end(void);
+#pragma aux fdps_chapter_27_end "*" parm caller [];
 
 #endif

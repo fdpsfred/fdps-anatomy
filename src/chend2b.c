@@ -13,6 +13,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "btlend.h"
+#include "ending.h"
 #include "icon.h"
 #include "roster.h"
 #include "text.h"
@@ -172,4 +173,103 @@ void fdps_chapter_26_end(void)
     fdps_icon_script_run(CH26_VICTORY_SCRIPT);
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH26_NEXT_CHAPTER_ID;
+}
+
+/* Chapter 27's two closing cut-scenes, both run by the IconAni.vfs
+   interpreter.  read_memory at 0x621f0 returns 74 00 00 00 57 69 6e 47 41 32
+   36 2e 64 61 74 00 57 69 6e 32 36 2e 64 61 74 00, so 0x621f4 is the W of
+   "WinGA26.dat" (MOV EAX,0x621f4 at 0003b94f) and 0x62200 the W of
+   "Win26.dat" (MOV EAX,0x62200 at 0003b96e).  Both carry the 0-based id 26 of
+   the chapter just won, like every member of the family.  WinGA26.dat is the
+   alternative scene in which 平衡之神 is revived and 法蓮娜 freed; Win26.dat is
+   the scene in which the revival fails.  Lower case and writable for the same
+   reason as chapter 25's. */
+#define CH27_HIDDEN_ROUTE_SCRIPT "WinGA26.dat"
+#define CH27_ENDING_SCRIPT "Win26.dat"
+
+/* The two carriers, by fixed battle-unit index: PUSH 0x0 at 0003b906 and
+   0003b937, PUSH 0x3 at 0003b918 and 0003b945.  Unit 0 is 蘭迪斯 and unit 3 is
+   法蓮娜, the roster's first and fourth records in join order.  They are
+   indices into the battle array and not character ids. */
+#define CH27_RANDIS_UNIT_INDEX 0
+#define CH27_FARENA_UNIT_INDEX 3
+
+/* The two items the hidden route spends (assets/items.md): 魔精石碎片, PUSH
+   0xb3 at 0003b901, looked for on 蘭迪斯, and 反禁制器, PUSH 0xdc at 0003b913,
+   looked for on 法蓮娜 -- the item chapter 23 hands her (chevt4.c). */
+#define CH27_MANA_SHARD_ITEM_ID 0xb3
+#define CH27_SEAL_BREAKER_ITEM_ID 0xdc
+
+/* fdps_unit_find_item_slot's not-carried answer: CMP dword ptr [EBP-0x8],-0x1
+   at 0003b925 and CMP dword ptr [EBP-0x4],-0x1 at 0003b92b. */
+#define CH27_ITEM_NOT_CARRIED (-1)
+
+/* The hidden route's store, MOV dword ptr [0x00069cf4],0x1b at 0003b962: the
+   0-based index 27, chapter 28.  The ending route stores nothing here. */
+#define CH27_HIDDEN_NEXT_CHAPTER_ID 0x1b
+
+/* The ending route's store, MOV byte ptr [0x000643eb],0x1 at 0003b981: the
+   return-to-title request.  Every test of the flag is against zero, so this is
+   simply "raised" (gamedata.h). */
+#define CH27_QUIT_REQUESTED 1
+
+/* 0003b8f0.  Chapter 27's end handler, the gate on the hidden chapters.
+
+   The frame is the four-push one with SUB ESP,0x8; the two locals are the two
+   search results, [EBP-0x8] for the 魔精石碎片 and [EBP-0x4] for the 反禁制器.
+   Nothing is pushed by the dispatcher and the RET carries no immediate.
+
+   THE SWEEP IS UNCONDITIONAL AND FIRST, CALL 0x00039e10 at 0003b8fc, ahead of
+   both searches and on both routes.
+
+   BOTH SEARCHES RUN BEFORE ANYTHING IS DECIDED.  The two CALLs at 0003b908 and
+   0003b91a are back to back and only then do the compares start, so neither
+   item is removed unless both were found.  The test is an OR of the two misses:
+   CMP [EBP-0x8],-0x1 / JZ lands on the JMP at 0003b931 that goes to the ending
+   route at 0003b96e, and CMP [EBP-0x4],-0x1 / JNZ at 0003b92f is the only way
+   into the hidden route at 0003b933.  So the condition below is written the
+   same way round: the hidden route is the else-arm reached only when neither
+   search missed.  The short-circuit is on two locals already filled, so it has
+   no side effect to order.
+
+   THE HIDDEN ROUTE: both items removed, 蘭迪斯's first, each with the slot its
+   own search returned (MOV EAX,[EBP-0x8] at 0003b933, MOV EAX,[EBP-0x4] at
+   0003b941); WinGA26.dat interpreted; the fallen revived; the chapter index
+   set to 27.  There is no roster write-back call anywhere in the handler --
+   unlike every other slot of the table -- so none is written here.
+
+   THE ENDING ROUTE: Win26.dat interpreted, the ending sequence played, and the
+   return-to-title flag raised.  It leaves data_fdps_chapter_current_chapter_id
+   as it found it, and the two items stay where they are.
+
+   Values used after a CALL: fdps_unit_find_item_slot's EAX twice, stored at
+   0003b910 and 0003b922 and read by the compares and by the two removal pushes.
+   Nothing else is read out of EAX after a CALL -- the ADD ESP after each
+   argumented call is the next instruction, and the other callees return
+   nothing. */
+void fdps_chapter_27_end(void)
+{
+    /* Where the 魔精石碎片 sits in 蘭迪斯's bag, or -1. */
+    int mana_shard_slot;
+    /* Where the 反禁制器 sits in 法蓮娜's bag, or -1. */
+    int seal_breaker_slot;
+
+    fdps_battle_destroy_remaining_enemies();
+    mana_shard_slot = fdps_unit_find_item_slot(CH27_RANDIS_UNIT_INDEX,
+                                               CH27_MANA_SHARD_ITEM_ID);
+    seal_breaker_slot = fdps_unit_find_item_slot(CH27_FARENA_UNIT_INDEX,
+                                                 CH27_SEAL_BREAKER_ITEM_ID);
+
+    if (mana_shard_slot == CH27_ITEM_NOT_CARRIED
+            || seal_breaker_slot == CH27_ITEM_NOT_CARRIED) {
+        fdps_icon_script_run(CH27_ENDING_SCRIPT);
+        fdps_play_ending_credit_roll();
+        data_fdps_shared_quit_game_requested = CH27_QUIT_REQUESTED;
+    } else {
+        fdps_unit_remove_item(CH27_RANDIS_UNIT_INDEX, mana_shard_slot);
+        fdps_unit_remove_item(CH27_FARENA_UNIT_INDEX, seal_breaker_slot);
+        fdps_icon_script_run(CH27_HIDDEN_ROUTE_SCRIPT);
+        fdps_roster_revive_fallen_members();
+        data_fdps_chapter_current_chapter_id = CH27_HIDDEN_NEXT_CHAPTER_ID;
+    }
 }
