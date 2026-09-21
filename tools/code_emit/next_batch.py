@@ -54,8 +54,33 @@ TERMINAL = ("committed", "skip")
 SNAP_RX = re.compile(r"^([0-9a-f]{8})\s*\|\s*(0x[0-9a-f]+)\s*\|", re.M)
 
 
+ADDR_RX = re.compile(r"^[0-9a-f]{8}$")
+
+
 def load_state():
-    return json.loads(STATE.read_text(encoding="utf-8"))
+    """Read emit_state.json, refusing a record written at the wrong level.
+
+    Every function's record lives under "functions".  One written at the top
+    level instead -- beside "functions" rather than inside it -- is invisible
+    to everything that reads this file, so the function it describes reads as
+    never emitted and is handed out again, and the second emit lands a second
+    definition of code that already exists.  That happened for real in t22-11
+    (0002bae0 and 0003b600): the prompts said "the entry for key <addr>" without
+    naming the "functions" level, and an agent writing a record that did not
+    exist yet put it at the top.  It was caught by hand before either function
+    was re-issued.  This makes the next one stop the run instead of relying on
+    somebody noticing.
+    """
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    stray = sorted(k for k in state if ADDR_RX.match(k))
+    if stray:
+        raise SystemExit(
+            "emit_state.json has function record(s) at the top level instead of "
+            "under \"functions\": %s.  Move each one under \"functions\" (its "
+            "content is right, only its place is wrong) before handing out "
+            "anything, or those functions will be emitted a second time."
+            % ", ".join(stray))
+    return state
 
 
 def save_state(state):

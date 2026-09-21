@@ -66,15 +66,19 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 `t22-09` **100 支全數落地**，中途拆了三次檔（`vilshop.c`、`chevt5.c`、`chevt2.c`）都靠重抓清單接續跑完，`segments` 回報 4——上一段那個改動實測有效，對照組是同樣觸發條件下 t22-07 停在 65 支、t22-08 停在 2 支。這批也暴露了那個改動自己帶進來的一個回報錯誤：重抓時順手更新了 `remainingTotal`，而它填的是語意為「開跑時」的 `remaining_at_start`，已修。
 
-累計 435 支在 `emit_state.json` 記為 `committed`，`next_batch.py --stats` 說還剩 79 支。**續跑從這個進度接下去，不重跑已完成的；`failed` 與 `in_flight` 都會被重新發回清單。**
+`t22-10` 落地 65 支、中途拆了六次檔（章節處理器家族居多：`chinit`、`chend`、`chpost` 各自拆出後半段），分段機制一路撐住，之後應使用者要求人工停掉——當下在途的一支還沒寫檔，丟掉進度檔上的在途標記即回到乾淨狀態。`t22-11` 落地最後 14 支，含一次拆檔。
+
+**`t22-11` 抓到一個會讓同一支 function 被 emit 兩次的缺陷**：兩筆進度記錄被寫在 `functions` 的外層，讀進度的腳本看不到，會把已完成的 function 當成待做重新發出。根因是 prompt 只寫「把 key `"<位址>"` 那筆設成……」而沒提 `functions`，偏偏每支新 emit 的都是一筆還不存在的記錄，沒有現成的層級可照抄。逐一核對過每個位址的落地 commit：**514 支剛好 514 個不重複的落地，沒有任何一支實際被 emit 兩次**。修法是 prompt 寫明路徑之外，加上結構性防呆——`next_batch.py` 讀到外層有位址形狀的 key 就直接報錯停下。
+
+**514 支全數落地。** `next_batch.py --stats` 回報 514 committed、0 pending。
 
 前兩支的區域變數命名經人工檢查合格，但那是 emitter 自己的判斷，當時 workflow 裡沒有任何規則要求它，所以不能拿它當「規則有效」的證據。第三支才是票 21.7 的實測：Ghidra 給的四個區域變數全是預設名（`sVar1`／`sVar2`／`local_18`／`local_14`），emit 出來是 `grid_width`／`grid_height`／`cell_index`／`cell`。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成，沒有東西擋著批次（22.1 剩下的是本票收尾時的總掃）
 
-**Status:** in-progress（514 支已落地 435 支，剩 79；`t22-09` 之後暫停過一次，已恢復續跑）
+**Status:** in-progress（514/514 已全數落地；剩收尾的疑慮總掃。emit 結束後應使用者要求暫停，總掃的 workflow 等指示再寫）
 
-- [ ] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
+- [x] 遊戲本體 function 全部 emit 完成，每個都經 reviewer 通過
 - [ ] 每個 function 一次處理一個，無任何批次處理
 - [ ] 全程無人介入跑完，可中斷可續跑，重跑跳過已完成的 function
 - [ ] workflow 有錯誤處理：agent 未回傳或判定檔缺漏會重試、落地與 gate 失敗會明確回報、上游工具失去回應有停止訊號；收尾報告列出完成數、失敗數與未完成清單
