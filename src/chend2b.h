@@ -91,4 +91,16 @@ extern void fdps_chapter_27_end(void);
 extern void fdps_chapter_28_end(void);
 #pragma aux fdps_chapter_28_end "*" parm caller [];
 
+/* Chapter 29's end handler: closes chapter 29 out and hands the game to
+   chapter 30.  Takes nothing and returns nothing.
+
+   Chapter 28's four closing steps in the same order -- the enemy side swept,
+   the battle party banked, the victory cut-scene Win28.dat interpreted, the
+   fallen revived and billed -- and then the chapter index set to 29,
+   chapter 30.
+
+   Table slot 28. */
+extern void fdps_chapter_29_end(void);
+#pragma aux fdps_chapter_29_end "*" parm caller [];
+
 #endif

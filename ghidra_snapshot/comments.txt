@@ -12004,13 +12004,13 @@ Watcom alignment padding: lea eax,[eax+0] (6) + lea edx,[edx+0] (4), aligns next
 Chapter 29's chapter-end handler: closes the chapter out by clearing the map, banking the party, playing chapter 29's victory scene and handing the game on to chapter 30. Reached through slot 28 of the chapter-end handler table based at 0x00060304.
 
 Algorithm:
-Builds the standard four-push Watcom frame with an empty local area, then runs four steps in order. fdps_battle_destroy_remaining_enemies wipes every enemy still standing on the battle map, so the scene plays over a cleared map. FUN_00023980 writes every active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes. FUN_00021650, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win28.dat" at 0x00062218 and plays chapter 29's victory scene. FUN_00039e70 revives every party unit left at 0 HP, restoring it from its maximum and charging the per-class revive cost. The chapter index at DAT_00069cf4 is then set to 0x1d, so the village phase that main runs next, and the chapter loaded after it, are chapter 30's -- the chapter index is 0-based, so 0x1d is the player's chapter 30 and the Win number 28 is the 0-based index of this chapter.
+Builds the standard four-push Watcom frame with an empty local area, then runs four steps in order. fdps_battle_destroy_remaining_enemies wipes every enemy still standing on the battle map, so the scene plays over a cleared map. fdps_roster_write_back_battle_units writes every active battle unit record back into the persistent roster table, resetting the per-battle fields as it goes. fdps_icon_script_run, the IconAni.vfs event-script interpreter, is called with the ASCIIZ resource name "Win28.dat" at 0x00062218 and plays chapter 29's victory scene. fdps_roster_revive_fallen_members revives every party unit left at 0 HP, restoring it from its maximum and charging the per-class revive cost. The chapter index at data_fdps_chapter_current_chapter_id is then set to 0x1d, so the village phase that main runs next, and the chapter loaded after it, are chapter 30's -- the chapter index is 0-based, so 0x1d is the player's chapter 30 and the Win number 28 is the 0-based index of this chapter.
 
 Parameters:
   none -- main dispatches through the chapter-end handler table with nothing pushed and no stack cleanup.
 
 Returns:
-  nothing; the effects are the cleared map, the roster writeback, the victory scene it played, the revived party and the advanced chapter index in DAT_00069cf4.
+  nothing; the effects are the cleared map, the roster writeback, the victory scene it played, the revived party and the advanced chapter index in data_fdps_chapter_current_chapter_id.
 
 Pool: fdps  [calls only game code; its one data operand is the game resource name "Win28.dat"; it is reached from main through the game's own chapter-end handler table, and matches no Watcom or AIL library symbol]
 

@@ -3988,6 +3988,11 @@
       "status": "committed",
       "emitted_against": "0x38",
       "rounds": 0
+    },
+    "0003ba10": {
+      "status": "committed",
+      "emitted_against": "0x38",
+      "rounds": 0
     }
   }
 }

@@ -308,3 +308,37 @@ void fdps_chapter_28_end(void)
     fdps_roster_revive_fallen_members();
     data_fdps_chapter_current_chapter_id = CH28_NEXT_CHAPTER_ID;
 }
+
+/* Chapter 29's victory cut-scene, the string at 0x62218 loaded into EAX at
+   0003ba26 and pushed as fdps_icon_script_run's only argument.  Named after
+   the 0-based id of the chapter just WON: chapter 29 is id 28.  read_memory
+   at 0x62210 returns 37 2e 64 61 74 00 64 61 57 69 6e 32 38 2e 64 61 74 00,
+   so 0x62216..0x62217 is the 64 61 filler behind "Win27.dat" and 0x62218 is
+   the W of "Win28.dat".  Lower case and writable for the same reason as
+   chapter 25's. */
+#define CH29_VICTORY_SCRIPT "Win28.dat"
+
+/* What the handler leaves in data_fdps_chapter_current_chapter_id: MOV dword
+   ptr [0x00069cf4],0x1d at 0003ba39, 0-based, so chapter 30.  One more than
+   the script's 28, for the reason chapter 25's pair differs by one. */
+#define CH29_NEXT_CHAPTER_ID 0x1d
+
+/* 0003ba10.  Chapter 29's end handler: chapter 28's shape exactly, four calls
+   and one store with no branch and no local (the four-push prologue with
+   SUB ESP,0x0), in the same order -- sweep at 0003ba1c, writeback at
+   0003ba21, cut-scene at 0003ba2c, revive at 0003ba34 -- for the reasons
+   given at fdps_chapter_25_end.  Reached through table slot 28 (the pointer
+   at 0x00060374).
+
+   Every call is to a void function and nothing after any CALL reads EAX: the
+   only argument is the script name pushed at 0003ba2b and cleaned by the
+   caller's ADD ESP,0x4 at 0003ba31.  The store at 0003ba39 is the handler's
+   last act. */
+void fdps_chapter_29_end(void)
+{
+    fdps_battle_destroy_remaining_enemies();
+    fdps_roster_write_back_battle_units();
+    fdps_icon_script_run(CH29_VICTORY_SCRIPT);
+    fdps_roster_revive_fallen_members();
+    data_fdps_chapter_current_chapter_id = CH29_NEXT_CHAPTER_ID;
+}
