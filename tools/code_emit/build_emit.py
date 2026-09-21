@@ -318,6 +318,18 @@ def gen_lnk(src_objs, tst_objs, with_stubs=False):
     return "\n".join(lines) + "\n"
 
 
+# The unit that defines the game's C entry point.  src/main.c defines `main`
+# because the Watcom CRT's __CMain calls exactly that symbol, and the generated
+# TESTMAIN.C defines `main` too, because it is the test image's entry.  Two
+# definitions of one symbol are a link error, so in THIS image only the game's
+# entry is renamed away at compile time with a command-line define.  No test
+# calls it (it would exit or never return), src/ carries no test hook
+# (ADR-0003), and a build of the game itself compiles the unit without the
+# define.  Same answer as the FD2 rebuild's tests/genbuild.py.
+GAME_ENTRY_UNIT = "MAIN"
+GAME_ENTRY_TEST_NAME = "fdps_game_main"
+
+
 def gen_build_bat(src_c, src_asm, tst_c):
     """Compile every unit, then link.  A heartbeat naming the current unit is
     written before each step, so a compiler that wedges is reported as hung on
@@ -325,9 +337,11 @@ def gen_build_bat(src_c, src_asm, tst_c):
     w = DRV_WORK
     steps = []
     for stem in src_c:
+        extra = (" -dmain=%s" % GAME_ENTRY_TEST_NAME
+                 if stem.upper() == GAME_ENTRY_UNIT else "")
         steps.append((stem.lower(),
-                      r"WCC386 %s\%s.C -fo=%s:\OUT\OBJS\%s.OBJ >> %s:\OUT\BUILD.OUT"
-                      % (G_SRC, stem, w, stem, w)))
+                      r"WCC386 %s\%s.C%s -fo=%s:\OUT\OBJS\%s.OBJ >> %s:\OUT\BUILD.OUT"
+                      % (G_SRC, stem, extra, w, stem, w)))
     for stem in src_asm:
         steps.append((stem.lower(),
                       r"WASM %s\%s.ASM -fo=%s:\OUT\OBJS\%s.OBJ >> %s:\OUT\BUILD.OUT"
@@ -827,6 +841,14 @@ def _selftest_rows():
     rows.append(("src and test objects kept apart",
                  r"OBJS\AILDPMI.OBJ" in bat and r"OBJT\MENU.OBJ" in bat,
                  "yes"))
+    rows.append(("other units compile without the entry rename",
+                 "-dmain=" not in bat, "yes"))
+    bat_main = gen_build_bat(["MAIN", "MENU"], [], ["TESTMAIN"])
+    main_lines = [l for l in bat_main.splitlines() if "WCC386 SRC\\" in l]
+    rows.append(("game entry renamed away in the test image only",
+                 len([l for l in main_lines if "-dmain=" in l]) == 1
+                 and r"SRC\MAIN.C -dmain=%s" % GAME_ENTRY_TEST_NAME in bat_main,
+                 "; ".join(main_lines)))
     rows.append(("assembly assembled with wasm",
                  r"WASM SRC\AILFLAGS.ASM" in bat, "yes"))
     longest = max(len(l) for l in bat.splitlines())
