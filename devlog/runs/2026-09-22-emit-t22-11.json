@@ -1,0 +1,181 @@
+{
+  "batch": "t22-11",
+  "attempted": 14,
+  "segments": 2,
+  "committed": 14,
+  "skipped": 0,
+  "unfinished": 0,
+  "never_reached": 0,
+  "cut_short": [],
+  "recovered": [],
+  "stopped": null,
+  "stop_detail": "",
+  "ended_early": null,
+  "splits": [
+    {
+      "file": "chend2.c",
+      "lines": 1015,
+      "new_files": [
+        "src/chend2b.c"
+      ],
+      "note": "The cut is between chapters 24 and 25, the same boundary chinit2b.c and chpost3.c use. Chapters 16-24 stay in chend2.c. Every handler there only passes the game on to the next chapter, and the cut keeps together chapters 19 and 24, the two 妖刀-duel handlers that restore the whole party before banking it. Chapters 25-30 (fdps_chapter_25_end..30_end, all still pending) are now routed to the new chend2b.c. That group is the run-in to the ending: it holds chapter 27, which can play the ending and ask to go back to the title screen, and chapter 30, which always does. No emitted code or test moved (tests/chend2.c and run_chend2_tests are unchanged), so no function's target changed in emit_state.json. src/chend2b.c does not exist yet; the first emit into it will create it. Updated files: the chapter_end_file decision table and docstring in tools/code_emit/build_routing.py; routing.json and routing.md, regenerated with --check passing; the file table in rebuild_info/code_layout.md, where the .c count is now 89; and only the header comments of chend1/chend1b/chend2 .c/.h. Gate `check --target emittest` passed. Split commit: c92e46c. SEPARATE PRE-EXISTING DEFECT, FIXED IN ITS OWN COMMIT 1b46bf9: in emit_state.json, the committed records for 0002bae0 (fdps_battle_player_phase_loop) and 0003b600 (fdps_chapter_24_end) had been written at the file's top level instead of under \"functions\". Because of that, next_batch.py was handing both functions out again as pending, which would have re-emitted definitions that already exist. I moved both entries under \"functions\" with their content unchanged; stats now show 507 committed and 7 pending. The two landing commits that did this were a4f473b and 7ddf629, so the bookkeeper/landing stage's state writer looks like it is writing at the wrong nesting level and should be checked."
+    }
+  ],
+  "remaining_at_start": 14,
+  "concerns_logged": 0,
+  "concern_mismatches": [],
+  "results": [
+    {
+      "addr": "00015470",
+      "name": "fdps_battle_unit_turn",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "fcd4b44 fdps_battle_unit_turn @ 00015470",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 86,
+      "problems": "The emitter and the reviewer each had one plate fix for 00015470, and the two overlap. As the reviewer instructed, I applied them as one merged plate: the reviewer's rewrite of the first sentence plus the corrected field roles (0x3b move, 0x20 clazz, 0x08 char_id). Both open_issues arrays were empty. No stray files were found outside the pipeline paths."
+    },
+    {
+      "addr": "0001fa30",
+      "name": "fdps_battle_tick_status_effects",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "35655a5 fdps_battle_tick_status_effects @ 0001fa30",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 71,
+      "problems": "Both plate fixes (emit: symbol-name substitutions; review: HP-floor sentence rewrite) were merged into one set_plate_comment call. There were no stray paths. Neither verdict file had open_issues, so nothing was appended and emit_issues.json was left unchanged. target_lines is the newline count (the wc -l equivalent), counted with Python."
+    },
+    {
+      "addr": "0001e3f0",
+      "name": "fdps_battle_advance_turn",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "caaf177 fdps_battle_advance_turn @ 0001e3f0",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 67,
+      "problems": "Both plate fixes (emit and review) targeted the same plate at 0001e3f0 and the review's fix is a superset of the emit's, so I combined them into one set_plate_comment rewrite. Both verdict files had an empty open_issues list, so nothing was appended to emit_issues.json. No stray paths were found."
+    },
+    {
+      "addr": "00014ab0",
+      "name": "fdps_battle_system_menu",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4447543 fdps_battle_system_menu @ 00014ab0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 66,
+      "problems": "I applied 1 of the 2 review fixes. The plate comment at 00014ab0 is rewritten as instructed. The type fix for 000601c4 was not applied: the table is typed /void_int_fn *[50], but /void_int_fn is actually defined as void(void). The fix is to redefine it as void(int unit_index), which is safe because nothing else uses that type. The permission classifier blocked that edit (reported as \"Modify Shared Resources\"), so it is left undone. No stray files; emit_issues.json unchanged (both verdicts have empty open_issues)."
+    },
+    {
+      "addr": "0002ea10",
+      "name": "fdps_battle_end_phase_if_all_units_done",
+      "status": "committed",
+      "rounds": 1,
+      "commit": "f8b5b3d fdps_battle_end_phase_if_all_units_done @ 0002ea10",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 42,
+      "problems": "Emitter and reviewer ghidra_fixes were the same plate correction (+0x26 is status_timers[4], the paralysis counter, not an acted marker; record address is fdps_get_unit_record@0002d210 expanded inline), so it was applied once as a single plate edit. Both open_issues arrays were empty, so emit_issues.json was left unchanged. There were no stray files."
+    },
+    {
+      "addr": "0002bae0",
+      "name": "fdps_battle_player_phase_loop",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "7ddf629 fdps_battle_player_phase_loop @ 0002bae0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 86,
+      "problems": "The task said both ghidra_fixes arrays would be empty, but the emitter's was not. It held one plate-comment fix for 0002bae0, and it was applied as written. The plate now names fdps_keyboard_scancode_ptr in place of FUN_00056799. In the Enter/Space row, \"clear the key latch (FUN_000567b3)\" became \"flush the keyboard queue (fdps_flush_keyboard_queue; the latch byte itself is not cleared)\". The same row now also says that data_fdps_battle_pending_xp_credit is zeroed when a unit is found under the cursor. The first write stored a literal \"&amp;\" in place of \"&\" and was rewritten at once with a plain \"&\". The audit gate is clean: 0 orphan code ranges, 0 error bookmarks, 0 undefined bytes. The program was saved and the snapshot re-exported (ghidra_snapshot/comments.txt). Neither verdict file had open_issues, so nothing was appended to emit_issues.json. That file already existed and was not changed. No stray files were found outside the pipeline paths."
+    },
+    {
+      "addr": "0003b600",
+      "name": "fdps_chapter_24_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "a4f473b fdps_chapter_24_end @ 0003b600",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 49,
+      "problems": "none; no stray files; both verdicts had empty open_issues so emit_issues.json unchanged"
+    },
+    {
+      "addr": "0003b720",
+      "name": "fdps_chapter_25_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "5e3f57b fdps_chapter_25_end @ 0003b720",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 26,
+      "problems": "The emitter and the reviewer each listed the same plate fix, so it was applied once. Both open_issues arrays were empty, so emit_issues.json was left unchanged. There were no stray files."
+    },
+    {
+      "addr": "0003b800",
+      "name": "fdps_chapter_26_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "1310b97 fdps_chapter_26_end @ 0003b800",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 46,
+      "problems": "Applied the reviewer's single plate fix. The current Ghidra name for DAT_00069cd8 is data_fdps_map_unit_array_ptr (looked up in ghidra_snapshot/labels.txt). The speaker phrase \"paints 索爾's gift line\" became \"paints the gift line (text entry 0x18)\" because the speaker was not confirmed. Neither verdict file had any open_issues, so nothing was appended to emit_issues.json. There were no stray paths outside the pipeline's own directories. The Ghidra audit gate was clean: 0 orphan code ranges and 0 error bookmarks."
+    },
+    {
+      "addr": "0003b8f0",
+      "name": "fdps_chapter_27_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "b340499 fdps_chapter_27_end @ 0003b8f0",
+      "ghidra_applied": 0,
+      "issues": 0,
+      "out_tok_k": 34
+    },
+    {
+      "addr": "0003b9b0",
+      "name": "fdps_chapter_28_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "568c943 fdps_chapter_28_end @ 0003b9b0",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 29
+    },
+    {
+      "addr": "0003ba10",
+      "name": "fdps_chapter_29_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "d70c428 fdps_chapter_29_end @ 0003ba10",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 27
+    },
+    {
+      "addr": "0003ba80",
+      "name": "fdps_chapter_30_end",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "4562078 fdps_chapter_30_end @ 0003ba80",
+      "ghidra_applied": 2,
+      "issues": 0,
+      "out_tok_k": 34,
+      "problems": "Emit fix of kind 'rename' at 00062222 is a data re-definition, which none of the three listed tools can do, so it was applied through an inline script. The script cleared the string at 0x62222 (which held \"daWin29.dat\") and created a char[10] \"Win29.dat\" at 0x62224. The fix gave no label name, so the label follows the existing Win28/Win22 pattern: binary_artifact_string_literal_icon_script_win29_dat_62224 (USER_DEFINED). For the review plate fix, the seven stale FUN_/DAT_ names in the 0003ba80 plate were replaced with their current names, and no FUN_/DAT_ remain. Neither verdict has any open_issues, so emit_issues.json (which already exists) was not changed. No stray paths. emit_state.json keeps functions under a 'functions' object, so the entry was updated at functions['0003ba80']."
+    },
+    {
+      "addr": "00029220",
+      "name": "main",
+      "status": "committed",
+      "rounds": 0,
+      "commit": "3dcfc1d main @ 00029220",
+      "ghidra_applied": 1,
+      "issues": 0,
+      "out_tok_k": 50,
+      "problems": "The one reviewer plate fix was applied: the Signature sentence was reworded as specified. The emit verdict had no Ghidra fixes. Neither verdict listed any open issues, so emit_issues.json was not changed. No stray files were found. The final git status --porcelain after the commit printed nothing."
+    }
+  ],
+  "out_tok_k": 733
+}
