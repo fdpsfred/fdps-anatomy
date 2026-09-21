@@ -132,4 +132,16 @@ extern void fdps_battle_unit_turn(int unit_index);
 extern void fdps_battle_advance_turn(void);
 #pragma aux fdps_battle_advance_turn "*" parm caller [];
 
+/* Ends the player phase if there is nobody left to move: when no unit on side
+   2 has neither bit 0 (retired) nor bit 7 (already acted) of its status byte
+   set and a zero paralysis counter, fdps_battle_advance_turn runs the battle
+   round to the next player phase.  Otherwise nothing happens.  Takes nothing,
+   returns nothing, writes nothing itself.
+
+   A paralysed player unit does not hold the phase open; a poisoned one that
+   has not acted does.  Units of the other two sides are never looked at, and
+   the walk stops at data_fdps_map_unit_count. */
+extern void fdps_battle_end_phase_if_all_units_done(void);
+#pragma aux fdps_battle_end_phase_if_all_units_done "*" parm caller [];
+
 #endif

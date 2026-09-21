@@ -2047,6 +2047,185 @@ static void adv_stops_after_the_npc_phase_on_a_battle_end_code(void)
     adv_unstage();
 }
 
+/* fdps_battle_end_phase_if_all_units_done at 0002ea10, from here down.
+ *
+ * The function's only output is whether it calls fdps_battle_advance_turn,
+ * so the cases run it over the rest-sweep fixture above with a battle-end
+ * code already standing: a call then shows as fdps_battle_advance_turn's
+ * entry store of 0 into the play-active flag (MOV byte ptr [0x00060159],0x0
+ * at 0001e407) and its one post-action call from the NPC status tick before
+ * the test at 0001e588 returns.  No call leaves the flag's sentinel and a
+ * post-action count of 0.
+ *
+ * Expected values come from the assembly at 0002ea10 -- MOV dword ptr
+ * [EBP-0x4],0x1 for the flag's start, AND AL,0x81 / JNZ on +5, AND EAX,0xff /
+ * CMP EAX,0x2 / JZ on +6, CMP byte ptr [EAX+0x26],0x0 / JZ, the store of 0 at
+ * 0002ea8e, CMP EAX,dword ptr [0x00060150] / JL at 0002ea2d for the bound, and
+ * CMP dword ptr [EBP-0x4],0x1 / JNZ in front of the CALL 0x0001e3f0 at
+ * 0002ea9d -- and from the record layout ticket 17 settled.  None of them is
+ * read off the emitted C.
+ */
+
+/* Raises bit 7 on every side-2 unit of the fixture, so that none of them can
+   act; the other sides are left idle. */
+static void end_mark_player_units_acted(void)
+{
+    int i;
+
+    for (i = 0; i < ADV_UNIT_COUNT; i++) {
+        if ((int) adv_unit(i)->side == ADV_SIDE_PLAYER) {
+            adv_unit(i)->flags = (unsigned char)
+                (adv_unit(i)->flags | ADV_FLAG_ACTED);
+        }
+    }
+}
+
+static void end_stage(void)
+{
+    adv_stage();
+    end_mark_player_units_acted();
+    data_fdps_chapter_event_or_battle_end_code = 1;
+}
+
+static void end_run(void)
+{
+    adv_set_mode(ADV_MODE_13H);
+    adv_saved_timer = _dos_getvect(ADV_TIMER_VECTOR);
+    _dos_setvect(ADV_TIMER_VECTOR, adv_timer_isr);
+    fdps_battle_end_phase_if_all_units_done();
+    _dos_setvect(ADV_TIMER_VECTOR, adv_saved_timer);
+    adv_set_mode(ADV_MODE_TEXT);
+}
+
+/* Whether fdps_battle_advance_turn ran, read off the two things it does
+   before the planted battle-end code stops it. */
+static int end_advanced(void)
+{
+    return data_fdps_ui_play_active_flag == 0 && adv_post_calls == 1;
+}
+
+static int end_did_not_advance(void)
+{
+    return (int) data_fdps_ui_play_active_flag == ADV_PLAY_FLAG_SENTINEL &&
+           adv_post_calls == 0;
+}
+
+/* Every player unit has acted; the enemy (5) and the NPC (13) are idle with
+   a clear status byte and are not looked at -- the side test is equality with
+   2.  So the phase ends and the turn advances. */
+static void end_advances_when_every_player_unit_has_acted(void)
+{
+    end_stage();
+
+    end_run();
+
+    CHECK_EQ(end_advanced(), 1);
+    CHECK_EQ((int) adv_unit(5)->flags, 0);
+    CHECK_EQ((int) adv_unit(13)->flags, 0);
+    adv_unstage();
+}
+
+/* One idle player unit anywhere holds the phase open: first, in the middle
+   and last in the array.  With the idle one at index 0, every later unit has
+   acted, and the flag stored 0 by the first is never stored 1 again. */
+static void end_waits_on_an_idle_player_unit(void)
+{
+    end_stage();
+    adv_unit(0)->flags = 0;
+
+    end_run();
+
+    CHECK_EQ(end_did_not_advance(), 1);
+    adv_unstage();
+
+    end_stage();
+    adv_unit(4)->flags = 0;
+
+    end_run();
+
+    CHECK_EQ(end_did_not_advance(), 1);
+    adv_unstage();
+
+    end_stage();
+    adv_unit(13)->side = ADV_SIDE_PLAYER;
+
+    end_run();
+
+    CHECK_EQ(end_did_not_advance(), 1);
+    adv_unstage();
+}
+
+/* AND AL,0x81: bit 0 alone (retired) and bit 7 alone (acted) each take a unit
+   out of the count, and the six bits between them do not -- a player unit
+   holding only 0x7e is idle and blocks. */
+static void end_tests_bits_zero_and_seven_only(void)
+{
+    end_stage();
+    adv_unit(0)->flags = ADV_FLAG_RETIRED;
+
+    end_run();
+
+    CHECK_EQ(end_advanced(), 1);
+    adv_unstage();
+
+    end_stage();
+    adv_unit(0)->flags = 0x7e;
+
+    end_run();
+
+    CHECK_EQ(end_did_not_advance(), 1);
+    adv_unstage();
+}
+
+/* CMP byte ptr [EAX+0x26],0x0: an idle player unit that is paralysed does not
+   hold the phase open.  The poison counter beside it at +0x25 is not read, so
+   an idle poisoned unit does. */
+static void end_passes_over_a_paralysed_unit_only(void)
+{
+    end_stage();
+    adv_unit(0)->flags = 0;
+    adv_unit(0)->status_timers[ADV_PARALYSIS_TIMER] = 1;
+
+    end_run();
+
+    CHECK_EQ(end_advanced(), 1);
+    adv_unstage();
+
+    end_stage();
+    adv_unit(0)->flags = 0;
+    adv_unit(0)->status_timers[ADV_POISON_TIMER] = 1;
+
+    end_run();
+
+    CHECK_EQ(end_did_not_advance(), 1);
+    adv_unstage();
+}
+
+/* CMP EAX,dword ptr [0x00060150] / JL bounds the walk: an idle player record
+   at index count -- allocated, but past the live units -- is never read.  And
+   with no units at all the flag keeps its initial 1, so an empty battle
+   advances at once. */
+static void end_walks_only_the_live_units(void)
+{
+    end_stage();
+    adv_unit(13)->side = ADV_SIDE_PLAYER;
+    data_fdps_map_unit_count = 13;
+
+    end_run();
+
+    CHECK_EQ(end_advanced(), 1);
+    adv_unstage();
+
+    end_stage();
+    adv_unit(0)->flags = 0;
+    data_fdps_map_unit_count = 0;
+
+    end_run();
+
+    CHECK_EQ(end_advanced(), 1);
+    adv_unstage();
+}
+
 void run_btlturn_tests(void)
 {
     RUN_TEST(mark_record_layout_matches_the_assembly);
@@ -2107,6 +2286,12 @@ void run_btlturn_tests(void)
     RUN_TEST(adv_rest_skips_the_ineligible);
     RUN_TEST(adv_stops_after_the_npc_ticks_on_a_battle_end_code);
     RUN_TEST(adv_stops_after_the_npc_phase_on_a_battle_end_code);
+
+    RUN_TEST(end_advances_when_every_player_unit_has_acted);
+    RUN_TEST(end_waits_on_an_idle_player_unit);
+    RUN_TEST(end_tests_bits_zero_and_seven_only);
+    RUN_TEST(end_passes_over_a_paralysed_unit_only);
+    RUN_TEST(end_walks_only_the_live_units);
 
 
     /* Put the globals back before leaving.  stage() points them at this

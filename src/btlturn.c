@@ -914,3 +914,64 @@ void fdps_battle_advance_turn(void)
     fdps_flush_keyboard_queue();
     data_fdps_ui_play_active_flag = 1;
 }
+
+/* ---- fdps_battle_end_phase_if_all_units_done, 0002ea10 ----------------- */
+
+/* 0002ea10.  Decides whether the player phase is over: one counted walk over
+   the whole unit array, and a call to fdps_battle_advance_turn when no unit
+   on side 2 can still be given a turn.  The plain -4s frame -- PUSH
+   EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x18, nothing read above [EBP], one
+   epilogue at 0002eaa2 with a bare RET -- and the one caller,
+   fdps_battle_player_phase_loop, makes a bare CALL.
+
+   THE FLAG is the dword at EBP-0x4, stored 1 before the walk and 0 by a unit
+   that can still act, and it is never stored 1 again: the walk has no early
+   exit (its only backward branch is JMP 0x0002ea2a, the loop's own) but the
+   first idle unit settles the answer.  The test after the walk is CMP dword
+   ptr [EBP-0x4],0x1 / JNZ.
+
+   A UNIT CAN STILL ACT when all three hold, tested in this order: neither bit
+   of UNIT_BUSY_FLAGS_MASK in the status byte at +5 (AND AL,0x81 / JNZ), the
+   side byte at +6 equal to PLAYER_PHASE_SIDE (AND EAX,0xff / CMP EAX,0x2 /
+   JZ), and the paralysis counter at +0x26, status_timers[4], zero (CMP byte
+   ptr [EAX+0x26],0x0 / JZ).  Equality tests only, so signedness decides
+   nothing here.  The poison counter beside it is not read: a poisoned unit
+   still holds the phase open, a paralysed one does not.
+
+   The bound is re-read from data_fdps_map_unit_count on every iteration (CMP
+   EAX,dword ptr [0x00060150] inside the loop at 0002ea2d).
+
+   The record address is formed in-line: the index copied into an
+   argument-shaped slot at EBP-0x14, IMUL by 0x50, the base read from
+   [0x00069cd8], the sum parked in a result slot at EBP-0x10 and copied to the
+   local at EBP-0x8.  That is fdps_get_unit_record (0002d210) expanded in place
+   -- the inline fingerprint rebuild_info/build_flags.md describes, a
+   parameter slot plus a result slot -- and there is no CALL, so it is written
+   here as the open-coded address, which is behaviourally the same thing.
+
+   Nothing called returns anything read: fdps_battle_advance_turn is void and
+   the epilogue follows its CALL directly. */
+void fdps_battle_end_phase_if_all_units_done(void)
+{
+    /* EBP-0x4: 1 until a player unit that can still act is found. */
+    int all_units_done;
+    /* EBP-0xc: the walk's index into the unit array. */
+    int unit_index;
+    /* EBP-0x8: that unit's record. */
+    struct fdps_unit_record *unit;
+
+    all_units_done = 1;
+    for (unit_index = 0; unit_index < data_fdps_map_unit_count; unit_index++) {
+        unit = (struct fdps_unit_record *)
+               (data_fdps_map_unit_array_ptr +
+                unit_index * (int) sizeof(struct fdps_unit_record));
+        if ((unit->flags & UNIT_BUSY_FLAGS_MASK) == 0 &&
+            (int) unit->side == PLAYER_PHASE_SIDE &&
+            unit->status_timers[STATUS_TIMER_PARALYSIS] == 0) {
+            all_units_done = 0;
+        }
+    }
+    if (all_units_done == 1) {
+        fdps_battle_advance_turn();
+    }
+}
