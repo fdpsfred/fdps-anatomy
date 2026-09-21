@@ -9,6 +9,47 @@
 #ifndef BTLMENU_H
 #define BTLMENU_H
 
+/* 00014ab0.  The battle menu the player opens over the map with no unit
+   chosen: four entries -- the system submenu below, advance all, options and
+   end turn -- run on a ring menu until the player backs out or an entry ends
+   the call.  Its one caller is fdps_battle_player_phase_loop, which keeps the
+   answer.
+
+   Takes nothing and answers 0, except when the system submenu answered
+   something other than its cancel: that answer is passed straight through, so
+   a confirmed quit comes back as 1.
+
+   WHAT EACH ENTRY DOES.
+     - System: runs fdps_battle_system_submenu.  A cancel out of it reopens
+       this menu; anything else ends the call with its answer.
+     - Advance all: asks first.  On yes, every unit that is on side 2, has
+       none of flags bits 0, 2 and 7 set and is not paralysed
+       (status_timers[4] zero) is walked by fdps_battle_move_unit_toward
+       (movegrid.h) toward the tile the map cursor stood on when the question
+       was answered, the cursor being moved onto each unit first; a chapter
+       event the walk left pending is fired with that unit's index, and the
+       unit is marked done (btlturn.h).  Then the turn is advanced with
+       fdps_battle_advance_turn and fdps_units_clear_status_bit7 (unit.h)
+       runs, and the call ends.  On no the menu reopens.
+     - Options: runs fdps_options_menu (menu.h) and reopens this menu.
+     - End turn: asks first.  On yes the turn is advanced and the call ends;
+       on no the menu reopens.
+
+   THE MENU REOPENS ON THE ENTRY THE PLAYER LAST CHOSE.  The cursor is set to
+   the system entry once, when the call begins, and carried from pass to pass
+   after that.  Nothing is ever greyed out.
+
+   IT LEAVES THE CURSOR OVERLAY AND THE PLAY-ACTIVE FLAG ON THE WAY OUT.  Both
+   are lowered to 0 when the call begins and both raised to 1 on every way
+   out -- except confirmed end turn, which raises only
+   data_fdps_ui_play_active_flag and leaves data_fdps_map_cursor_draw_mode as
+   fdps_battle_advance_turn left it (gamedata.h).
+
+   IT DRAWS STRAIGHT TO THE ADAPTER THROUGHOUT and repaints the view after every
+   pass of the ring, before acting on the choice. */
+extern int fdps_battle_system_menu(void);
+#pragma aux fdps_battle_system_menu "*" parm caller [];
+
 /* 00014ea0.  The in-battle SYSTEM submenu: four entries -- the objectives
    window, save, load and quit -- built on a ring menu and run until the player
    commits to one of them or backs out.

@@ -1,9 +1,18 @@
 /* tests/btlmenu.c -- cover for src/btlmenu.c.
  *
- * One subject: fdps_battle_system_submenu at 00014ea0.  The cell search and
- * the action menu, which this file used to cover as well, moved to
+ * Two subjects: fdps_battle_system_submenu at 00014ea0, and the outer battle
+ * menu fdps_battle_system_menu at 00014ab0 that opens it, whose cases are
+ * the outer_ ones at the end and run on the same fixture.  The cell search
+ * and the action menu, which this file used to cover as well, moved to
  * tests/btlact.c with their subject, and took a copy of the fixture below
  * with them.
+ *
+ * NEITHER CONFIRMED ARM OF THE OUTER MENU IS RUN.  Advance all and end turn
+ * both end in fdps_battle_advance_turn, which runs the whole NPC and enemy
+ * phases through the chapter's event and post-action handler tables -- tables
+ * ticket 23 has not yet filled, so a call through them is a call to address
+ * zero -- and so no case here says yes to either prompt.  What the declined
+ * arms are asserted to leave alone is what the confirmed ones would change.
  *
  * Expected values come from the assembly, never from the emitted C: the four
  * command icon ids of the template at 00014700 and the all-zero descriptor at
@@ -385,9 +394,13 @@ static void menu_load_script(unsigned char *codes, int count)
     menu_script_next = 0;
 }
 
-/* One whole run of the submenu, with the adapter in the mode the game draws it
-   in and the timer interrupt both pacing the frames and playing the keys. */
-static int menu_run(unsigned char *codes, int count)
+/* Which of the two subjects a run calls. */
+#define RUN_SUBMENU 0
+#define RUN_OUTER_MENU 1
+
+/* One whole run of a menu, with the adapter in the mode the game draws it in
+   and the timer interrupt both pacing the frames and playing the keys. */
+static int menu_play(unsigned char *codes, int count, int subject)
 {
     int answer;
 
@@ -402,11 +415,25 @@ static int menu_run(unsigned char *codes, int count)
 
     menu_saved_timer = _dos_getvect(MENU_TIMER_VECTOR);
     _dos_setvect(MENU_TIMER_VECTOR, menu_timer_isr);
-    answer = fdps_battle_system_submenu();
+    if (subject == RUN_OUTER_MENU) {
+        answer = fdps_battle_system_menu();
+    } else {
+        answer = fdps_battle_system_submenu();
+    }
     _dos_setvect(MENU_TIMER_VECTOR, menu_saved_timer);
 
     menu_set_mode(MENU_MODE_TEXT);
     return answer;
+}
+
+static int menu_run(unsigned char *codes, int count)
+{
+    return menu_play(codes, count, RUN_SUBMENU);
+}
+
+static int outer_run(unsigned char *codes, int count)
+{
+    return menu_play(codes, count, RUN_OUTER_MENU);
 }
 
 /* Is the named file staged next to this executable? */
@@ -731,8 +758,245 @@ static void a_zero_unit_count_walks_nothing(void)
     menu_unstage();
 }
 
+/* ---------------------------------------------------------------------- */
+/* fdps_battle_system_menu @ 00014ab0                                      */
+/* ---------------------------------------------------------------------- */
+
+/* The outer menu's answers: MOV dword ptr [EBP-0x4],0x0 on the cancel
+   (00014b62) and on both confirmed arms (00014d5d, 00014e49), and the system
+   submenu's own answer passed through (MOV EAX,[EBP-0x8] / MOV [EBP-0x4],EAX
+   at 00014b93). */
+#define OUTER_DONE 0
+
+/* The values data_fdps_map_cursor_draw_mode and data_fdps_ui_play_active_flag
+   are left at on the ways out these cases take: MOV dword ptr [0x00069cd0],0x1
+   and MOV byte ptr [0x00060159],0x1 at 00014b51/00014b5b and
+   00014b82/00014b8c. */
+#define OUTER_CURSOR_DRAW_MODE_NORMAL 1
+#define OUTER_PLAY_ACTIVE 1
+
+/* A draw mode none of the function's own stores writes, staged so that the 1
+   read back afterwards can only have come from the function. */
+#define OUTER_STAGED_DRAW_MODE 2
+
+/* A turn number to stage and read back: fdps_battle_advance_turn bumps
+   data_fdps_battle_turn_counter (btlturn.h), so an arm that reached it would leave a
+   different one. */
+#define OUTER_STAGED_TURN 5
+
+/* Where the one player unit of the advance-all case stands, and the side byte
+   the arm walks (CMP EAX,0x2 at 00014cb2). */
+#define OUTER_UNIT_TILE_X 3
+#define OUTER_UNIT_TILE_Y 4
+#define OUTER_PLAYER_SIDE 2
+
+/* menu_stage plus the two globals only this subject writes back to something
+   other than what it was staged at. */
+static void outer_unstage(void)
+{
+    data_fdps_map_cursor_draw_mode = 0;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+    data_fdps_battle_turn_counter = 0;
+    menu_unstage();
+}
+
+/* A cancel on the first pass: CMP dword ptr [EBP-0x10],-0x1 / JNZ at 00014b4b
+   falls into the arm that raises the cursor overlay to 1 and the play-active
+   flag to 1 and answers 0.  Both globals are staged at values that are not 1
+   -- the draw mode at one the function never stores -- so reading 1 back says
+   the arm ran, and the turn counter says nothing advanced the turn. */
+static void outer_a_cancel_answers_zero_and_raises_both_flags(void)
+{
+    unsigned char codes[2];
+
+    menu_stage();
+    data_fdps_map_cursor_draw_mode = OUTER_STAGED_DRAW_MODE;
+    data_fdps_ui_play_active_flag = 0;
+    data_fdps_battle_turn_counter = OUTER_STAGED_TURN;
+
+    codes[0] = KEY_IGNORED;
+    codes[1] = KEY_ESC;
+
+    CHECK_EQ(outer_run(codes, 2), OUTER_DONE);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, OUTER_CURSOR_DRAW_MODE_NORMAL);
+    CHECK_EQ(data_fdps_ui_play_active_flag, OUTER_PLAY_ACTIVE);
+    CHECK_EQ(data_fdps_battle_turn_counter, OUTER_STAGED_TURN);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
+/* The system entry with the submenu backing out: fdps_battle_system_submenu's
+   -1 fails the CMP [EBP-0x8],-0x1 / JZ at 00014b7c, which jumps to the loop
+   head, so the outer menu reopens and the trailing cancel ends it with 0.  No
+   face sheet is needed: a cancelled submenu opens no window. */
+static void outer_a_cancelled_submenu_reopens_the_outer_menu(void)
+{
+    unsigned char codes[4];
+
+    menu_stage();
+    data_fdps_battle_turn_counter = OUTER_STAGED_TURN;
+
+    codes[0] = KEY_ENTER;
+    codes[1] = KEY_IGNORED;
+    codes[2] = KEY_ESC;
+    codes[3] = KEY_ESC;
+
+    CHECK_EQ(outer_run(codes, 4), OUTER_DONE);
+    CHECK_EQ(data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, OUTER_CURSOR_DRAW_MODE_NORMAL);
+    CHECK_EQ(data_fdps_ui_play_active_flag, OUTER_PLAY_ACTIVE);
+    CHECK_EQ(data_fdps_battle_turn_counter, OUTER_STAGED_TURN);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
+/* The submenu's answer is the outer menu's answer: confirming quit in the
+   submenu answers 1, which is not -1, so MOV EAX,[EBP-0x8] / MOV [EBP-0x4],EAX
+   at 00014b93 returns it -- 1 here, where every other way out of this function
+   answers 0.  Both flags are raised on this arm as well (00014b82,
+   00014b8c). */
+static void outer_the_submenu_answer_is_passed_through(void)
+{
+    unsigned char codes[5];
+
+    if (!menu_file_present(FACE_NAME)) {
+        return;
+    }
+
+    menu_stage();
+    data_fdps_map_cursor_draw_mode = OUTER_STAGED_DRAW_MODE;
+
+    codes[0] = KEY_ENTER;
+    codes[1] = KEY_DOWN;
+    codes[2] = KEY_ENTER;
+    codes[3] = KEY_IGNORED;
+    codes[4] = KEY_ENTER;
+
+    CHECK_EQ(outer_run(codes, 5), SUBMENU_QUIT_CONFIRMED);
+    CHECK_EQ(data_fdps_shared_quit_game_requested, 1);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, OUTER_CURSOR_DRAW_MODE_NORMAL);
+    CHECK_EQ(data_fdps_ui_play_active_flag, OUTER_PLAY_ACTIVE);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
+/* Advance all, declined: fdps_prompt_two_choice's cancel is not the 0 the CMP
+   [EBP-0x10],0x0 / JNZ at 00014be5 tests for, so the arm at 00014d69 draws the
+   refusal and jumps back to the loop head.  The staged player unit is one the
+   confirmed arm would walk -- side 2, flags clear, not paralysed -- and it is
+   still on its tile afterwards, and the turn counter is unchanged, so neither
+   the walk nor fdps_battle_advance_turn ran. */
+static void outer_a_declined_advance_all_moves_nobody(void)
+{
+    unsigned char codes[6];
+
+    if (!menu_file_present(FACE_NAME)) {
+        return;
+    }
+
+    menu_stage();
+    menu_stage_unit(0, 0);
+    menu_units[0].side = OUTER_PLAYER_SIDE;
+    menu_units[0].pos_x = OUTER_UNIT_TILE_X;
+    menu_units[0].pos_y = OUTER_UNIT_TILE_Y;
+    data_fdps_map_unit_count = 1;
+    data_fdps_battle_turn_counter = OUTER_STAGED_TURN;
+
+    codes[0] = KEY_LEFT;
+    codes[1] = KEY_ENTER;
+    codes[2] = KEY_IGNORED;
+    codes[3] = KEY_ESC;
+    codes[4] = KEY_IGNORED;
+    codes[5] = KEY_ESC;
+
+    CHECK_EQ(outer_run(codes, 6), OUTER_DONE);
+    CHECK_EQ(menu_units[0].pos_x, OUTER_UNIT_TILE_X);
+    CHECK_EQ(menu_units[0].pos_y, OUTER_UNIT_TILE_Y);
+    CHECK_EQ(menu_units[0].flags, 0);
+    CHECK_EQ(data_fdps_battle_turn_counter, OUTER_STAGED_TURN);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, OUTER_CURSOR_DRAW_MODE_NORMAL);
+    CHECK_EQ(data_fdps_ui_play_active_flag, OUTER_PLAY_ACTIVE);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
+/* End turn, declined: the CMP [EBP-0x10],0x0 / JNZ at 00014dfc takes the arm
+   at 00014e52, which draws the refusal and falls through to the loop head, so
+   the turn is not advanced and the trailing cancel answers 0. */
+static void outer_a_declined_end_turn_leaves_the_turn_alone(void)
+{
+    unsigned char codes[6];
+
+    if (!menu_file_present(FACE_NAME)) {
+        return;
+    }
+
+    menu_stage();
+    data_fdps_battle_turn_counter = OUTER_STAGED_TURN;
+
+    codes[0] = KEY_DOWN;
+    codes[1] = KEY_ENTER;
+    codes[2] = KEY_IGNORED;
+    codes[3] = KEY_ESC;
+    codes[4] = KEY_IGNORED;
+    codes[5] = KEY_ESC;
+
+    CHECK_EQ(outer_run(codes, 6), OUTER_DONE);
+    CHECK_EQ(data_fdps_battle_turn_counter, OUTER_STAGED_TURN);
+    CHECK_EQ(data_fdps_map_cursor_draw_mode, OUTER_CURSOR_DRAW_MODE_NORMAL);
+    CHECK_EQ(data_fdps_ui_play_active_flag, OUTER_PLAY_ACTIVE);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
+/* The cursor is set to slot 0 ONCE, MOV dword ptr [EBP-0xc],0x0 at 00014ad4
+   ahead of the loop head at 00014aec, so the menu reopens on the entry last
+   chosen.  The script picks options (Right, Enter), backs out of it, and then
+   presses Enter with NO arrow: the retained slot 2 opens the options menu a
+   second time, where Down and Enter toggle the terrain switch.  Had the cursor
+   been put back on slot 0 the same Enter would open the system submenu
+   instead, the Down and Enter there would raise the quit prompt, the escapes
+   would decline and cancel it, and the terrain switch would be left at 0. */
+static void outer_the_menu_reopens_on_the_entry_last_chosen(void)
+{
+    unsigned char codes[12];
+
+    if (!menu_file_present(FACE_NAME)) {
+        return;
+    }
+
+    menu_stage();
+    data_fdps_ui_terrain_hud_user_enabled = 0;
+
+    codes[0] = KEY_RIGHT;
+    codes[1] = KEY_ENTER;
+    codes[2] = KEY_IGNORED;
+    codes[3] = KEY_ESC;
+    codes[4] = KEY_IGNORED;
+    codes[5] = KEY_ENTER;
+    codes[6] = KEY_DOWN;
+    codes[7] = KEY_ENTER;
+    codes[8] = KEY_IGNORED;
+    codes[9] = KEY_ESC;
+    codes[10] = KEY_IGNORED;
+    codes[11] = KEY_ESC;
+
+    CHECK_EQ(outer_run(codes, 12), OUTER_DONE);
+    CHECK_EQ(data_fdps_ui_terrain_hud_user_enabled, 1);
+    CHECK_EQ(data_fdps_shared_quit_game_requested, 0);
+    CHECK_EQ(_heapchk(), _HEAPOK);
+    outer_unstage();
+}
+
 void run_btlmenu_tests(void)
 {
+    RUN_TEST(outer_a_cancel_answers_zero_and_raises_both_flags);
+    RUN_TEST(outer_a_cancelled_submenu_reopens_the_outer_menu);
+    RUN_TEST(outer_the_submenu_answer_is_passed_through);
+    RUN_TEST(outer_a_declined_advance_all_moves_nobody);
+    RUN_TEST(outer_a_declined_end_turn_leaves_the_turn_alone);
+    RUN_TEST(outer_the_menu_reopens_on_the_entry_last_chosen);
     RUN_TEST(a_cancelled_ring_answers_minus_one);
     RUN_TEST(the_availability_walk_leaves_a_cancel_alone);
     RUN_TEST(a_confirmed_quit_raises_the_flag_and_answers_one);

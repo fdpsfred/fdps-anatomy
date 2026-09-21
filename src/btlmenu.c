@@ -11,7 +11,8 @@
  * where Watcom 10.0a declares each of them; all of them are real calls in the
  * original -- CALL 0x00042438 at 00014ecc for access, CALL 0x0003d375 at
  * 000150cc and CALL 0x0003d478 at 0001530d for malloc and free, CALL
- * 0x0003d514 at 00015161 for memmove, CALL 0x0003d370 at 0001500c for delay
+ * 0x0003d514 at 00015161 for memmove, CALL 0x0003d370 at 0001500c and
+ * 00014c1a for delay
  * and CALL 0x0004265e / 0x0004270d / 0x00042a41 / 0x000428be for fopen, fread,
  * fwrite and fclose -- because the flag set carries no -oi
  * (rebuild_info/build_flags.md), so the plain declarations are what reproduce
@@ -26,9 +27,13 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "btlend.h"
+#include "btlturn.h"
+#include "chapter.h"
 #include "keybd.h"
+#include "mapcur.h"
 #include "mapdraw.h"
 #include "menu.h"
+#include "movegrid.h"
 #include "msgwin.h"
 #include "savefile.h"
 #include "text.h"
@@ -198,6 +203,282 @@
    chapter_index in each of the four (fdpstype.h, save.c). */
 #define SAVE_IMAGE_SLOTS_AT 0x312b
 #define SAVE_SLOT_UNWRITTEN_CHAPTER 0xff
+
+/* The four entries of the outer battle menu in ring slot order -- 0 up, 1
+   left, 2 right, 3 down (menu.h) -- and the Command.cel sub-image each shows,
+   the four ints of the template at 000146e0 copied onto the stack by the MOVSD
+   run at 00014ac4..00014ac7.  The descriptor that goes with them is the
+   all-zero template at 000146f0 (00014ad0..00014ad3), and nothing in this
+   function ever writes into it, so no entry of this menu is ever greyed. */
+#define OUTER_MENU_SLOTS 4
+#define OUTER_ICON_SYSTEM 0x16
+#define OUTER_ICON_ADVANCE_ALL 0x0b
+#define OUTER_ICON_OPTIONS 0x0c
+#define OUTER_ICON_END_TURN 0x13
+
+/* Which slot does what: the dispatch is CMP dword ptr [EBP-0xc] against 0, 1,
+   2 and 3 at 00014b6e, 00014ba3, 00014da6 and 00014db6, and a value outside
+   0..3 falls off the end of the chain and reopens the menu. */
+#define OUTER_ENTRY_SYSTEM 0
+#define OUTER_ENTRY_ADVANCE_ALL 1
+#define OUTER_ENTRY_OPTIONS 2
+#define OUTER_ENTRY_END_TURN 3
+
+/* The closing retraction this function plays itself rather than through
+   fdps_menu_animate_close: radius 0x17 at 00014b17, ADD [EBP-0x14],-0x4 at
+   00014b26 and CMP [EBP-0x14],0x0 / JG at 00014b1e, so the six frames are
+   drawn at 0x17, 0x13, 0xf, 0xb, 7 and 3.  Those are the radii
+   fdps_menu_animate_close draws too, but that function opens with the window
+   cue (menu.h) and this loop does not, which is why it is written out here
+   and not replaced by the call. */
+#define CLOSE_SWEEP_FIRST_RADIUS 0x17
+#define CLOSE_SWEEP_STEP 4
+
+/* The two values the cursor overlay and the play-active flag are switched
+   between.  Both are lowered once on entry, at 00014adb and 00014ae5, and
+   raised again on the way out (gamedata.h). */
+#define CURSOR_DRAW_MODE_HIDDEN 0
+#define CURSOR_DRAW_MODE_NORMAL 1
+#define PLAY_INACTIVE 0
+#define PLAY_ACTIVE 1
+
+/* The six entries of data_fdps_all_game_text_ptr the two confirmed arms write,
+   pushed at 00014bca, 00014c02, 00014d7c, 00014ddd, 00014e11 and 00014e65: a
+   question, the line that replaces it on yes, and the line that replaces it on
+   no, for each of the two arms. */
+#define TEXT_ADVANCE_ALL_QUESTION 0x1ea
+#define TEXT_ADVANCE_ALL_CONFIRMED 0x1eb
+#define TEXT_ADVANCE_ALL_DECLINED 0x1ec
+#define TEXT_END_TURN_QUESTION 0x1ed
+#define TEXT_END_TURN_CONFIRMED 0x1ee
+#define TEXT_END_TURN_DECLINED 0x1ef
+
+/* The end-turn arm's answer goes one row lower than every other answer in this
+   file: PUSH 0xad3ca at 00014e0c and 00014e60 is screen (138, 169), where the
+   advance-all arm's PUSH 0xabc0a at 00014bfd and 00014d77 is (138, 150).  Like
+   the other two it is an address in the display adapter's aperture and stays
+   a literal (contract E). */
+#define MESSAGE_END_TURN_ANSWER_AT 0x000ad3ca
+
+/* Both answers are held for 300 ms, PUSH 0x12c at 00014c15, 00014d8f,
+   00014e24 and 00014e78, the yes as long as the no. */
+#define OUTER_ANSWER_HOLD_MS 300
+
+/* The face index both prompts open the message window with, PUSH 0x0 at
+   00014bad and 00014dc0. */
+#define OUTER_FACE_INDEX 0
+
+/* Which units the advance-all arm walks.  record +5 AND AL,0x85 at 00014c9c
+   skips any unit with bit 0 (retired), bit 7 (acted this turn) or bit 2 set;
+   no instruction in the image stores bit 2 as an immediate or tests it on its
+   own, so what it marks is not established and it is named only by its
+   value.  record +6 must be 2, the player side (CMP EAX,0x2 at 00014cb2), and
+   record +0x26, status_timers[4] the paralysis counter (aitarget.h), must be
+   zero (00014cbc). */
+#define ADVANCE_ALL_SKIP_FLAGS 0x85
+#define ADVANCE_ALL_SIDE 2
+#define ADVANCE_ALL_STATUS_PARALYSIS 4
+
+/* fdps_battle_move_unit_toward's side_select, PUSH 0x1 at 00014cf5: the
+   acting unit is on the player's side (movegrid.h). */
+#define ADVANCE_ALL_SIDE_SELECT 1
+
+/* The "no event is pending" value data_fdps_chapter_pending_event_idx is
+   seeded with before each walk and tested against after it, MOV dword ptr
+   [0x00069d90],0xff at 00014ceb and CMP dword ptr [0x00069d90],0xff at
+   00014d0b (gamedata.h). */
+#define NO_PENDING_EVENT 0xff
+
+/* What this function answers when it does not pass the system submenu's
+   answer through: MOV dword ptr [EBP-0x4],0x0 at 00014b62, 00014d5d and
+   00014e49 (btlmenu.h). */
+#define OUTER_MENU_DONE 0
+
+/* 00014ab0.  See btlmenu.h for what the answer means and for what each entry
+   does.
+
+   THE CURSOR IS SET TO THE FIRST ENTRY ONCE, IN FRONT OF THE LOOP, MOV dword
+   ptr [EBP-0xc],0x0 at 00014ad4 with the loop head at 00014aec.  So a menu
+   reopened after a declined prompt, after the options menu or after a
+   cancelled system submenu opens on the entry the player last chose -- the
+   opposite of fdps_battle_system_submenu, which resets its cursor on every
+   pass.
+
+   THE OVERLAY AND THE PLAY-ACTIVE FLAG ARE LOWERED ONCE, ALSO IN FRONT OF THE
+   LOOP, and raised again on each way out except one: the confirmed end-turn
+   arm raises only the play-active flag (MOV byte ptr [0x00060159],0x1 at
+   00014e42) and leaves data_fdps_map_cursor_draw_mode at the 0 stored on
+   entry -- or at whatever fdps_battle_advance_turn left in it.
+
+   THE VIEW IS REPAINTED BEFORE THE SELECTION IS ACTED ON, CALL 0x0002beb0 at
+   00014b46, which is what takes the retracted ring off the screen, and on the
+   cancelled pass as well.
+
+   THE ADVANCE-ALL ARM WORKS FROM THE CURSOR'S TILE AS IT STOOD WHEN THE PROMPT
+   WAS ANSWERED.  Both tile coordinates are taken once, by the signed IDIV by
+   0x18 at 00014c3a and 00014c52, before the walk; the cursor is then moved
+   onto each unit in turn and never put back, so every unit is sent to the
+   same tile and the cursor ends on the last unit walked.
+
+   THE PENDING EVENT IS FIRED WITH THE WALKING UNIT'S INDEX, PUSH EAX from
+   [EBP-0x14] at 00014d27 in front of CALL dword ptr [EDX+0x601c4], and the
+   slot is scaled straight into the table with no bound. */
+int fdps_battle_system_menu(void)
+{
+    /* The two four-int arrays the ring menu is described by, in slot order up,
+       left, right, down (menu.h), copied from the templates at 000146e0 and
+       000146f0. */
+    int menu_icons[OUTER_MENU_SLOTS] = {
+        OUTER_ICON_SYSTEM, OUTER_ICON_ADVANCE_ALL,
+        OUTER_ICON_OPTIONS, OUTER_ICON_END_TURN
+    };
+    int menu_disabled[OUTER_MENU_SLOTS] = { 0, 0, 0, 0 };
+    /* [EBP-0xc]: the slot the cursor is on, carried from pass to pass. */
+    int selected;
+    /* [EBP-0x10]: what the cursor loop answered, -1 for a cancel. */
+    int cursor_result;
+    /* [EBP-0x10] again in the original: the confirmation prompt's answer, 0
+       for yes. */
+    int prompt_answer;
+    /* [EBP-0x8]: what fdps_battle_system_submenu answered. */
+    int submenu_result;
+    /* [EBP-0x14]: the retraction's radius. */
+    int close_radius;
+    /* [EBP-0x14] again: the unit the advance-all walk is on, and [EBP-0x28]
+       the record it names. */
+    int unit_index;
+    struct fdps_unit_record *unit;
+    /* [EBP-0x1c] and [EBP-0x18]: the tile the map cursor stood on when the
+       advance-all prompt was answered, the destination every unit is sent
+       toward. */
+    int cursor_tile_x;
+    int cursor_tile_y;
+    /* [EBP-0x24] and [EBP-0x20]: the walking unit's own tile, zero-extended
+       from the record's two position bytes. */
+    int unit_tile_x;
+    int unit_tile_y;
+
+    selected = OUTER_ENTRY_SYSTEM;
+    data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+    data_fdps_ui_play_active_flag = PLAY_INACTIVE;
+
+    for (;;) {
+        fdps_menu_animate_open(menu_icons, menu_disabled, selected);
+        cursor_result = fdps_menu_cursor_input_loop(menu_icons, menu_disabled,
+                                                    &selected);
+        for (close_radius = CLOSE_SWEEP_FIRST_RADIUS; close_radius > 0;
+             close_radius -= CLOSE_SWEEP_STEP) {
+            fdps_render_ring_menu_frame(menu_icons, menu_disabled,
+                                        close_radius, selected);
+        }
+        fdps_render_view_frame();
+
+        if (cursor_result == MENU_CURSOR_CANCELLED) {
+            data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_NORMAL;
+            data_fdps_ui_play_active_flag = PLAY_ACTIVE;
+            return OUTER_MENU_DONE;
+        }
+
+        if (selected == OUTER_ENTRY_SYSTEM) {
+            submenu_result = fdps_battle_system_submenu();
+            if (submenu_result != SUBMENU_CANCELLED) {
+                data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_NORMAL;
+                data_fdps_ui_play_active_flag = PLAY_ACTIVE;
+                return submenu_result;
+            }
+        } else if (selected == OUTER_ENTRY_ADVANCE_ALL) {
+            fdps_message_window_open(OUTER_FACE_INDEX);
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_ADVANCE_ALL_QUESTION,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+            prompt_answer = fdps_prompt_two_choice();
+            if (prompt_answer == PROMPT_ANSWER_YES) {
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               TEXT_ADVANCE_ALL_CONFIRMED,
+                               (unsigned char *) MESSAGE_ANSWER_AT,
+                               VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                               MESSAGE_TEXT_BG_COLOR,
+                               MESSAGE_TEXT_OUTLINE_COLOR);
+                delay(OUTER_ANSWER_HOLD_MS);
+                fdps_message_window_close();
+
+                cursor_tile_x = data_fdps_map_cursor_world_x / MAP_TILE_SIZE;
+                cursor_tile_y = data_fdps_map_cursor_world_y / MAP_TILE_SIZE;
+                data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_HIDDEN;
+                data_fdps_ui_play_active_flag = PLAY_INACTIVE;
+
+                for (unit_index = 0; unit_index < data_fdps_map_unit_count;
+                     unit_index++) {
+                    unit = fdps_get_unit_record(unit_index);
+                    if ((unit->flags & ADVANCE_ALL_SKIP_FLAGS) == 0 &&
+                        (int) unit->side == ADVANCE_ALL_SIDE &&
+                        unit->status_timers[ADVANCE_ALL_STATUS_PARALYSIS]
+                            == 0) {
+                        unit_tile_x = (int) unit->pos_x;
+                        unit_tile_y = (int) unit->pos_y;
+                        fdps_map_cursor_move_to(unit_tile_x * MAP_TILE_SIZE,
+                                                unit_tile_y * MAP_TILE_SIZE);
+                        data_fdps_chapter_pending_event_idx = NO_PENDING_EVENT;
+                        fdps_battle_move_unit_toward(cursor_tile_x,
+                                                     cursor_tile_y, unit_index,
+                                                     ADVANCE_ALL_SIDE_SELECT);
+                        if (data_fdps_chapter_pending_event_idx
+                                != NO_PENDING_EVENT) {
+                            data_fdps_chapter_event_handler_table
+                                [data_fdps_chapter_pending_event_idx](
+                                    unit_index);
+                        }
+                        fdps_battle_mark_unit_done(unit_index);
+                    }
+                }
+
+                fdps_battle_advance_turn();
+                data_fdps_map_cursor_draw_mode = CURSOR_DRAW_MODE_NORMAL;
+                data_fdps_ui_play_active_flag = PLAY_ACTIVE;
+                fdps_units_clear_status_bit7();
+                return OUTER_MENU_DONE;
+            }
+            fdps_draw_text(data_fdps_all_game_text_ptr,
+                           TEXT_ADVANCE_ALL_DECLINED,
+                           (unsigned char *) MESSAGE_ANSWER_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+            delay(OUTER_ANSWER_HOLD_MS);
+            fdps_message_window_close();
+        } else if (selected == OUTER_ENTRY_OPTIONS) {
+            fdps_options_menu();
+        } else if (selected == OUTER_ENTRY_END_TURN) {
+            fdps_message_window_open(OUTER_FACE_INDEX);
+            fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_END_TURN_QUESTION,
+                           (unsigned char *) MESSAGE_QUESTION_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+            prompt_answer = fdps_prompt_two_choice();
+            if (prompt_answer == PROMPT_ANSWER_YES) {
+                fdps_draw_text(data_fdps_all_game_text_ptr,
+                               TEXT_END_TURN_CONFIRMED,
+                               (unsigned char *) MESSAGE_END_TURN_ANSWER_AT,
+                               VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                               MESSAGE_TEXT_BG_COLOR,
+                               MESSAGE_TEXT_OUTLINE_COLOR);
+                delay(OUTER_ANSWER_HOLD_MS);
+                fdps_message_window_close();
+                data_fdps_ui_play_active_flag = PLAY_INACTIVE;
+                fdps_battle_advance_turn();
+                data_fdps_ui_play_active_flag = PLAY_ACTIVE;
+                return OUTER_MENU_DONE;
+            }
+            fdps_draw_text(data_fdps_all_game_text_ptr, TEXT_END_TURN_DECLINED,
+                           (unsigned char *) MESSAGE_END_TURN_ANSWER_AT,
+                           VGA_SCREEN_PITCH, MESSAGE_TEXT_FG_COLOR,
+                           MESSAGE_TEXT_BG_COLOR, MESSAGE_TEXT_OUTLINE_COLOR);
+            delay(OUTER_ANSWER_HOLD_MS);
+            fdps_message_window_close();
+        }
+    }
+}
 
 /* 00014ea0.  See btlmenu.h for what the answer means and for what each entry
    does.
