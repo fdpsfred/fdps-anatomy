@@ -303,6 +303,15 @@ def check_layout(entry, manifest_by_sym, reb, reb_map):
             ok = pseg == seg and off == want
             out.append((ok, "follows %s: at %04x:%08x, expected %04x:%08x"
                         % (prev, seg, off, pseg, want)))
+    pad = layout.get("zero_pad_after")
+    if pad:
+        end = off + int(entry["size"])
+        after = reb.read(seg, end, int(pad))
+        owners = [s for s, (sg, so, _) in reb_map.items()
+                  if sg == seg and end <= so < end + int(pad)]
+        ok = after == b"\0" * int(pad) and not owners
+        out.append((ok, "zero pad after (%d): bytes %s, public symbols there: %s"
+                    % (int(pad), after.hex(), owners or "none")))
     if layout.get("zero_guard_before"):
         below = reb.read(seg, off - 4, 4)
         owners = [s for s, (sg, so, _) in reb_map.items()
@@ -416,6 +425,16 @@ def selftest():
     res = check_layout({"symbol": "t", "layout": {"zero_guard_before": True}},
                        man, orig, {"t": (2, 0x74, "X"), "flag": (2, 0x70, "X")})
     rows.append(("guard owned by a public symbol fails", res and not res[0][0], str(res)))
+    # 0x60070 is the one-byte village flag; its next three bytes are zero pad
+    # up to the init table at 0x60074.
+    fmap = {"flag": (2, 0x70, "X"), "t": (2, 0x74, "X")}
+    fman = {"flag": {"symbol": "flag", "size": 1}}
+    res = check_layout({"symbol": "flag", "size": 1, "layout": {"zero_pad_after": 3}},
+                       fman, orig, fmap)
+    rows.append(("zero pad after passes", res and res[0][0], str(res)))
+    res = check_layout({"symbol": "flag", "size": 1, "layout": {"zero_pad_after": 4}},
+                       fman, orig, fmap)
+    rows.append(("pad reaching a public symbol fails", res and not res[0][0], str(res)))
     ok_all = True
     for name, passed, detail in rows:
         print("[selftest] %-40s %s (%s)" % (name, "ok" if passed else "FAIL", detail))

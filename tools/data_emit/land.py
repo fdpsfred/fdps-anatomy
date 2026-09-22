@@ -104,7 +104,9 @@ def validate(v, routing_rows):
     if "#" in body:
         p.append("definition contains a preprocessor line")
     # The symbol is defined exactly once, and as a definition.
-    defs = re.findall(r"\b%s\b\s*(\[[^\]]*\])?\s*(=|;)" % re.escape(sym), body)
+    # A plain declarator ("int x[6] =", "int x;") or a function-pointer
+    # array's ("void (*x[30])(void) =").
+    defs = re.findall(r"\b%s\b\s*(\[[^\]]*\])?\s*(=|;|\))" % re.escape(sym), body)
     if len(defs) != 1:
         p.append("definition names %s %d times as a declarator, expected 1"
                  % (sym, len(defs)))
@@ -121,7 +123,13 @@ def validate(v, routing_rows):
     if hdr.get("replace_with") and not hdr.get("current"):
         p.append("header.replace_with without header.current")
     lay = v.get("layout") or {}
-    if lay.get("follows") or lay.get("zero_guard_before"):
+    pad = lay.get("zero_pad_after")
+    if pad not in (None, False, 0) and (not isinstance(pad, int) or pad < 0):
+        p.append("layout.zero_pad_after %r is not a byte count" % pad)
+    elif pad and not re.search(r"\bstatic\b[^;]*=[^;]*;\s*$", body.strip()):
+        p.append("layout.zero_pad_after needs the definition to END with its own "
+                 "static initialised zero pad")
+    if lay.get("follows") or lay.get("zero_guard_before") or pad:
         if v.get("kind") != "initialized":
             p.append("a layout constraint needs kind initialized (only _DATA keeps "
                      "source order)")
@@ -313,7 +321,7 @@ def manifest_entry(v):
     return {"symbol": v["symbol"], "addr": v["addr"], "size": v["size"],
             "target": v["target"], "kind": v["kind"],
             "layout": {k: val for k, val in (v.get("layout") or {}).items()
-                       if k in ("follows", "zero_guard_before") and val},
+                       if k in ("follows", "zero_guard_before", "zero_pad_after") and val},
             "confidence": v["confidence"], "basis": " ".join(v["basis"].split()),
             "handoff": [h.get("id") for h in (v.get("handoff") or []) if h.get("id")]}
 
@@ -502,6 +510,18 @@ def _selftest():
     rows.append(("wrong target refused", bool(validate(bad, r)), str(validate(bad, r))))
     bad = V("data_z", "00069000", "zero", "int data_z;", layout={"follows": "data_def"})
     rows.append(("layout on a zero definition refused", bool(validate(bad, r)),
+                 str(validate(bad, r))))
+    fp = V("data_z", "00069000", "initialized",
+           "void (*data_z[2])(void) = { f0, f1 };", size=8)
+    rows.append(("function-pointer array declarator accepted", validate(fp, r) == [],
+                 str(validate(fp, r))))
+    padded = V("data_z", "00069000", "initialized",
+               "int data_z = 0;\nstatic unsigned char data_z_tail[3] = { 0 };",
+               layout={"zero_pad_after": 3})
+    rows.append(("zero pad after accepted", validate(padded, r) == [], str(validate(padded, r))))
+    bad = V("data_z", "00069000", "initialized", "int data_z = 0;",
+            layout={"zero_pad_after": 3})
+    rows.append(("zero pad without its static refused", bool(validate(bad, r)),
                  str(validate(bad, r))))
 
     tmp = Path(tempfile.mkdtemp(prefix="fdps_land_selftest_"))
