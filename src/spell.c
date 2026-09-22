@@ -577,11 +577,12 @@ void fdps_play_spell_11_cutscene(void)
  * into this frame with the fingerprint build_flags.md describes: a run of
  * parameter-shaped slots as wide as the callee's parameter list, the callee's
  * body replayed instruction for instruction against them, and for the heal a
- * separate result slot the answer is copied out of.  Watcom 10.0a still honours
- * a source-level _inline under -od.  They are written open-coded here because
+ * separate result slot the answer is copied out of.  The expansion is the
+ * compiler's: the original's game units were compiled with -oe=25
+ * (rebuild_info/build_flags.md).  They are written open-coded here because
  * ADR-0001 asks for the behaviour and not the source text, and because turning
- * either back into a call without also declaring it _inline would put a CALL in
- * the rebuild that the original does not execute.
+ * either back into a call under the rebuild's current build, which has no -oe,
+ * would put a CALL in the rebuild that the original does not execute.
  *
  * THE FOUR VALUES THAT COME BACK FROM A CALL.  fdps_get_spell_record and
  * fdps_get_unit_record hand back pointers that are dereferenced at once.

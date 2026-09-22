@@ -104,12 +104,12 @@ int fdps_saf_frame_count(void *saf)
    called them: both expansions carry a full copy of the callee's frame --
    argument temps copied into consecutive parameter-shaped slots, the body
    replayed under a uniform slot substitution, the result copied back out -- and
-   -oe is not in the flag set, so the expansion was asked for in the source with
-   _inline (rebuild_info/build_flags.md).  Writing the bodies out is still
-   correct: ADR-0001 is functional equivalence and the two spellings compile to
-   the same behaviour.  Chasing the original's wording is the riskier of the
-   two, because the call spelling only stays equivalent while the _inline
-   declaration is there to expand it -- a call without it puts a CALL here that
+   the original's game units were compiled with -oe=25, which expanded them
+   (rebuild_info/build_flags.md; 10.0a C has no _inline keyword).  Writing the
+   bodies out is still correct: ADR-0001 is functional equivalence and the two
+   spellings compile to the same behaviour.  The call spelling only reproduces
+   the expansion under -oe=25 with the callee in the same unit, which the
+   rebuild's build does not have yet -- without it a call puts a CALL here that
    the original does not have.  Both copies are read the same
    way -- the count word at +0x0c zero-extended, the three magic bytes joined
    with OR, the frame offset rebased on the image base -- so the notes on

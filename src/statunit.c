@@ -139,8 +139,9 @@
    fingerprint, and that function has no caller anywhere in the image because
    both of its uses were expanded (rebuild_info/build_flags.md).  Writing the
    arithmetic out is correct under ADR-0001: the two spellings behave
-   identically, and spelling it as a call without an _inline declaration to
-   expand it would put two CALLs here that the original does not have.
+   identically, and spelling it as a call under the rebuild's current build,
+   which has no -oe (the original's game units used -oe=25), would put two
+   CALLs here that the original does not have.
 
    The division is the signed one -- MOV EAX,EDX / SAR EDX,0x1f / IDIV at
    000165b8 -- and it rounds up, so one hit point left still shows a filled

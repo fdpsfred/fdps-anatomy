@@ -66,12 +66,12 @@ OUT = os.path.join(REPO, "workspace", "build_flags", "fn_match")
 
 BASE = "-bt=dos4g -mf -zq -4s -fpi"
 SETS = {
-    "A": BASE + " -s -ot -od",              # the set build_flags.md documents
+    "A": BASE + " -s -ot -od",              # the rebuild's current build
     "B": BASE + " -s -ot -oe -d2",
-    "Q": BASE + " -s -ot -oe=25 -d2",
+    "Q": BASE + " -s -ot -oe=25 -d2",       # the original's game units (build_flags.md)
     "R1": BASE + " -s -d2 -oe=25 -ot",      # flag order variants of Q
     "R2": BASE + " -s -oe=25 -d2 -ot",
-    "O": BASE + " -os",                     # CD units
+    "O": BASE + " -os",                     # the original's CD units
     "P": BASE + " -os -d2",
 }
 

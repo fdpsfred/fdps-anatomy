@@ -72,13 +72,13 @@ void fdps_map_grid_reset(void)
 
    The four neighbour marks are written out here rather than calling
    fdps_move_grid_set_stop_flag, which is the same three lines as a standalone
-   function at 00010da0.  The binary keeps that copy but nothing calls it.  Note
-   that -od does NOT mean the compiler did no inlining -- _inline in the source
-   is honoured under it, and three expansion sites in this image are the
-   measurement (rebuild_info/build_flags.md) -- so the assembly does not settle
-   how the original spelled this.  It does not need to: emitting a call would
-   put a CALL where the original has none, and under ADR-0001 writing the marks
-   out reproduces the behaviour either way.
+   function at 00010da0.  The binary keeps that copy but nothing calls it.  The
+   original's game units were compiled with -oe=25, which expands small
+   same-unit callees on its own (rebuild_info/build_flags.md), so the assembly
+   does not settle how the original spelled this.  It does not need to: the
+   rebuild's build has no -oe yet, so emitting a call would put a CALL where the
+   original has none, and under ADR-0001 writing the marks out reproduces the
+   behaviour either way.
 
    What the shape here does say is that this is not 00010da0's body with its
    parameters bound once: each of the four sites gets its own five-dword group

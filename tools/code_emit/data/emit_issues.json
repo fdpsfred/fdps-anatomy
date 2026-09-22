@@ -3235,9 +3235,10 @@
       "blocking": false,
       "sweep": {
         "cluster": "c24",
-        "ruling": "open",
-        "pass": "rescan",
-        "resolved_after_sweep": "tests/title.c waits one timer tick after stuffing the BIOS ring"
+        "ruling": "settled",
+        "pass": "after_sweep",
+        "resolved_after_sweep": "tests/title.c waits one timer tick after stuffing the BIOS ring",
+        "ruling_at_sweep": "open"
       },
       "earlier_answer": "Not a behaviour difference in src/, so it is not blocking. fdps_play_movie and the CRT kbhit it calls (00043570: [0x60440] ungetch byte, else INT 21h AH=0Bh) are reproduced faithfully. What is established: movie_premise_the_queue_can_be_stuffed's CHECK_EQ(seen != 0, 1) failed once and passed five times on the same 1,601,325-byte image. That case runs with IRQ1 masked and with no game ISR, no AIL timer and no mode 13h. So kbhit's occasional blindness to a hand-stuffed BIOS ring is a property of DOSBox-X's INT 21h AH=0Bh / console-status path, not of the three suspects on record. They can at most change how often it happens. The comment above movie_queue_really_held_two_keys_at_entry that says the premise case 'has never failed' is now false. What is not established, and cannot be read out of FDPS.LE, the objects or the knowledge base, is which state inside DOSBox-X makes AH=0Bh disagree with the ring's head and tail between runs. It would be settled by running a minimal DOS/4GW probe under DOSBox-X -silent many times on one binary: stuff the ring, then record INT 16h AH=01h's ZF, INT 21h AH=0Bh's AL, the words at 0x41a/0x41c and 0x480/0x482, and the CRT byte at the ungetch slot. That shows which layer drops the keys. Until then, as long as the premise case asserts kbhit on every run, the emit gate can go red at random. The drain case's fork depends on that same premise reading as its canary, so the premise assertion cannot simply be deleted either. This is a harness and test-design question for the owner of tests/title.c, not something the rebuild's source can fix."
     },
@@ -3277,10 +3278,11 @@
       "same_as": "emit#2",
       "sweep": {
         "cluster": "c24",
-        "ruling": "open",
-        "pass": "rescan",
+        "ruling": "settled",
+        "pass": "after_sweep",
         "mirror_of": "0002dcf0#2",
-        "resolved_after_sweep": "tests/title.c waits one timer tick after stuffing the BIOS ring"
+        "resolved_after_sweep": "tests/title.c waits one timer tick after stuffing the BIOS ring",
+        "ruling_at_sweep": "open"
       }
     }
   ],

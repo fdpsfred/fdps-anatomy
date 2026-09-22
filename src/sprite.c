@@ -236,11 +236,11 @@ void fdps_draw_tilemap_layer(int *request)
    into the consecutive parameter-shaped slots at -0x58 and -0x5c, the callee's
    body replayed instruction for instruction under that substitution, and the
    result slot at -0x64 copied out into this function's own local at -0xc.
-   -oe is not in the flag set, so the expansion was asked for in the source
-   with _inline (rebuild_info/build_flags.md).  Writing the body out is still
+   The original's game units were compiled with -oe=25, which made that
+   expansion (rebuild_info/build_flags.md).  Writing the body out is still
    correct: ADR-0001 is functional equivalence and the two spellings behave
-   alike.  Spelling it as a call is the riskier of the two, because it only
-   stays equivalent while an _inline declaration is there to expand it.  The
+   alike.  Spelling it as a call only reproduces the expansion under -oe=25
+   with the callee in the same unit, which the rebuild's build lacks.  The
    count word at +0x0c is read zero-extended and the frame offset is rebased on
    the image and not on the table, both exactly as fdps_saf_get_frame does
    them, so saf.c's notes apply here unchanged.
