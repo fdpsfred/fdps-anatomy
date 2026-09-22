@@ -23,6 +23,18 @@
 #include "palette.h"
 #include "palcycle.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060014. Starts at 15, the top of the cycle, exactly as the image ships it.
+   Nothing ever resets the phase except the wrap from -1 back to 15, so a zero
+   start would leave the UI colour wave permanently offset from the original.
+   */
+int data_fdps_ui_palette_cycle_phase = 15;
+
+/* End of global data. */
+
 /* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
    progress, and it is the only bit anyone here looks at. */
 #define VGA_INPUT_STATUS_1 0x3da

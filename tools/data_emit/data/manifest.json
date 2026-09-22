@@ -1,0 +1,160 @@
+{
+  "_doc": "Every global ticket 23 has landed in src/: where it came from, how it is defined, the layout it has to keep and the basis of the decision.  Written by tools/data_emit/land.py; read by tools/data_emit/check_data.py, which compares each entry's linked bytes with the shipped image.",
+  "symbols": [
+    {
+      "symbol": "data_fdps_battle_action_cancel_ends_turn_flag",
+      "addr": "00060004",
+      "size": 4,
+      "target": "btlturn.c",
+      "kind": "zero",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image bytes 00060004..07 are all zero; only two dword CMP-with-0 reads, no writes, no neighbour-relative access, so tentative zero definition with no layout constraint.",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_audio_bgm_enabled_flag",
+      "addr": "00060008",
+      "size": 1,
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {},
+      "confidence": "high",
+      "basis": "initialised: image byte at 00060008 is 01; all 15 xrefs are direct byte accesses to 0x60008, none via a neighbour address, so no layout constraint",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_number_glyph_color_row",
+      "addr": "0006000c",
+      "size": 4,
+      "target": "gamedata.c",
+      "kind": "zero",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image bytes at 0006000c are 00 00 00 00 -> zero; every access is a full dword at the exact address, no neighbour crossing -> no layout.",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_ui_battle_animation_enabled",
+      "addr": "00060010",
+      "size": 1,
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image byte at 00060010 is 0x01 -> initialized; all 8 xrefs are direct byte accesses at 00060010, none reaching a neighbour -> no layout constraint.",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_ui_palette_cycle_phase",
+      "addr": "00060014",
+      "size": 4,
+      "target": "palcycle.c",
+      "kind": "initialized",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image bytes 0f 00 00 00 at 00060014 -> initialized 15; all six xrefs are dword accesses inside fdps_cycle_ui_palette; no neighbour-crossing access so no layout constraint.",
+      "handoff": [
+        "00015be0#0",
+        "00015be0#2"
+      ]
+    },
+    {
+      "symbol": "data_fdps_input_key_repeat_counter",
+      "addr": "00060018",
+      "size": 4,
+      "target": "keybd.c",
+      "kind": "zero",
+      "layout": {},
+      "confidence": "high",
+      "basis": "image bytes at 00060018 are 00 00 00 00 -> zero; all five xrefs are dword accesses to this address alone in fdps_read_scancode_auto_repeat -> signed int, no layout",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_battle_tile_attr_ap_modifier_table",
+      "addr": "00060040",
+      "size": 24,
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Initialized from image bytes 05 00 00 00 00 00 00 00 fb ff ff ff x3 00 00 00 00; signed int (IMUL/IDIV); no layout constraint on this symbol's predecessor, the adjacency need is recorded for the following def table.",
+      "handoff": [
+        "0001c520#0",
+        "00019f80#0",
+        "0002dcf0#0",
+        "0002dcf0#3"
+      ]
+    },
+    {
+      "symbol": "data_fdps_battle_tile_attr_def_modifier_table",
+      "addr": "00060058",
+      "size": 24,
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_battle_tile_attr_ap_modifier_table"
+      },
+      "confidence": "high",
+      "basis": "initialized: image bytes 00060058..6f = 0,0,10,10,-5,0 as signed dwords; layout follows AP table from out-of-range index 6 reads by all three readers (handoffs)",
+      "handoff": [
+        "0001c520#0",
+        "00019f80#0",
+        "0002dcf0#0"
+      ]
+    },
+    {
+      "symbol": "data_fdps_village_mode_flag",
+      "addr": "00060070",
+      "size": 1,
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_battle_tile_attr_def_modifier_table"
+      },
+      "confidence": "high",
+      "basis": "Image byte at 00060070 is 00 -> value 0; made initialised because class-6 terrain reads of the def table at 0001a148/0001c6aa/0002de59 run one dword past its end onto this byte (handoff from ticket 22). Rescan: confirmed from neighbour verdicts that the flag is the last initialised object in gamedata.c, so the only residual risk is the inter-module _DATA boundary.",
+      "handoff": [
+        "0001c520#0",
+        "0001c520#1",
+        "00019f80#0",
+        "0002dcf0#0"
+      ]
+    },
+    {
+      "symbol": "data_fdps_chapter_init_handler_table",
+      "addr": "00060074",
+      "size": 120,
+      "target": "chapter.c",
+      "kind": "initialized",
+      "layout": {},
+      "confidence": "high",
+      "basis": "initialized: 30 non-zero dwords at 00060074 each resolve to fdps_chapter_01_init..fdps_chapter_30_init (all defined in src/chinit1.c, chinit1b.c, chinit2.c, chinit2b.c); no layout: readers index by chapter id bounded 0..29 by its writers. Spelled through a file-local typedef (same type as the header's void (*[30])(void)) because land.py's declarator check does not recognise a bare function-pointer-array declarator.",
+      "handoff": [
+        "0001c520#0"
+      ]
+    },
+    {
+      "symbol": "data_fdps_portrait_sprite_buf_ptr",
+      "addr": "00060120",
+      "size": 4,
+      "target": "gamedata.c",
+      "kind": "zero",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image bytes 00060120..00060123 are 00 00 00 00 (zero, tentative definition); all 20 xrefs are whole-dword direct accesses to 00060120, none via a neighbour, so no layout constraint.",
+      "handoff": []
+    },
+    {
+      "symbol": "data_fdps_current_chapter_text_ptr",
+      "addr": "00060124",
+      "size": 4,
+      "target": "gamedata.c",
+      "kind": "zero",
+      "layout": {},
+      "confidence": "high",
+      "basis": "Image bytes at 00060124..00060127 are all zero; every access is a direct dword load/store/compare of [0x00060124], no neighbour-crossing access, so zero tentative definition with no layout constraint.",
+      "handoff": []
+    }
+  ]
+}

@@ -34,6 +34,17 @@
 #include "walk.h"
 #include "btlturn.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060004. Starts at 0 and nothing in the program ever writes it, so
+   cancelling a battle action always takes the non-ending-turn path; the
+   ends-turn branch is dead in the shipped game but kept for equivalence. */
+int data_fdps_battle_action_cancel_ends_turn_flag;
+
+/* End of global data. */
+
 /* The chapter script's turn-event table, in the resident MAP%02d.DAT block
    reached through data_fdps_tile_event_data_table_ptr (gamedata.h).  Sixteen
    fixed entries of three bytes each start at offset 3 of the block, right

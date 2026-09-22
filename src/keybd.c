@@ -17,6 +17,17 @@
 #include "gamedata.h"
 #include "keybd.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060018. Starts at zero in the image; the reader resets it to zero whenever
+   the scancode changes, so the initial value only matters for the very first
+   repeat check. */
+int data_fdps_input_key_repeat_counter;
+
+/* End of global data. */
+
 /* The latch's no-key value, and equally the filter's "nothing to report this
    poll" answer.  The ISR never produces it as a scancode: 0xff is a break code
    for a make code of 0x7f, which no key on the keyboard has. */

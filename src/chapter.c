@@ -17,6 +17,54 @@
 #include "sprite.h"
 #include "vfs.h"
 #include "chapter.h"
+#include "chinit1.h"
+#include "chinit1b.h"
+#include "chinit2.h"
+#include "chinit2b.h"
+
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060074. Slot n holds fdps_chapter_NN_init for NN = n + 1, in chapter order
+   with no gaps or repeats; these thirty relocated code pointers are the
+   table's whole content and the only thing selecting which setup script runs
+   on chapter entry. */
+typedef void (*chapter_init_handler_fn)(void);
+chapter_init_handler_fn data_fdps_chapter_init_handler_table[30] = {
+    fdps_chapter_01_init,
+    fdps_chapter_02_init,
+    fdps_chapter_03_init,
+    fdps_chapter_04_init,
+    fdps_chapter_05_init,
+    fdps_chapter_06_init,
+    fdps_chapter_07_init,
+    fdps_chapter_08_init,
+    fdps_chapter_09_init,
+    fdps_chapter_10_init,
+    fdps_chapter_11_init,
+    fdps_chapter_12_init,
+    fdps_chapter_13_init,
+    fdps_chapter_14_init,
+    fdps_chapter_15_init,
+    fdps_chapter_16_init,
+    fdps_chapter_17_init,
+    fdps_chapter_18_init,
+    fdps_chapter_19_init,
+    fdps_chapter_20_init,
+    fdps_chapter_21_init,
+    fdps_chapter_22_init,
+    fdps_chapter_23_init,
+    fdps_chapter_24_init,
+    fdps_chapter_25_init,
+    fdps_chapter_26_init,
+    fdps_chapter_27_init,
+    fdps_chapter_28_init,
+    fdps_chapter_29_init,
+    fdps_chapter_30_init
+};
+
+/* End of global data. */
 
 /* How many bytes of the per-cell event flag table are cleared: PUSH 0x20 at
    0002277e, which is the whole of data_fdps_map_cell_event_triggered_flags's
