@@ -103,7 +103,12 @@ const DATE = A.date || 'undated'
 const LIMIT = A.limit || 0
 const PASSES = A.passes || 3
 const MAX_REPAIRS = 2
-const COAUTHOR = 'Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>'
+// Every commit message ends with these trailers, and is passed by file:
+// PowerShell hands a multi-line -m argument to git as a pathspec.
+const COAUTHOR = 'the two trailer lines "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" and '
+  + '"Claude-Session: https://claude.ai/code/session_01SFBoWG1kt6hda9Cvf4BUr9". Write the whole message '
+  + 'to a UTF-8 file under ' + REPO + '\\workspace\\data_emit\\ and commit with  git commit -F <file>  '
+  + '(plus the pathspec where one is asked for); never a multi-line -m'
 
 // The paths this pipeline's own stages write, and so the only ones Recover may
 // clean (rebuild_info/data_emit.md, "中斷復原"). Reroute is the reason the
@@ -439,7 +444,7 @@ function recoverPrompt() {
     '   before the kill: after step 4, re-export instead of trusting either version:',
     '     ToolSearch "select:mcp__ghidra__run_ghidra_script"',
     '     run_ghidra_script ' + REPO + '\\tools\\ghidra_snapshot\\ExportGhidraSnapshot.java',
-    '   then  git add ghidra_snapshot; git commit -m "<subject>"  with subject',
+    '   then  git add ghidra_snapshot; git commit  with subject',
     '     data: 前一輪中斷，重新匯出 Ghidra 快照',
     '   a blank line, and  ' + COAUTHOR,
     '   Only if the export produced a diff.',
@@ -631,7 +636,7 @@ function knowledgePrompt(stats) {
     '   23 now describe a past state; state the present one in a sentence each.',
     '5. Re-read every page you changed for process narration and remove it.',
     '6. Commit only those docs, with a pathspec:',
-    '     git add <files>; git commit -m ... -- <files>',
+    '     git add <files>; git commit -F <msgfile> -- <files>',
     '   subject  docs: 票 23 資料符號的判定規則與佈局約束進知識庫 , a blank line, ' + COAUTHOR,
     'git status --porcelain must end empty. Summary object only.',
   ].join('\n')
@@ -651,7 +656,7 @@ function reportPrompt(report, stopped) {
     '   "recovered" list) versus never reached this run (the "not_reached" list) --',
     '   they are different and must not be merged; every failure and why.',
     (stopped ? '   This run STOPPED early: ' + stopped + '. Say so in the first paragraph.' : ''),
-    '3. git add devlog; git commit -m ... -- devlog   subject',
+    '3. git add devlog; git commit -F <msgfile> -- devlog   subject',
     '     devlog: 票 23 資料 emit ' + LABEL,
     '   a blank line, ' + COAUTHOR,
     'git status --porcelain must end empty. Summary object only.',
