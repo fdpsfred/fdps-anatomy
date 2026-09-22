@@ -145,7 +145,13 @@ CD 模組    wcc386 -bt=dos4g -mf -4s -fpi -os
 
 **這與引數推送形式那一節是不同的軸，不要混。** 那一節講的混用發生在**同一支 function 內部**（比例可以懸殊到 1 比 87），per-file 的旗標差異解釋不了它；CD 這件事則是整個 translation unit 的邊界，兩者各自成立。
 
-**重建目前沒有跟上這件事。** `build_emit.py` 對每個 unit 用同一組旗標，所以重建的 `cd.c` / `cdaudio.c` / `cdtoc.c` 全部沒有 stack probe。行為差異只有一項：CD 程式碼發生堆疊溢位時原版會印 `Stack Overflow!` 然後停，重建版直接寫過去。其餘差異都是 register allocation 與 instruction selection，ADR-0001 排除在外。要收只有兩條路——教 `build_emit.py` 吃 per-unit 旗標，或明文接受這個模組放棄 probe。**尚未決定**，記在 [`open_issues.md`](../open_issues.md)。
+**重建版的 CD 模組刻意不帶 stack probe，全部 unit 用同一組旗標。** `build_emit.py` 不吃 per-unit 旗標，`cd.c` / `cdaudio.c` / `cdtoc.c` 與其餘遊戲段一樣以定案旗標組（含 `-s`）編譯。這是接受的差異，不是待辦：
+
+- 行為差異只有一項，而且只在出事時才出現——CD 程式碼把堆疊用爆時，原版印 `Stack Overflow!` 然後停，重建版直接寫過去。堆疊夠用時 probe 什麼都不做，正常遊玩兩者無從分辨。
+- 觸發條件本身就代表程式已經壞了。CD 模組的呼叫層數淺，也不在時序敏感的熱迴圈裡（契約 D），probe 每次進入多一個小呼叫的成本對 CD 請求這種低頻操作沒有可感差異。
+- 其餘差異是 register allocation 與 instruction selection，ADR-0001 排除在外。
+
+所以讀重建版 `cd*.c` 的目的檔時看不到 `__CHK` 是預期的；要逐 byte 對照原版的 CD body，得自己另外以 `-os` 編一份，不能拿建置產出的 `.OBJ` 直接比。
 
 ### `-od` 之下仍然有 inline 展開
 
