@@ -1158,22 +1158,42 @@
       "from": "review",
       "what": "The data half of the plate's Sol explanation is still unverified from this seat: that deployment record 20 of map01.dat is Sol (side 1, character id 0x0c, level 10) carrying death-script opcode 5 with operand 0xff at record byte +0x16. The code half I did confirm independently -- fdps_run_death_scripts stores 1 into 0x00069da0 at 0001dd0d, so the mechanism the plate names exists. What I could not check is the record itself: resource_info documents no map deployment-record layout (grep of resource_info for a deployment or death-script record format returns nothing; vfs.md lists MAP01.DAT at 833 bytes and stops there), and record byte +0x16 is not struct fdps_unit_record's death_script_opcode offset -- that struct puts +0x16 inside inventory_slots -- so the map file's on-disk record is a different layout that has not been settled anywhere I can read. This is explicitly NOT load-bearing for the emit: the body is one CALL and nothing else, so the C is correct whatever map01.dat holds, and I approved on that basis.",
       "needs": "The map deployment-record layout from whichever ticket settles the MAPnn.DAT format, after which record 20 of map01.dat can be read directly to confirm or correct the plate's claim.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "The plate's claim is correct. MAP01.DAT (chapter 2 is chapter id 1; post-action table slot 1 at 0006028c+4 is 0003a450) holds 27 deployment records at +0x83, 0x1a bytes each; record 20 is side 1, character 0x0c, level 10, behaviour 3, wave 1, and its bytes +0x16..+0x18 are death opcode 5 with operand 0x00ff. +0x16 is the MAP file record's own death_script_opcode (struct fdps_char_spawn_record, src/fdpstype.h), not an fdps_unit_record offset; fdps_deploy_unit copies it into the unit record, and fdps_run_death_scripts' opcode 5 is the store of 1 into 0x00069da0. The one-CALL body in src/chpost1.c is correct regardless.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "0003aad0": [
     {
       "what": "The strategy guide gives chapter 14 (天空之騎士) two lose conditions, 蘭迪斯或法蓮娜死亡, and this handler implements only the first: it is a bare forward to fdps_battle_check_default_end_conditions, whose defeat arm watches unit slot 0, and no instruction between 0003aad0 and 0003aae5 examines a unit. So the rebuild reproduces this function exactly, but where the original enforces 法蓮娜's half of the condition is not established. The record layout carries a per-unit death_script_opcode/death_script_operand (struct fdps_unit_record, src/fdpstype.h) and fdps_run_death_scripts calls fdps_unit_is_retired at 0001da16 and 0001dc26, which is the route earlier chapters' unenforced casualty conditions were found to take (chapters 2, 4, 5, 6 in src/chpost1.h), but that route was verified there from map file contents and no such reading was done for this chapter's map.",
       "needs": "The chapter 14 map's deployment records, read out of the map container with the map loader's on-disk layout (no map format is documented in resource_info/ yet), checking whether the record standing for 法蓮娜 carries a death script; or chapter 14's own event/init handlers once they are emitted, in case the condition is enforced there instead.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The original does not enforce 法蓮娜's half of chapter 14's stated lose condition anywhere, so src/ (a bare forward to fdps_battle_check_default_end_conditions) is exactly right and adding a slot test would be a behaviour change. Evidence: MAP13.DAT's 37 deployment records are all side-0 enemies (chars 82, 94, 96, 99, 103) and none is 法蓮娜, so no map death script stands for her; player-slot units are built with death_script_opcode 0xff (fdps_build_map_unit_array, src/deploy.c) and no icon-script opcode writes one; MAP13's only live turn event is turn 6 -> slot 19 (fdps_chapter_14_event_deploy_wave_4) and it has no live tile event; no instruction in the image compares the chapter id with 0xd; chapter 14's init, end, post-action and turn-6 handler test no unit other than the shared test's slot 0. The guide's 蘭迪斯或法蓮娜死亡 overstates what the program checks: 法蓮娜 falling in chapter 14 does not end the battle, and fdps_chapter_14_end's fdps_roster_revive_fallen_members brings her back afterwards.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "Reached the same gap independently and confirm it. My addition: the guide half is now pinned to the mirror rather than to memory -- 失敗條件：蘭迪斯或法蓮娜死亡 is fdps/walkthrough line 884, bracketed by the 第14章 天空之騎士 heading at line 838 and 第15章 要塞砲危機 at line 899, so it is chapter 14's. The code half needs no search to settle: the whole function is twelve instructions with exactly one CALL, to 0003a2e0, so nothing here can consult a unit, and 法蓮娜's half of the condition is enforced outside this handler. I did not extend the search to chapter 14's event or init handlers; I agree with the emitter that the map container's on-disk layout is undocumented in resource_info/ and that this is not settleable from where the emitter sat.",
       "needs": "chapter 14's deployment records once a map reader exists, or chapter 14's own event/init handlers once they are emitted",
       "same_as": "emit#0",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "0003aad0#0"
+      }
     }
   ],
   "0003bade": [
@@ -2157,7 +2177,14 @@
       "from": "review",
       "what": "The provenance of the two anchor pairs (5, 12) and (15, 13) and of the phrase 'wave 4' in the function's name cannot be checked from anywhere in this repository yet. Both the plate and the emitted comments say the anchors are the placement records map29.cod gives character ids 0x55 and 0x6a and that those two ids are chapter 30's wave 4, but chapters/ holds only its _index.md, resource_info/ has no map or .cod format page, and no map29 file is unpacked under fdps_game_files/ -- the map container has not been opened by any ticket. Nothing in the emitted behaviour depends on this: the code carries the four numbers as literals exactly as the assembly does, and the claim is only about where the original author got them.",
       "needs": "The chapter/map data work that parses map29 out of its container and records the two types' placement records and their wave tag; the anchors and the 'wave 4' name can then be confirmed or the comments corrected.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "The provenance claim holds, with one precision. MAP29.DAT (chapter 30 = chapter id 29) has 7 records; its wave-4 records are exactly the four undead: records 3 and 4 are character 0x55, level 20, whose MAP29.COD placement pairs are both (5,12), and records 5 and 6 are character 0x6a, level 20, at (15,13) and (16,13). So (5,12) is the anchor of both 0x55 records and (15,13) is the anchor of the first 0x6a record (record 5); the second skeleton's own record is (16,13). The code carries the four literals exactly as the assembly does (0001080f..00010826), so nothing behavioural depends on this; the src/chevt6.c comment 'the spawn coordinates map29.cod gives the two types' own placement records' is accurate for 0x55 and should read 'the first 0x6a record's' for the skeleton if anyone touches it. The 'wave 4' in the function name is right.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "0001dd30": [
@@ -2397,7 +2424,14 @@
       "from": "review",
       "what": "Which of the four captives at unit indices 0xf..0x12 are the two 村民 and which the two 村婦 is not established. The assembly settles only that the closing line splits at 0x11 (CMP [EBP+0x14],0x11 / JGE at 00037698, 0x20 below and 0x21 at or above), and src/chevt2.c's macro CH08_LAST_VILLAGER_IS_A_WOMAN_FROM plus the surrounding comments assert that 0xf and 0x10 are the 村民 and 0x11 and 0x12 the 村婦. The support for that is the guide listing them in that order (docs/guide/fdps/walkthrough.txt lines 455-456, LV12村民x2 then LV12村婦x2), which is suggestive but is not the deployment order. Nothing behavioural rests on it -- the two text ids are picked by index either way -- so this is not a blocking finding, and I am recording it rather than asking for the macro to be renamed.",
       "needs": "Chapter 8's deployment table read out of map07.dat: records 15..18 and the character or portrait id in each. chapters/ currently holds only _index.md, so the chapter pages that would answer this have not been written yet, and the record layout work is another ticket's. When that lands, either the macro name is confirmed or the two ids swap.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "The macro name and comments are right: units 0xf and 0x10 are the 村民 and units 0x11 and 0x12 the 村婦. MAP07.DAT declares 5 player slots and its fourteen wave-0 records (2,3,5,8,9,11,12,15,17,18,20,21,22,23) become units 5..18, so units 0xf..0x12 are records 20..23: side 1, characters 0x76, 0x76, 0x77, 0x77, level 12, behaviour 8, death opcode 3 with operands 22..25. ENEMYDAT.DAT rows 58 and 59 are byte-identical (HP 18 a level = 216, the guide's figure for both), so the stats do not separate them, but the ICON.CEL sprite groups the units are drawn with (group = character id) do: group 118 (0x76) is a short-haired man in trousers and group 119 (0x77) a woman with a hair bun in a long dress. The split at 0x11 in the assembly (CMP [EBP+0x14],0x11 / JGE at 00037698) therefore falls exactly between the two men and the two women.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "000378f0": [
@@ -2710,8 +2744,15 @@
     {
       "what": "Which unit map22.dat deploys at index 0x1f, and therefore which of chapter 23's two stated 失敗條件 the second test enforces. Established here: 0x1f is not a roster slot -- fdps_chapter_23_end (0003b350) treats indices 0..10 as this chapter's eleven player units and 11 upward as the map's own, so 0x1f is one of map22.dat's deployment records; the image contains only two literal PUSH 0x1f operands (this one and one in fdps_chapter_04_event_for_turn), so no other function identifies it; and the strategy guide's 第23章 死神冥河 gives 失敗條件：法蓮娜死亡，蘭迪斯從戰場上方消失（二十回合）, whose first clause is the slot-3 test, leaving the second clause as the only candidate for this one -- but nothing ties that clause to slot 0x1f. The emitted C is unaffected either way: the index is the literal 0x1f.",
       "needs": "The MAP%02d.DAT deployment-record layout (not yet decoded; resource_info/ covers VFS, CEL, SAF and the MISC.VFS tables only), read against MAP22.DAT so slot 0x1f's character id can be looked up -- or a playtest that loses chapter 23 on that condition and reads the line the game prints.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "Map unit 0x1f in chapter 23 is MAP22.DAT deployment record 21: side 1, character 0x24, level 21, AI behaviour 7, placed at (24,24) with destination (24,3). MAP22 declares 11 player slots and its wave-0 records are records 1..21, which fdps_build_map_unit_array appends in record order as units 11..31, so unit 31 is record 21. All 21 wave-0 guests (chars 0x24..0x27, FRIAPRDA template rows with MV 1) stand in column x=24 from y=4 to y=24 and all have destination (24,3); behaviour 7 walks a unit to its destination and retires it on arrival, playing Posion.saf for portraits 0x24..0x27 (src/mapai.c). Unit 0x1f is the last of that column, 21 tiles below the destination at one tile a turn, so its retirement is the column reaching the top of the battlefield -- the guide's second clause 蘭迪斯從戰場上方消失（二十回合）. The second test is that clause. The C, which uses the literal 0x1f, is correct as written.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "The message on the second defeat path is not asserted by the unit test. fdps_draw_text (0001ff60, src/text.c) is emitted and really runs, so the else-arm ordering -- entry 0x14 painted only when slot 3 is standing and slot 0x1f is not -- does happen; it simply leaves no trace a case can read back, because the destination is the hard-coded VGA aperture at 0xa0000 and not a surface the caller chooses. The test therefore pins the battle-end code on both arms and stages a text block whose entries point straight at a -1 terminator, so the call is harmless and deterministic instead of walking from a null base.",
@@ -2723,8 +2764,14 @@
       "what": "Confirmed the emitter's sweep for myself rather than taking it: search_instructions for PUSH with operand 0x1f across all 89420 instructions returns exactly two literal 6a 1f sites in the image -- 00036fc0 in fdps_chapter_04_event_for_turn and 0003b306 here -- so no other function identifies the unit. I also confirmed the boundary the emitter leans on: fdps_chapter_23_end at 0003b350 seeds its sweep at MOV dword ptr [EBP + -0x8],0xb (0003b361), so 0x1f sits above the eleven player slots and is one of the map's own records. Nothing to add to the gap itself, and the emitted C is the literal 0x1f either way.",
       "needs": "The MAP%02d.DAT deployment-record layout read against MAP22.DAT, or a playtest that loses chapter 23 on that condition and reads the line the game prints.",
       "same_as": "emit#0",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c15",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "0003b2e0#0"
+      }
     },
     {
       "what": "Checked the staging rather than only the concern: with every entry of the staged block pointing at byte 42 and that short holding -1, fdps_draw_text exits its while loop on the first test (src/text.c:391) with window_opened still 0, so the tail at text.c:546 neither waits on a key nor closes a window, and 0xa0000 is never written. The concern itself stands as honest -- the message really is unobservable from a text-mode case -- and the call is now harmless instead of walking from a null base.",
