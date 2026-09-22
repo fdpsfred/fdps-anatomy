@@ -621,19 +621,6 @@ extern int data_fdps_cel_sprite_cache_count;
    garbage. */
 extern unsigned int data_fdps_palette_shade_ramp_table[4608];
 
-/* 00064378.  How many cells of the battle indicator queue are filled, and
-   equally the index the next cell is appended at: the cursor into the three
-   parallel arrays src/indicat.h declares.  Signed, and it is a count and not a
-   ring -- nothing wraps it and nothing checks it against the arrays' 200 cells.
-
-   Every producer appends its popup's cells at the cursor and adds that many to
-   it.  Two places put it back to zero and a sweep of every reference to 00064378
-   finds no others: fdps_play_indicator_queue at 0001f4ff, after animating
-   everything queued, and fdps_apply_item_effect_to_targets at 000262ac, on entry
-   and before queueing a batch of its own, so popups left over from an
-   interrupted playback cannot leak into an item's. */
-extern int data_fdps_indicator_queue_count;
-
 /* 00063f78, 00063f74, 00063f80 and 00063f84.  What the map AI's physical
    attack search decided: how good the best attack it found is, which unit it
    would hit, and the tile it would attack from.  fdps_map_actor_score_best_attack

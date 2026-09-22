@@ -58,6 +58,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "chapter.h"
+#include "indicat.h"
 #include "unitstat.h"
 
 /* The stride fdps_get_unit_record multiplies by. */

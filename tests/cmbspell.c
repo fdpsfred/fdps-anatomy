@@ -45,6 +45,7 @@
 #include "fdpstype.h"
 #include "gamedata.h"
 #include "audio.h"
+#include "indicat.h"
 #include "vfs.h"
 #include "sprite.h"
 #include "cmbspell.h"

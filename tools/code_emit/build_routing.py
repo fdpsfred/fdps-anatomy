@@ -557,6 +557,10 @@ DATA_OVERRIDES = {
     "data_fdps_chapter_end_handler_table": ("chapter.c",
         "Same family. Read from main.c alone, but splitting it away from its "
         "three siblings would hide that they are one dispatch surface."),
+    "data_fdps_indicator_queue_count": ("indicat.c",
+        "Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids "
+        "(indicat.c) contiguously so the unbounded glyph_ids overrun lands on "
+        "this cursor as in the original."),
 }
 
 

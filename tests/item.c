@@ -42,6 +42,7 @@
 #include "testharn.h"
 #include "fdpstype.h"
 #include "gamedata.h"
+#include "indicat.h"
 #include "item.h"
 
 /* The stride fdps_get_unit_record multiplies by. */
