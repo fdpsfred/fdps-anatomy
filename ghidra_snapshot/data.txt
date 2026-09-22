@@ -1392,7 +1392,7 @@
 00063f74 | 0x4 | /int | data_fdps_battle_ai_best_physical_target_idx | USER_DEFINED
 00063f78 | 0x4 | /int | data_fdps_battle_ai_best_physical_score | USER_DEFINED
 00063f7c | 0x4 | /int | data_fdps_map_ai_best_item_bag_slot | USER_DEFINED
-00063f80 | 0x4 | /uint | data_fdps_battle_ai_best_physical_target_x | USER_DEFINED
+00063f80 | 0x4 | /int | data_fdps_battle_ai_best_physical_target_x | USER_DEFINED
 00063f84 | 0x4 | /int | data_fdps_battle_ai_best_attack_tile_y | USER_DEFINED
 00063f88 | 0x4 | /int | data_fdps_battle_ai_best_spell_score | USER_DEFINED
 00063f8c | 0x4 | /int | data_fdps_battle_ai_best_item_score | USER_DEFINED
