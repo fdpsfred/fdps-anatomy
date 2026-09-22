@@ -80,6 +80,7 @@ python tools/code_emit/emit_order.py
 - 原始碼暫存成兩個 guest 目錄 `C:\SRC` 與 `C:\TST`，物件檔分別落在 `OBJS\` 與 `OBJT\`。理由是測試檔與生產檔同名（`tests/menu.c` 對 `src/menu.c`），攤平在同一個目錄會互相覆蓋。
 - 暫存區每次重建。沿用舊的會讓已經從版本庫刪掉或改名的檔案繼續從殘留副本被編進去。
 - 光碟映像在時就掛、不在就不掛。測試映像沒有任何東西讀光碟，把它變成硬相依會讓「這台機器沒有光碟映像」被報成閘門失敗。
+- **兩次連結都寫 map**（`out/EMITTEST.MAP`，第二次覆蓋第一次，所以它永遠描述磁碟上那個映像）。[`tools/data_emit/check_data.py`](../data_emit/_index.md) 從它取每個全域的連結位址去與原版比對。
 - **連結跑兩次，第一次的未定義符號是預期產物而不是錯誤。** 第一次不帶 stub，報出來的就是「已 emit 的程式碼要、但還沒有人定義」的完整清單，落檔到 `workspace/code_emit/undefined.json`；第二次帶上 `gen_stubs.py` 產生的零填充模組，必須乾淨。判定用的是第二次的結果。
 - **stub 模組不進 `src/`。** 它每次建置重新產生，落在暫存區。放進 `src/` 就會與真的 emit 出來的定義混在一起，一百支 function 之後分不出誰是誰。
 - **`src/fdpstype.h` 與 `tests/fdpstype.c` 是產生物。** 改 struct 佈局要改 Ghidra、重匯出快照、重跑 `gen_types.py`，不手改這兩個檔。

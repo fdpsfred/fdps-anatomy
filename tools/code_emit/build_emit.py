@@ -71,6 +71,7 @@ RUN = WORK / "run"
 RUN_MEMSIZE_MB = 64
 
 EXE = "EMITTEST.EXE"
+MAP = "EMITTEST.MAP"
 LNK = "EMITTEST.LNK"
 # The second link, the one that carries the generated stub module.
 LNK2 = "EMITTES2.LNK"
@@ -307,7 +308,12 @@ def gen_lnk(src_objs, tst_objs, with_stubs=False):
     w = DRV_WORK
     lines = ["system dos4g",
              r"name %s:\OUT\%s" % (w, EXE),
-             "option stack=8k"]
+             "option stack=8k",
+             # The map is where ticket 23's data check reads each global's
+             # linked address from (tools/data_emit/check_data.py).  Both links
+             # write it; the second, when there is one, overwrites the first,
+             # so it always describes the image on disk.
+             r"option map=%s:\OUT\%s" % (w, MAP)]
     lines += ["alias %s=%s" % (a, b) for a, b in link_ail.ALIASES]
     lines += [r"file %s:\OUT\OBJS\%s.OBJ" % (w, s) for s in src_objs]
     lines += [r"file %s:\OUT\OBJT\%s.OBJ" % (w, s) for s in tst_objs]
@@ -430,7 +436,7 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
     OBJ_SRC.mkdir(parents=True, exist_ok=True)
     OBJ_TST.mkdir(parents=True, exist_ok=True)
     OBJ_STB.mkdir(parents=True, exist_ok=True)
-    for parent, name in ((OUT, EXE), (OUT, "BUILD.DON"), (OUT, "BUILD.OUT"),
+    for parent, name in ((OUT, EXE), (OUT, MAP), (OUT, "BUILD.DON"), (OUT, "BUILD.OUT"),
                          (OUT, "BUILD2.DON"), (OUT, "BUILD2.OUT"),
                          (OUT, "HB.TXT"), (OUT, "NAMES.OUT"),
                          (WORK, "dosbox.log"), (WORK, "stdio.log")):
@@ -860,6 +866,8 @@ def _selftest_rows():
                  r"OBJS\AILDPMI.OBJ" in lnk and r"OBJT\MENU.OBJ" in lnk, "yes"))
     rows.append(("first link carries no stub module",
                  "STUBS.OBJ" not in lnk, "yes"))
+    rows.append(("link writes a map for the data check",
+                 ("option map=" + DRV_WORK + r":\OUT\EMITTEST.MAP") in lnk, "yes"))
     rows.append(("AIL library and its aliases are linked",
                  "AILV3.LIB" in lnk
                  and "alias fd2_dpmi_lock_size=fdps_dpmi_lock_size" in lnk

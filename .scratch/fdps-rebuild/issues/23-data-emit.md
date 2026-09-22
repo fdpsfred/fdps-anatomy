@@ -27,6 +27,12 @@
 
 順帶一件要一起決定的事：票 21.6 的界線是一組明確的路徑，其中 `tools/code_emit/data/` 是票 22 狀態檔的位置。本票若把自己的標記檔或判定索引放到別處，界線就得同步擴，否則它自己的產物會被自己的收拾段判成界線外而停機。
 
+**決定：加標記檔，放在 `workspace/data_emit/in_flight.json`。** 理由：
+
+- 足跡只在落地段需要。判定 agent 除了自己的判定檔什麼都不寫，死掉只留下一個通不過 `land.py validate` 的判定檔，該符號自然回到清單；會留下工作區殘骸的只有落地段，所以落地段在碰 `src/` 之前寫標記、commit 或丟棄之後刪掉。
+- 放 `workspace/` 而不是 `tools/data_emit/data/`：`workspace/` 不被 git 追蹤，標記對 `git status` 不可見，收拾段不會把它當殘骸清掉，也不必擠進界線；它照樣活過 session 被砍。
+- 界線因此是本 pipeline 各段會寫的八個路徑：`src/`、`tests/`（修復段改斷言了 stub 值的測試）、`tools/data_emit/data/`（`manifest.json`）、`ghidra_snapshot/`、`tools/code_emit/build_routing.py` 與 `tools/code_emit/data/routing.json`／`routing.md`、`rebuild_info/code_layout.md`（擁有權變更段）。知識庫頁與 devlog 由各自的段落以 pathspec 當場 commit。正典寫在 [`rebuild_info/data_emit.md`](../../../rebuild_info/data_emit.md)。
+
 回掃段在這裡對應的是：型別判定為低信心的符號，在相鄰符號都還原完之後重讀一次——資料表的欄位語意常常要看過相鄰表才明朗。
 
 ## 票 22 交接過來的：資料定義必須帶上的性質

@@ -164,6 +164,17 @@ TEST_SUITES = [
     {"name": "ail_link.run",
      "argv": ["tools/ail_link/link_ail.py", "run"],
      "needs": ("dosbox", "disc", "audio"), "target": "ailsmoke"},
+    # The global data src/ defines, compared with the shipped image byte for
+    # byte (pointers by target name) and against the layout constraints the
+    # manifest records.  The emittest image is the one it reads, so it rides
+    # on that target; the shipped FDPS.LE is not in the repository, so a
+    # machine without it reports the suite skipped.
+    {"name": "data_emit.selftest",
+     "argv": ["tools/data_emit/check_data.py", "--selftest"],
+     "needs": ("gamefiles",), "target": None},
+    {"name": "data_emit.check",
+     "argv": ["tools/data_emit/check_data.py"],
+     "needs": ("gamefiles",), "target": "emittest"},
 ]
 
 
@@ -476,6 +487,8 @@ def check(targets, watcom, disc, timeout, with_audio=False, skip_tests=False):
         available.add("disc")
     if with_audio:
         available.add("audio")
+    if (ROOT / "fdps_game_files" / "FDPS.LE").is_file():
+        available.add("gamefiles")
     tests = [] if skip_tests else run_tests(available, targets, timeout * 4)
 
     passed = (all(r["verdict"] == "pass" for r in rows)
