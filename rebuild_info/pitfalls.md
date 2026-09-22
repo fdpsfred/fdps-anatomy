@@ -118,13 +118,15 @@
 
 ## 不能照編譯器慣例設定的旗標
 
-旗標組本身與判定依據見 [`build_flags.md`](build_flags.md)，這裡只收「不照原版設會出事」的五項。
+旗標組本身與判定依據見 [`build_flags.md`](build_flags.md)，這裡只收「不照原版設會出事」的各項。
 
 | 事項 | 照直覺會怎麼寫 | 正典 |
 | --- | --- | --- |
 | 程式庫要用 10.0a 的，10.0 家族的三個發行版不能互換 | 手上裝了哪個 10.0 就連哪個，反正都是 10.0 家族。10.0b 的 `MATH387S.LIB` 把 `strtod` 重編成大 4 byte 的框架，又把 5 byte 的裸 `IF@TAN` 換成 21 byte、會回退到軟體實作的守衛版；10.0 的 `CLIB3S.LIB` 則有另一套 `__prtf`／`__scnf`／`__isindst`／`_nmalloc`。連錯版本不會有任何診斷，映像檔就是另一份 | [`build_flags.md`](build_flags.md) |
-| 遊戲模組用 `-s` 關掉堆疊檢查 | 不加 `-s`，用編譯器預設。預設會在每個有框架的 function 前插入 `push <大小>` / `call __CHK`——原版的遊戲碼在堆疊耗盡時是直接寫穿，重建版會改成印 `Stack Overflow!` 然後結束，外顯行為不同。`__CHK`（`0x4361a`）的 34 個直接呼叫端中，32 個是 CD 模組 `fdps_cd*`、2 個是 CRT 的 `spawnvpe`（`0x54dcc`）與 `spawnve`（`0x556ae`）；原版 CD 模組帶 probe，重建版刻意全部 unit 用同一組旗標而不帶，這是接受的差異，CRT 那兩支則照程式庫原樣帶檢查 | [`build_flags.md`](build_flags.md) |
-| `-ot` 要寫在 `-od` 前面 | 只寫 `-od`，或寫成 `-od -ot`。`wcc386` 由左而右處理選項：`-ot` 設定「以速度為優先」的偏好，`-od` 之後才關掉最佳化器而不清掉那個偏好。只寫 `-od` 會讓所有位址縮放從 `lea reg,[reg*N]` 變成 `shl reg,N`（原版有 304 處）；寫成 `-od -ot` 則會連最佳化器一起打開，區域變數不再來回堆疊 | [`build_flags.md`](build_flags.md) |
+| 遊戲模組用 `-s` 關掉堆疊檢查 | 不加 `-s`，用編譯器預設。預設會在每個有框架的 function 前插入 `push <大小>` / `call __CHK`——原版的遊戲碼在堆疊耗盡時是直接寫穿，重建版會改成印 `Stack Overflow!` 然後結束，外顯行為不同。`__CHK`（`0x4361a`）的 34 個直接呼叫端中，32 個是 CD 模組 `fdps_cd*`、2 個是 CRT 的 `spawnvpe`（`0x54dcc`）與 `spawnve`（`0x556ae`）；原版 CD 模組是以 `-os`、不帶 `-s` 編的所以帶 probe（重建版的建置目前還沒跟上，由票 22.2 對齊），CRT 那兩支則照程式庫原樣帶檢查 | [`build_flags.md`](build_flags.md) |
+| `-ot` 要寫在 `-d2` 前面 | 把 `-ot` 擺在最後，或只寫 `-d2`。`wcc386` 由左而右處理選項：`-ot` 設定「以速度為優先」的偏好，`-d2` 之後才關掉最佳化器而不清掉那個偏好。`-ot` 擺到 `-d2` 之後會把最佳化器重新打開，區域變數不再來回堆疊、序幕與 switch 表全變（42 支真實 function 的逐 byte 對照從 17 支相同掉到 0 支）；不寫 `-ot` 則所有位址縮放從 `lea reg,[reg*N]` 變成 `shl reg,N`（原版有 304 處） | [`build_flags.md`](build_flags.md) |
+| 原版是 `-d2` 不是 `-od`，而且 `-oe=25` 的門檻要明寫 | 用 `-od` 關最佳化，或 `-oe` 不帶門檻。`-od` 會把宣告的變數當引數時直接推（原版經 EAX 中轉）、函式表呼叫換成 EAX 索引；預設的 `-oe` 門檻展開不到原版展開的幾支，門檻 27 以上又會多展開原版保持呼叫的。LE header 的 `debug_info_off` 為 0 看起來像是「沒帶除錯資訊」，但 wlink 從不填那個欄位，不能拿來排除 `-d2` | [`build_flags.md`](build_flags.md) |
+| 10.0a 的 C 沒有 inline 關鍵字，映像裡的展開是 `-oe` 做的 | 讀到 function 本體出現在呼叫端裡，就推論原始碼寫了 `_inline`，重建時照寫。`_inline`／`__inline`／`inline` 在 `wcc386` 10.0a 全部是 E1009 語法錯誤；展開只發生在同一個 translation unit 內，所以原始碼的分檔決定哪些呼叫會被展開 | [`build_flags.md`](build_flags.md) |
 | 原版用 `-fpi` 而不是 `-fpi87` | 沿用前作 FD2 的 `-fpi87`。wlink 只抽出解得掉未定義符號的 lib 成員，`-fpi87` 不會發出 `__init_387_emulator` 這個參照，於是 `emu387.lib` 就算在 `.lnk` 裡列了也不會被連進去——在沒有 387 的環境下遊戲的浮點運算直接當掉 | [`build_flags.md`](build_flags.md) |
 | 連結要明寫 `option stack=8k` | 不寫，讓 wlink 用預設。wlink 的預設是 4K，只有原版的一半 | [`build_flags.md`](build_flags.md) |
 | 原版用 flat 記憶體模型（`-mf`），const 資料與區域陣列初值影像因此落在程式碼 object | 用 `-ms`。除了資料搬家到 DGROUP 之外，每次把初值複製到堆疊前還會多兩條 `mov ax,ss` / `mov es,ax`。反過來說，讀 Ghidra 時看到常數表夾在函式之間也不要當成分析錯誤 | [`build_flags.md`](build_flags.md) |
