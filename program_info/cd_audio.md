@@ -30,6 +30,10 @@
 
 裝置狀態字存在 `0x69e20`。`0x3c6d0` 判讀其 bit 9，`0x3c6e8` 先查狀態再判讀，得到「音軌是否仍在播放」。
 
+### DOSBox-X 的 MSCDEX 不讀未初始化的欄位
+
+DOSBox-X 內建的 MSCDEX（`src/dos/dos_mscdex.cpp`）處理 `INT 2Fh` AX=1510h 的 IOCTL Input（命令 3）與 IOCTL Output（命令 `0x0C`）時，request header 只讀 `+2`（命令碼）與 `+0x0E`／`+0x10`（transfer address），宣告長度（`+0`）、`+0x12` 之後的欄位、以及超出 26 byte 的部分一概不讀；分派只看 transfer buffer 的第一個 byte（control block 代碼）。Read Audio Track Info（control block `0x0B`）只讀 block `+1` 的音軌號，無論成功與否都無條件寫回 block `+2`..`+6`（frame、second、minute、0、attr），查詢被拒時寫的是零。因此在 DOSBox-X 下，各 CD 請求在 header 與 control block 裡留下的未初始化堆疊位元組不影響結果，重建版的堆疊配置不同也不會造成行為差異。
+
 ## 啟動時的光碟偵測
 
 `main`（`0x29220`）在進入遊戲迴圈前依序做三件事：

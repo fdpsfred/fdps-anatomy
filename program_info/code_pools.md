@@ -198,7 +198,7 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 辨識特徵一致：沒有 prologue，參數由呼叫端預先放在 ESI／EDI／ECX／EDX，直接沿用呼叫端的 EBP frame，並且會蓋掉呼叫端的傳入參數槽。Ghidra 對它們推出來的 `__watcall` 簽章是猜的，不是真的呼叫慣例。
 
-重建時這些必須以 `.ASM` 模組或內嵌組語產出，不能寫成一般的 C function——見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
+這些 function 原版是手寫組語，但暫存器交接與對呼叫端 frame 的讀寫都封閉在 `fdps_blit_dispatch` 之內、對外不可觀察，所以重建以一般 C（預設堆疊慣例）同時改寫 dispatcher 與 kernel 兩端即為功能等價；`fdps_xor_crypt_buffer` 同理。唯一的差異是速度（C 版每像素的指令數是 `REP STOSB`／`REP MOVSB` 的數倍），遊戲以垂直歸線與 timer tick 定步調，是否看得出來由實機驗證決定。參數表怎麼定見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 
 存檔相關的兩支同樣是手寫組語，它們的常數決定存檔相容性：
 

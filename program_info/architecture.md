@@ -160,7 +160,7 @@ vendor library 那一組不該進任何遊戲分區——它們由 vendor 契約
 
 ## 尚未確定的事
 
-**貼圖模式的語意已定**。`fdps_blit_dispatch`（`000568db`）底下的 13 個 kernel 各自對應一種模式：原樣、調色盤重映射（分「只映射 sprite」與「連背景一起」兩種）、換色、縮放、旋轉、旋轉加縮放、水平鏡像、垂直鏡像、半透明、半透明限定色域、著色、著色連背景。它們全部是手寫組合語言，重建時不能寫成 C（見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。
+**貼圖模式的語意已定**。`fdps_blit_dispatch`（`000568db`）底下的 13 個 kernel 各自對應一種模式：原樣、調色盤重映射（分「只映射 sprite」與「連背景一起」兩種）、換色、縮放、旋轉、旋轉加縮放、水平鏡像、垂直鏡像、半透明、半透明限定色域、著色、著色連背景。它們全部是手寫組合語言，但交接封閉在 dispatcher 之內，dispatcher 與 kernel 兩端一起寫成 C 即為功能等價（見 [`code_pools.md`](code_pools.md) 與 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。
 
 **兩個 AI 階段的進入點已定**：敵方階段 `fdps_battle_enemy_turn_phase`（`00012960`）與我方 NPC 階段 `fdps_battle_npc_turn_phase`（`00012b20`），配合 `fdps_battle_tick_status_effects`（`0001fa30`）與 `fdps_battle_run_turn_events`（`0002e0c0`）。章節重新初始化的實質內容是 `fdps_build_map_unit_array`（`00022be0`）：它依名冊陣列 `0x64108` 重建地圖單位記錄，超出名冊人數的槽位歸零並標成退場。
 
@@ -168,6 +168,7 @@ vendor library 那一組不該進任何遊戲分區——它們由 vendor 契約
 
 - `fdps_render_view_frame`（`0002beb0`）每幀組出來的內容還沒定。它不收參數、有 41 個呼叫端，主體全部來自全域狀態；緩衝區 360×240 而只顯示 312×192，開頭 `0x21d8` byte 的用途未知。
 - 離場旗標 `000643eb` 與 `Disk.no` 第三個 token 的緩衝區 `000643e8` 只差三個 byte。兩者是獨立全域還是同一個小緩衝的第 3 個 byte，沒有從 `main` 本身斷定；執行期無差別（旗標在讀檔後被明確歸零），但重建時緩衝區要宣告大小就必須先決定。
-- 單位記錄的 byte +5 已由寫入端證實：bit 0 是退場、bit 7 是本回合已行動，而且退場是整個指派而非設位元。byte +6（陣營）與 +0x26 的語意仍只從測試推得。
+- 單位記錄的 byte +5 已由寫入端證實：bit 0 是退場、bit 7 是本回合已行動，而且退場是整個指派而非設位元。bit 1..6 在整個映像裡沒有任何寫入端——這個 byte 只被整個指派成 0 或 1、OR `0x80`／`0x1`、AND `0x7f`／`0xfe`／`0x1`——所以執行期恆為 0。bit 2 雖然被 `fdps_battle_system_menu`（`00014c9c`）與 `fdps_battle_player_phase_loop`（`0002bc89`）的 `AND AL,0x85` 測試，但沒有人設它，是死旗標；MP 回復的三處 `flags == 0` 測試實際上等於「未退場且本回合未行動」。byte +6（陣營）與 +0x26 的語意仍只從測試推得。
+- 移動格子 cell 的 byte 0 只有 bit 6（`0x40`，有單位佔據）與 bit 7（`0x80`，進入即停）有意義。`fdps_field_load_chapter_resources` 以 malloc 配置整塊後只寫表頭就呼叫 `fdps_map_grid_reset`，後者以 `AND 0x3f` 保留低六位，所以低六位是堆積殘值；全程式沒有任何讀取端不先以 `0x40` 或 `0x80` 遮罩，殘值不影響行為。
 - `fdps_set_flag_bit`（`000282b0`）與 `fdps_object_set_field34_low_nibble_range`（`00036b60`）的行為清楚但歸屬哪個子系統未定，要等它們操作的旗標語意定案。
 - 全域資料的命名與 struct 佈局整批留給票 17。目前 plate comment 一律以 `DAT_xxxxxxxx` 指稱它們。

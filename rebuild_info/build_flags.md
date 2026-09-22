@@ -141,7 +141,7 @@ CD 模組    wcc386 -bt=dos4g -mf -4s -fpi -os
 
 判定是逐 byte 的，不是推論：以 `-os` 編出來的 `src/cd.c` body 與原版 `0003bade` 逐條指令、逐 byte 相同（0x9f byte）；以定案旗標組編同一份原始碼得到 0xad byte，形狀處處不同——四推框架對上沒有框架、`MOV EAX,offset` / `PUSH EAX` 對上 `PUSH imm32`、`XOR EAX,EAX` / `MOV AX` 對上 `MOVZX`，而且沒有 stack probe。
 
-範圍由 `__CHK` 的呼叫端界定：`get_xrefs_to 0004361a` 回來 34 個，32 個是位址連續的 `fdps_cd*`，另外兩個是 CRT 的 `spawnve` / `spawnvpe`。「用 `PUSH imm32` 推資料位址」這個形式在整個 image 裡也只出現在同一個區塊。這個形狀只有「那是一個獨立的 translation unit，用不同旗標編」解釋得了——一支 function 的序幕不可能一半有 probe 一半沒有。
+範圍由 `__CHK` 的呼叫端界定：`get_xrefs_to 0004361a` 回來 34 個，32 個是位址連續的 `fdps_cd*`，另外兩個是 CRT 的 `spawnve` / `spawnvpe`；同一組 stub 的其餘三支，`__STK`（`0x4362d`）只被 `__CHK` 自己呼叫，`__GRO`（`0x4362a`）與 `0x43612` 沒有任何參照。「用 `PUSH imm32` 推資料位址」這個形式在整個 image 裡也只出現在同一個區塊。這個形狀只有「那是一個獨立的 translation unit，用不同旗標編」解釋得了——一支 function 的序幕不可能一半有 probe 一半沒有。
 
 **這與引數推送形式那一節是不同的軸，不要混。** 那一節講的混用發生在**同一支 function 內部**（比例可以懸殊到 1 比 87），per-file 的旗標差異解釋不了它；CD 這件事則是整個 translation unit 的邊界，兩者各自成立。
 
@@ -267,7 +267,7 @@ object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是�
 序幕形狀的量測（樣本為 1,042 個 function）：
 
 - 468 個是標準的四推序幕（其中 414 個在 `0x3b000` 以下的遊戲段）——堆疊慣例
-- 18 個序幕就是 `push imm` / `call`——沒有 `-s` 的程式庫模組，同樣是堆疊慣例。其中 17 個呼叫 `__CHK`，第 18 個（`0x51f6b`）呼叫的是別的東西
+- 18 個序幕就是 `push imm` / `call`，同樣是堆疊慣例。`push imm` / `call __CHK` 這種序幕的主體是帶 probe 的 CD 模組，不是程式庫：`__CHK` 的 34 個呼叫端是 32 支 `fdps_cd*` 與 CRT 的 `spawnvpe`（`0x54dcc`）、`spawnve`（`0x556ae`）。`0x51f6b` 的序幕呼叫的是別的東西
 - 其餘 556 個是手寫組語或開了最佳化的 vendor 程式碼，形狀各異
 - 全 binary 只有 2 個 function 含 `RET imm`（`0x4361a` 的 `__CHK`、`0x5038a`）
 

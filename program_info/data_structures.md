@@ -50,6 +50,8 @@ pool 分布是 `binary_artifact` 395、`fdps` 292、`crt` 196、`ail` 157。判�
 | `fdps_cd_q_channel_block` | 11 | `0x69e56` | CD Q channel |
 | `fdps_dpmi_real_mode_call` | 50 | `0x69e22` | DPMI real-mode call structure |
 
+**鍵盤 ISR 狀態區（`0x70000`–`0x70024`）的出廠初值**：存下來的 INT 09h 向量 `0x70000`–`0x70005` 為 0；最後 scancode `0x70006` 為 `0xFF`（無按鍵）；十格環形佇列 `0x7000F`–`0x70018` 全部為 `0xFF`；讀索引 `0x70019` 與寫索引 `0x7001D` 為 0；ISR 的前一 scancode `0x70021` 為 `0xFF`。各欄緊密排列、兩個索引都沒有 4-byte 對齊，但所有存取都各自指名欄位，索引恆在 0..9，也沒有 DPMI 鎖定這一段，所以重建版把它們寫成各自獨立的全域變數、排列與對齊任意都不影響行為。
+
 **沒有 per-chapter 記錄。** 章節資料不是執行檔裡的一張表；沒有任何程式碼以固定 stride 索引章節結構。章節的分派走的是 [`memory_layout.md`](memory_layout.md) 記的那四張函式指標表，資料則整章從資源檔讀。
 
 ## 與前作 FD2 的對應

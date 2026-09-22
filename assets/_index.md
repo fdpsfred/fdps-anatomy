@@ -15,4 +15,5 @@
 | [`items.md`](items.md) | 226 個物品的類型、AP／HIT／DP／EV、附加屬性、距離、價格與使用效果 |
 | [`spells.md`](spells.md) | 40 個法術的威力、命中率、距離、範圍、MP 與作用對象 |
 | [`characters.md`](characters.md) | 十二名我方人物的出場基礎值、升級成長範圍與法術習得等級，以及三者合成實際數值的公式 |
-| [`classes.md`](classes.md) | 40 個職業代碼的地形行動力消耗、暴擊率與魔法抗性 |
+| [`classes.md`](classes.md) | 40 個職業代碼的地形行動力消耗、暴擊率與魔法抗性，以及 36 個職業准許裝備的物品類型 |
+| [`enemies.md`](enemies.md) | `ENEMYDAT.DAT` 91 筆敵方單位係數的內容、樣板列、可認出身分的幾筆，與表尾之外的肖像編號 |

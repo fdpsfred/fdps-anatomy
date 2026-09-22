@@ -22,7 +22,7 @@
 | ---: | --- | --- | --- |
 | `0x00` | `u8[6]` | `allowed_item_types` | 准許的物品類型代碼，升冪排列，空位為 `0xFF` |
 
-代碼比對的對象是物品 record 的 `+0x00` 類型欄位（見 [`items.md`](items.md)）。六個代碼各自對應哪一種物品尚未解讀。
+代碼比對的對象是物品 record 的 `+0x00` 類型欄位（見 [`items.md`](items.md)）。每個職業的准許類型見 [`assets/classes.md`](../classes.md)。
 
 ### 索引是原始的職業代碼，沒有加 1
 
@@ -31,3 +31,7 @@
 ### 沒有 sentinel，也沒有任何界限
 
 唯一的讀取端 `fdps_unit_can_equip_item` 六格全掃，不因為讀到 `0xFF` 就停；空位用 `0xFF` 而不是 `0x00`，是因為 `0x00` 本身就是一個活的物品類型代碼。取值函式本身也什麼都不檢查：216 byte 只裝得下職業代碼 `0x00`–`0x23` 的 36 筆，而職業代碼一路到 `0x27`，所以 `0x24`–`0x27` 會讀到檔案後面；乘法是帶號的，負的索引會讀到檔案前面；表基底也不測 null。重建時照直覺補上終止判斷會改變行為，見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md)。
+
+### 兩張表的越界讀取在遊戲中走不到
+
+人物 record `+0x20` 的職業碼只有四個寫入點：部署時取 `FRIAPRDA.DAT` 或 `ENEMYDAT.DAT`、入隊時取 `FRIAPRDA.DAT`、教會轉職時取 `RANKUP.DAT`。三檔的職業碼上限分別是 `0x19`、`0x26`、`0x18`。能走到 `fdps_unit_can_equip_item` 的只有隊伍成員與 side 2 的單位，職業碼最大 `0x19`，所以 `PROEQU.DAT` 的 36 筆夠用。`0x24`–`0x26` 只出現在敵方單位身上，它們只查 `PROMAP.DAT`，列號最大 `0x27`，落在 41 筆之內。
