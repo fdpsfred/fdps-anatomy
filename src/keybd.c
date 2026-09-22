@@ -21,10 +21,58 @@
  * Initialised definitions come first and their order is the layout
  * (rebuild_info/data_emit.md); zero-filled ones follow. */
 
+/* 00070006. Starts as 0xff, the no-key sentinel the uninstall routine also
+   writes back, so a loop that reads the latch before the first IRQ 1 sees no
+   key rather than scancode 0. */
+unsigned char data_fdps_input_last_scancode = 0xff;
+
+/* 0007000f. Every slot starts as 0xFF, the same no-key sentinel
+   fdps_read_keyboard_queue returns when the queue is empty. Slots are only
+   ever overwritten with make codes below 0x80, so the initial fill is never
+   observed through the normal head/write-index protocol but must still match
+   the image. */
+unsigned char data_fdps_input_scancode_queue[SCANCODE_QUEUE_LEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+/* 00070021. Starts at 0xff, a value port 0x60 never delivers as a fresh press,
+   so the very first scancode the keyboard ISR sees always differs from it and
+   is queued rather than dropped as a repeat. */
+unsigned char data_fdps_input_isr_prev_scancode = 0xff;
+
 /* 00060018. Starts at zero in the image; the reader resets it to zero whenever
    the scancode changes, so the initial value only matters for the very first
    repeat check. */
 int data_fdps_input_key_repeat_counter;
+
+/* 00063fc4. Starts at zero, so the first scancode read (any non-zero key)
+   differs from it and resets the repeat counter; a zero scancode on the first
+   call counts as a repeat. */
+unsigned int data_fdps_input_key_repeat_prev_scancode;
+
+/* 00063fc8. Starts at zero in the image (BSS); fdps_read_scancode_auto_repeat
+   overwrites it with the current tick before the first equality comparison can
+   matter. */
+unsigned int data_fdps_input_key_repeat_last_tick;
+
+/* 00070000. Zero in the image; fdps_install_keyboard_isr stores the ES
+   selector returned by INT 21h AH=35h into it, and fdps_uninstall_keyboard_isr
+   loads it into DS for the AH=25h restore, so its initial value is never read
+   before being written. */
+unsigned short data_fdps_input_prev_int9_handler_selector;
+
+/* 00070002. Starts at zero in the image; fdps_install_keyboard_isr overwrites
+   it with the offset DOS returns before the uninstaller ever reads it, so the
+   initial value is never observed. */
+unsigned int data_fdps_prev_int9_handler_offset;
+
+/* 00070019. Starts at 0, equal to the ISR write index, so the ten-byte
+   scancode ring begins empty. It only ever holds 0..9 and wraps to 0 on
+   reaching 10. */
+int data_fdps_input_scancode_queue_head;
+
+/* 0007001d. Starts at 0, equal to the read head, so the ten-slot scancode ring
+   begins empty. It is volatile because the keyboard ISR advances it while
+   fdps_wait_any_key spins on it. */
+volatile int data_fdps_input_scancode_queue_write_index;
 
 /* End of global data. */
 

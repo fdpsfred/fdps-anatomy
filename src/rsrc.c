@@ -15,6 +15,22 @@
 #include "rsrc.h"
 #include "vfs.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00064060. Starts all zero in the image; entries are only meaningful below
+   the cached-group count at 00069cf0, which starts at 0, so the zero contents
+   are never read before being written. */
+int data_fdps_cel_sprite_cache_group_ids[30];
+
+/* 0006411c. Starts at zero in the image; the first fdps_cache_cel_sprite_group
+   call sets it outright and later calls grow it, so the initial value is never
+   read before it is written. */
+unsigned int data_fdps_cel_sprite_cache_buffer_used;
+
+/* End of global data. */
+
 /* The archive's offset table starts at file offset 6, past a six-byte header
    the reader never looks at, and holds one u32 per entry.  ADD EAX,0x6 onto
    LEA EAX,[EAX*0x4 + 0x0] at 00022e9c is the whole of the address

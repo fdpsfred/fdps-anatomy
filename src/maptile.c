@@ -10,6 +10,17 @@
 #include "gamedata.h"
 #include "maptile.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00069d0a. Starts at zero in the image (bss); it is only ever stored by
+   fdps_map_load_tile_info from tile attribute byte +1 and never read, so the
+   initial value is unobservable. */
+unsigned char data_fdps_map_current_tile_attr_reserved;
+
+/* End of global data. */
+
 /* 0002ba00.  Six globals written, nothing returned, no callee and no branch:
    the whole body is one straight run of loads and stores, which is why there
    is no control flow below to match against the assembly.

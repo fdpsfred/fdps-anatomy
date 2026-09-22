@@ -35,6 +35,17 @@
 #include "unitstat.h"
 #include "vfs.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00063fb8. Starts as zero in the image; it is always written by
+   fdps_battle_show_unit_status_window before fdps_close_status_window reads it
+   back, so the initial value is never observed. */
+unsigned char data_fdps_ui_play_active_flag_saved;
+
+/* End of global data. */
+
 /* The VGA graphics aperture as a flat linear address, the mode 13h scanline
    pitch, the row count and the size of one whole frame.  All four are
    hard-coded in the original (PUSH 0xa0000, PUSH 0x140, 0xc8, PUSH 0xfa00)

@@ -31,6 +31,17 @@
 #include "savepnl.h"
 #include "savefile.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00064104. Starts at 0 (save mode); the save and load screens each set it on
+   entry, so the initial value is only observable if the slot selection loop
+   ran before either screen, which it cannot. */
+int data_fdps_ui_saveload_is_load_mode;
+
+/* End of global data. */
+
 /* The adapter.  0xa0000 is where the display answers in mode 13h and 0x140 is
    its row stride, PUSH 0xa0000 at 000247dc and PUSH 0x140 at 000247a4, and both
    stay literals here because neither is the address or the size of anything

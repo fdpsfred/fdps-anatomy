@@ -21,6 +21,21 @@
 #include "chinit1b.h"
 #include "chinit2.h"
 #include "chinit2b.h"
+#include "chend1.h"
+#include "chend1b.h"
+#include "chend2.h"
+#include "chend2b.h"
+#include "chevt1.h"
+#include "chevt2.h"
+#include "chevt2b.h"
+#include "chevt3.h"
+#include "chevt4.h"
+#include "chevt5.h"
+#include "chevt5b.h"
+#include "chevt6.h"
+#include "chpost1.h"
+#include "chpost2.h"
+#include "chpost3.h"
 
 /* Global data owned by this file, in the original image's address order.
  * Initialised definitions come first and their order is the layout
@@ -62,6 +77,138 @@ chapter_init_handler_fn data_fdps_chapter_init_handler_table[30] = {
     fdps_chapter_28_init,
     fdps_chapter_29_init,
     fdps_chapter_30_init
+};
+
+/* 000601c4. Fifty relocated code pointers, slot n naming the handler the map
+   data's event slot n selects (slot 0 is
+   fdps_chapter_03_event_deploy_wave_for_turn, slot 49
+   fdps_chapter_30_event_deploy_wave_3); the order is the whole content, since
+   the map, turn and death scripts address handlers only by slot number. */
+void (*data_fdps_chapter_event_handler_table[50])(int unit_index) = {
+    fdps_chapter_03_event_deploy_wave_for_turn,
+    fdps_chapter_03_event_deploy_wave_1,
+    fdps_chapter_event_set_game_over,
+    fdps_chapter_02_event_enemies_advance,
+    fdps_chapter_03_event_deploy_wave_14,
+    fdps_chapter_03_event_turn_limit_game_over,
+    fdps_chapter_04_event_for_turn,
+    fdps_chapter_05_event_enemies_advance,
+    fdps_chapter_06_event_deploy_wave_2,
+    fdps_chapter_07_event_enemies_advance,
+    fdps_chapter_08_event_for_turn,
+    fdps_chapter_08_event_send_guest_mage_to_cells,
+    fdps_chapter_08_event_villagers_leave_cells,
+    fdps_chapter_08_event_villager_escapes,
+    fdps_chapter_09_event_deploy_wave_1,
+    fdps_chapter_10_event_deploy_wave_for_turn,
+    fdps_chapter_10_event_deploy_wave_10,
+    fdps_chapter_11_event_deploy_wave_for_turn,
+    fdps_chapter_13_event_enemies_advance,
+    fdps_chapter_14_event_deploy_wave_4,
+    fdps_chapter_15_event_activate_enemy_group,
+    fdps_chapter_15_event_boss_defeat,
+    fdps_chapter_16_event_wandering_smith_forge,
+    fdps_chapter_16_event_enemies_advance_for_turn,
+    fdps_chapter_17_event_deploy_wave_for_turn,
+    fdps_chapter_18_event_deploy_wave_for_turn,
+    fdps_chapter_19_event_lancelot_joins,
+    fdps_chapter_19_event_deploy_wave_6,
+    fdps_chapter_20_event_upgrade_randis_sword,
+    fdps_chapter_21_event_deploy_wave_1,
+    fdps_chapter_21_event_deploy_wave_2,
+    fdps_chapter_22_event_for_turn,
+    fdps_chapter_22_event_boss_defeat,
+    fdps_chapter_23_event_boss_defeat,
+    fdps_chapter_23_event_deploy_wave_for_turn,
+    fdps_chapter_23_event_give_martial_artist_ring,
+    fdps_chapter_24_event_deploy_wave_for_turn,
+    fdps_chapter_25_event_deploy_wave_1,
+    fdps_chapter_25_event_upgrade_randis_sword,
+    fdps_chapter_25_event_marian_buys_wind_god_bow,
+    fdps_chapter_26_event_enemies_advance,
+    fdps_chapter_26_event_deploy_waves_2_and_3,
+    fdps_chapter_26_event_wave_2_defeated_line,
+    fdps_chapter_27_event_deploy_wave_1,
+    fdps_chapter_28_event_deploy_wave_for_turn,
+    fdps_chapter_29_event_activate_enemy_groups,
+    fdps_chapter_29_event_activate_all_enemies,
+    fdps_chapter_30_event_deploy_wave_4,
+    fdps_chapter_30_event_deploy_wave_2,
+    fdps_chapter_30_event_deploy_wave_3
+};
+
+/* 0006028c. Slot n holds chapter n+1's post-action handler,
+   fdps_chapter_01_post_action through fdps_chapter_30_post_action in chapter
+   order. The battle loops call the slot data_fdps_chapter_current_chapter_id
+   selects after every unit action, so the order is the chapter numbering. */
+void (*data_fdps_chapter_post_action_handler_table[30])(void) = {
+    fdps_chapter_01_post_action,
+    fdps_chapter_02_post_action,
+    fdps_chapter_03_post_action,
+    fdps_chapter_04_post_action,
+    fdps_chapter_05_post_action,
+    fdps_chapter_06_post_action,
+    fdps_chapter_07_post_action,
+    fdps_chapter_08_post_action,
+    fdps_chapter_09_post_action,
+    fdps_chapter_10_post_action,
+    fdps_chapter_11_post_action,
+    fdps_chapter_12_post_action,
+    fdps_chapter_13_post_action,
+    fdps_chapter_14_post_action,
+    fdps_chapter_15_post_action,
+    fdps_chapter_16_post_action,
+    fdps_chapter_17_post_action,
+    fdps_chapter_18_post_action,
+    fdps_chapter_19_post_action,
+    fdps_chapter_20_post_action,
+    fdps_chapter_21_post_action,
+    fdps_chapter_22_post_action,
+    fdps_chapter_23_post_action,
+    fdps_chapter_24_post_action,
+    fdps_chapter_25_post_action,
+    fdps_chapter_26_post_action,
+    fdps_chapter_27_post_action,
+    fdps_chapter_28_post_action,
+    fdps_chapter_29_post_action,
+    fdps_chapter_30_post_action
+};
+
+/* 00060304. Slot n holds fdps_chapter_NN_end for NN = n + 1, in chapter order
+   with no gaps or repeats; these thirty relocated code pointers are the
+   table's whole content and decide which wrap-up script runs when a chapter is
+   cleared. */
+void (*data_fdps_chapter_end_handler_table[30])(void) = {
+    fdps_chapter_01_end,
+    fdps_chapter_02_end,
+    fdps_chapter_03_end,
+    fdps_chapter_04_end,
+    fdps_chapter_05_end,
+    fdps_chapter_06_end,
+    fdps_chapter_07_end,
+    fdps_chapter_08_end,
+    fdps_chapter_09_end,
+    fdps_chapter_10_end,
+    fdps_chapter_11_end,
+    fdps_chapter_12_end,
+    fdps_chapter_13_end,
+    fdps_chapter_14_end,
+    fdps_chapter_15_end,
+    fdps_chapter_16_end,
+    fdps_chapter_17_end,
+    fdps_chapter_18_end,
+    fdps_chapter_19_end,
+    fdps_chapter_20_end,
+    fdps_chapter_21_end,
+    fdps_chapter_22_end,
+    fdps_chapter_23_end,
+    fdps_chapter_24_end,
+    fdps_chapter_25_end,
+    fdps_chapter_26_end,
+    fdps_chapter_27_end,
+    fdps_chapter_28_end,
+    fdps_chapter_29_end,
+    fdps_chapter_30_end
 };
 
 /* End of global data. */

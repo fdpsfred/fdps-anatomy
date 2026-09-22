@@ -28,6 +28,17 @@
 #include "unit.h"
 #include "gauge.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00064014. Starts all zero in BSS; fdps_battle_show_combat_gauges fills both
+   pairs (or sets the attacker x to -1) on every call before reading them, so
+   no initial value is ever observed. */
+int data_fdps_battle_combat_gauge_pos_pairs[4];
+
+/* End of global data. */
+
 /* The status gauge bar is 117 pixels wide and 8 rows tall, and the sheet holds
    its three graphics that many bytes apart at that row pitch: PUSH 0x75 for
    the source stride and PUSH 0x8 for the row count at both blits, and

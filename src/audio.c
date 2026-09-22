@@ -18,6 +18,55 @@
 #include "vfs.h"
 #include "audio.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00069d30. All eight handles start null; fdps_audio_init fills them with
+   AIL_allocate_sample_handle. The table is preceded by a static zero dword
+   that nothing writes, so the unchecked index SFX_NO_SAMPLE_SLOT (-1) passed
+   to fdps_audio_sample_is_playing reads a null handle, AIL_sample_status
+   answers 0, and the level-up and bonus-lottery wait loops exit as in the
+   original. */
+static void *audio_sample_slot_below_table = 0;
+void *data_fdps_audio_sample_handle_table[SFX_SAMPLE_SLOT_COUNT] = { 0 };
+
+/* 00069d50. Starts as zero in the image's BSS; fdps_audio_timer_install
+   overwrites it with AIL_register_timer's result before any read, so the
+   initial value is never observed. */
+int data_fdps_audio_timer_handle;
+
+/* 00069d5c. Starts at zero in BSS; nothing but
+   fdps_audio_set_sample_playback_rate stores a real rate, so a sample started
+   before that call is handed a rate of 0. */
+int data_fdps_audio_sample_playback_rate;
+
+/* 00069d60. Starts out NULL in BSS; fdps_audio_init stores the
+   AIL_allocate_sequence_handle result here only when an MDI driver installs,
+   and nothing in the image ever reads it back. */
+void *data_fdps_audio_bgm_sequence_handle;
+
+/* 00069d68. Starts null in BSS; fdps_audio_init stores the AIL_install_DIG_INI
+   result here and only allocates sample handles when it is non-null. */
+void *data_fdps_audio_sfx_dig_driver_handle;
+
+/* 00069d6c. Starts out null (BSS); fdps_audio_init stores the
+   AIL_install_MDI_INI result here and only allocates a sequence handle when it
+   is non-null. */
+void *data_fdps_audio_bgm_driver_handle;
+
+/* 00069d71. Starts at zero (bss): no SFX driver is assumed until
+   fdps_audio_init sets it to 1 after a successful driver load, so sound
+   effects stay silent if init never succeeds. */
+unsigned char data_fdps_audio_sfx_driver_available_flag;
+
+/* 00069d72. Starts zero in BSS; fdps_audio_init clears it and sets it to 1
+   only once the BGM driver loads. Nothing in the image ever reads it, so only
+   the byte-wide stores matter. */
+unsigned char data_fdps_audio_bgm_driver_available_flag;
+
+/* End of global data. */
+
 /* Sound is section 3 of a .SAF, so its descriptor is the last of the four
    10-byte section descriptors that begin at header offset 0x0c: u16 item count
    at +0x2a, u32 section start at +0x2c.  Both are addressed as byte offsets

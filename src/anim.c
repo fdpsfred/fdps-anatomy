@@ -34,6 +34,17 @@
 #include "mapdraw.h"
 #include "anim.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 000643ec. Starts NULL in the image; it is always overwritten by
+   fdps_baseani_get_entry_or_exit before being read, so the initial value only
+   has to be zero. */
+unsigned char *data_fdps_animation_baseani_entry_ptr;
+
+/* End of global data. */
+
 /* 0002a240.  One branch, CMP dword ptr [0x000643ec],0x0 / JZ at 0002a267, and
    the not-found arm ends in the exit call, so the ADD ESP,0x4 and the store of
    0 into the return slot that follow it at 0002a293 are never executed.

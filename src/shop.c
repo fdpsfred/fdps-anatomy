@@ -26,6 +26,31 @@
 #include "vilmenu.h"
 #include "shop.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 000601a8. Starts at 0 so the first shop picker opens scrolled to the top;
+   fdps_shop_select_item only resets it when the saved cursor is out of range,
+   so otherwise the offset persists between picker invocations. */
+int data_fdps_shop_item_list_scroll_offset;
+
+/* 000601ac. Starts at zero so the first shop visit opens with the first item
+   highlighted; fdps_shop_select_item also resets it to 0 whenever it is at or
+   past the current stock count. */
+int data_fdps_shop_item_picker_cursor_idx;
+
+/* 000601b0. Starts at 0 (image bytes 00 00 00 00), so the first buy-target
+   list opens scrolled to the top; it is never reset by the reader, so it keeps
+   its scroll position between visits. */
+int data_fdps_shop_buy_target_scroll_offset;
+
+/* 000601b4. Starts at 0 (first buy-target slot); the shop never resets it, so
+   the cursor position persists between visits within a session. */
+int data_fdps_shop_buy_target_cursor_idx;
+
+/* End of global data. */
+
 /* 00031700.  Walks one twelve-byte row of the shop stock table and packs the
    stocked ids down into the caller's array.
 

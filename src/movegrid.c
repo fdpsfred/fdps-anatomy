@@ -14,6 +14,22 @@
 #include "unit.h"
 #include "walk.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00063930. All 800 bytes are zero in the image (bss); the flood fill seeds
+   entry 0 and fills each wave before reading it, so no initial value is ever
+   observed. */
+unsigned char data_fdps_battle_move_frontier_y[800];
+
+/* 00063c50. Starts all zero (bss); fdps_move_grid_flood_fill_range seeds entry
+   0 of the active 400-byte bank before reading any entry, so no initial value
+   is observed. */
+unsigned char data_fdps_battle_move_frontier_x[800];
+
+/* End of global data. */
+
 /* 00010b20.  CMP dword ptr [0x00060144],0 / JZ to the epilogue: an unallocated
    grid is not an error here, it is a silent return.  Which of the fourteen
    callers can actually reach it with a null grid is not established -- all

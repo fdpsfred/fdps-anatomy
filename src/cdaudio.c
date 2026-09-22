@@ -52,6 +52,38 @@
 #include "vfs.h"
 #include "cdaudio.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060170. Poll-tick counter for the CD music repeat check: incremented once
+   for every new timer tick seen, and when it reaches 75 the current track is
+   restarted and the counter goes back to 0. Starts at zero like the rest of
+   BSS. */
+int data_fdps_audio_cd_repeat_tick_counter;
+
+/* 00069d74. Starts at zero like the rest of BSS; the first poll sees it differ
+   from the timer tick count (unless the tick is also still 0) and begins
+   counting toward the 75-tick repeat check. */
+unsigned int data_fdps_audio_cd_repeat_last_tick;
+
+/* 00069de4. Starts at zero in the image; fdps_cd_resolve_track_range always
+   writes it before fdps_cd_play_track or fdps_cd_play_track_range read it, so
+   the initial value is never observed. */
+unsigned int data_fdps_cd_play_range_end_sector;
+
+/* 00069dec. Starts as zero in BSS; fdps_cd_resolve_track_range always writes
+   it before any play call reads it, so the initial value is never observed. */
+unsigned int data_fdps_cd_play_range_start_sector;
+
+/* 00069e56. Starts all zero in the image; it is only a staging block that
+   fdps_cd_read_q_channel overwrites with the driver's reply before
+   fdps_cd_read_audio_position reads it, so no initial value is observable
+   except after a refused request. */
+struct fdps_cd_q_channel_block data_fdps_cd_q_channel_block;
+
+/* End of global data. */
+
 /* 0003c3fa.  A bare MSCDEX device request -- command 0x83, Seek -- with no
    transfer attached: address field zero, sector count zero, and the drive
    asked only to put its head on the sector named at header offset 0x14.

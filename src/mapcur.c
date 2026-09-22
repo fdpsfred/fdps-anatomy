@@ -22,6 +22,18 @@
 #include "text.h"
 #include "unit.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 0006016c. Starts at 25 (0x19), the left-side column, because nothing
+   initialises it at run time; the panel is drawn there until the cursor first
+   reaches a low corner and the dodge logic stores 25 or 292. A zero-filled
+   definition would draw the first panels at column 0. */
+short data_fdps_ui_terrain_hud_panel_offset = 25;
+
+/* End of global data. */
+
 /* One map tile is 24 world pixels on each axis: the 0x18 that every displaced
    call site adds or subtracts, and the divisor of the mode 6 arm. */
 #define CURSOR_TILE_STEP 0x18

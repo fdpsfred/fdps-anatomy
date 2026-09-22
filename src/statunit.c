@@ -27,6 +27,22 @@
 #include "text.h"
 #include "unit.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00063fb0. Starts at zero in the image (BSS); it only carries a unit index
+   from the status panel draw to the following wait-input loop while in the
+   village, so no initial value is observed. */
+int data_fdps_village_status_window_unit_idx;
+
+/* 00063fc0. Starts at zero in the image (BSS); the first pass of the status
+   window's wait loop compares the live tick counter against this zero and
+   latches the counter at 0001750b, so no non-zero seed is required. */
+int data_fdps_unit_status_window_last_tick;
+
+/* End of global data. */
+
 /* The VGA graphics aperture as a flat linear address, the mode 13h scanline
    pitch and the size of one whole frame.  All three are hard-coded in the
    original (PUSH 0xa0000, PUSH 0x140, PUSH 0xfa00) and stay literals here:

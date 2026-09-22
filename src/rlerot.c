@@ -8,6 +8,59 @@
 #include "rle.h"
 #include "rlerot.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00070034. The image holds 1 (+1 byte step, the unrotated direction). Both
+   rotated blitters store +1 or -1 before any read, so the initial value is
+   never observed, but the gate compares the bytes. */
+int data_fdps_graphics_rle_rotate_dst_x_step_per_src_x = 1;
+
+/* 00070038. Starts as zero in the image; both rotated blitters store
+   +/-dest_pitch into it before any read, so the initial value is never
+   observed. */
+int data_fdps_graphics_rle_blit_rotated_src_pixel_step_y;
+
+/* 0007003c. Starts at zero in the image; both rotated blitters store +1 or -1
+   into it on every quadrant branch before the row loop reads it, so the
+   initial value is never observed. */
+int data_fdps_graphics_rle_blit_rot_row_dest_step_x;
+
+/* 00070040. Starts at zero; both rotated blitters store +/-dest_pitch into it
+   on every call before their loops read it, so the initial value is never
+   observed. */
+int data_fdps_graphics_rle_rotate_dst_y_step_per_src_y;
+
+/* 00070044. Starts as zero in the image and is reset to 0 at the start of
+   every fdps_rle_blit_rotated_scaled call before use, so the initial value has
+   no observable effect. */
+unsigned short data_fdps_graphics_rle_blit_rot_pixel_step_x_accumulator;
+
+/* 00070046. Starts at zero in the image; fdps_rle_blit_rotated_scaled resets
+   it to 0 before every run of pixels, so the initial value is never observed.
+   */
+unsigned short data_fdps_graphics_rle_blit_rot_pixel_step_y_accumulator;
+
+/* 00070048. Starts at zero in the image, but both rotated blitters reset it to
+   0 before every blit, so the load-time value is never observed. */
+unsigned short data_fdps_graphics_rle_blit_rot_row_step_x_accumulator;
+
+/* 0007004a. Starts at zero in the image, but both rotated blitters reset it to
+   0 on entry before use, so the initial value is never observed. */
+unsigned short data_fdps_graphics_rle_blit_rot_row_step_y_accumulator;
+
+/* 0007004c. Starts at zero in the image; both rotated RLE blitters store the
+   step magnitude (MOV word ptr, DX) before any read, so the initial value is
+   never observed. */
+unsigned short data_fdps_graphics_rle_rotate_cos_magnitude;
+
+/* 0007004e. Starts at zero; both rotated blitters store it before any read, so
+   the initial value is never observed. */
+unsigned short data_fdps_graphics_rle_rotate_sin_magnitude;
+
+/* End of global data. */
+
 /* 00056e2a.  Blit mode 5.  Hand-written assembly, not compiler output: no
    prologue, ESI is the stream, EDI the destination, BX the width left in the
    row, CL the command byte and DX and BP the two within-row fractional

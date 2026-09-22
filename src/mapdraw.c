@@ -22,6 +22,57 @@
 #include "palcycle.h"
 #include "mapdraw.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060154. Starts as palette index 255 (bytes ff 00 00 00) and nothing ever
+   writes it, so it is effectively a constant; the scene layer copies it into
+   the blend descriptor as the colour marked tiles are tinted toward. */
+int data_fdps_scene_marked_tile_tint_color = 255;
+
+/* 0006014c. Starts at 0 in the image; fdps_draw_map_units sets it to 1 for the
+   shadow sweep and back to 0 before the unit sweep, so its initial value is
+   only observed before the first map draw, where 0 means the normal pass. */
+unsigned char data_fdps_map_unit_shadow_pass_flag;
+
+/* 00060160. Starts at 0, so the first scene frame draws the base tile of each
+   animated pair; the phase only toggles once the tick latch has run for more
+   than three ticks. */
+int data_fdps_scene_tile_anim_phase;
+
+/* 00060164. Starts at zero; fdps_draw_scene_layer treats zero as 'not yet
+   armed' and seeds it from the timer tick counter on first use, so the initial
+   value must stay zero. */
+unsigned int data_fdps_scene_tile_anim_last_flip_tick;
+
+/* 00060168. Starts at zero, so the first status-icon rotation begins from the
+   first active timer slot; the value only ever increments, so its starting
+   point decides nothing beyond the phase of the icon rotation. */
+int data_fdps_map_unit_status_icon_cycle;
+
+/* 00069d10. Starts at zero in the image; the first fdps_render_view_frame call
+   only spins while the timer tick counter still equals zero, then latches the
+   current tick, so no nonzero seed is needed. */
+unsigned int data_fdps_view_frame_last_tick;
+
+/* 00069d14. Starts at zero in BSS; the first scene draw sees it differ from
+   the timer tick counter (unless that is also 0) and runs one scroll step
+   before latching the tick. */
+unsigned int data_fdps_scene_layer_scroll_last_tick;
+
+/* 00069d18. Starts at zero in the image (bss). The first draw call compares it
+   against the timer tick counter with an equality test only, so the zero start
+   just means the first frame with a non-zero tick advances the animation. */
+unsigned int data_fdps_map_unit_anim_last_tick;
+
+/* 00069d1c. Starts at zero in the image, so the first status-icon cycle begins
+   at tick 0 and the page counter at 0x00060168 advances after 25 unit draws.
+   */
+int data_fdps_map_unit_status_icon_tick_counter;
+
+/* End of global data. */
+
 /* 0002c220.  A hand-written bubble sort over the layer slot indices, keyed on
    the depth byte, with no callee and nothing returned.
 

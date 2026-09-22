@@ -37,6 +37,17 @@
 #include "audio.h"
 #include "unitatk.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00064010. Starts zero in the image; fdps_unit_resolve_attack_hit sets it to
+   1 on entry and clears it on a miss, so the initial value is never observed.
+   */
+unsigned char data_fdps_battle_last_hit_or_miss_flag;
+
+/* End of global data. */
+
 /* The weapon hit effects, read out of item record byte +9.  Both functions in
    this file read that byte and each answers a different part of it:
    fdps_unit_resolve_attack_hit's chain compares against 3, 4 and 1 and passes

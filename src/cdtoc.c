@@ -25,6 +25,45 @@
 #include "cd.h"
 #include "cdtoc.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00069e05. Starts at zero; fdps_cdrom_read_track_info stores the track's
+   control byte masked with 0xD0 before fdps_cd_track_is_audio tests it against
+   0x40 (data track), so no initial value is ever observed. */
+unsigned char data_fdps_cd_track_info_control_flags;
+
+/* 00069e06. Starts at zero; it is only filled from the audio disk info reply
+   when the CD table of contents is read, so nothing depends on its initial
+   value. */
+unsigned char data_fdps_cd_lowest_track_number;
+
+/* 00069e08. Starts as zero in the image; fdps_cdrom_read_disk_info fills it
+   from the lead-out MSF before anything could read it, so the initial value
+   carries no meaning. */
+unsigned char data_fdps_cd_leadout_msf_minute;
+
+/* 00069e09. Starts at zero in BSS; fdps_cdrom_read_disk_info fills it from the
+   lead-out MSF before anything reads it, so no initial value is observable. */
+unsigned char data_fdps_cd_leadout_second;
+
+/* 00069e0a. Starts at zero in the image; it is only meaningful after
+   fdps_cdrom_read_disk_info has unpacked the lead-out MSF from the driver, so
+   no initial value is relied on. */
+unsigned char data_fdps_cd_leadout_frame;
+
+/* 00069e0f. Starts all zero in the image (BSS); fdps_cdrom_read_upc fills all
+   seven bytes with a memcpy before anything could read them, so no initial
+   value matters. */
+unsigned char data_fdps_cd_media_catalog_number[7];
+
+/* 00069e16. Starts all zero in BSS; fdps_cdrom_read_disk_info fills all six
+   bytes with a memcpy from the IOCTL reply before anything could use them. */
+unsigned char data_fdps_cd_disk_info_reply[6];
+
+/* End of global data. */
+
 /* 0003bc3f.  Three byte stores straight out of the packed argument, in
    least-significant-field-first order: the low byte to *frame, bits 8-15 to
    *second, bits 16-23 to *minute.  There is no branch and no arithmetic beyond

@@ -26,6 +26,17 @@
 #include "keybd.h"
 #include "deploy.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060140. Starts as NULL; fdps_build_map_unit_array tests it against zero
+   before freeing a previous table, so the only requirement is that it begins
+   NULL, which zero-initialised BSS provides. */
+unsigned char *data_fdps_map_spawn_pos_table_ptr;
+
+/* End of global data. */
+
 /* The stride of one unit record, as the original writes it: IMUL EAX,EAX,0x50
    at 000232e3 for the realloc size and PUSH 0x50 at 000232cc for the first
    malloc.  A literal and not sizeof(struct fdps_unit_record) for the reason

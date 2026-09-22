@@ -8,6 +8,22 @@
 #include "gamedata.h"
 #include "rleblend.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00070050. Starts as zero in the image; fdps_rle_blit_translucent_color_range
+   stores the descriptor's lower colour bound here on every call before any
+   read, so the initial value is never observed. */
+short data_fdps_graphics_rle_blit_translucent_color_min;
+
+/* 00070052. Starts at zero in the image; fdps_rle_blit_translucent_color_range
+   stores the upper bound from its parameter block before any compare reads it,
+   so the initial value is never observed. */
+short data_fdps_graphics_rle_blit_translucent_color_max;
+
+/* End of global data. */
+
 /* One row of the shade ramp is 256 dwords, and the two halves of the table are
    nine rows apart: SHL ECX,0xa at 00057648 scales a row index into 0x400 bytes
    and the 0x2400 of 0005762f is 9 * 0x100 entries, not 0x2400 of them.  Both

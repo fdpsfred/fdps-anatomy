@@ -46,6 +46,34 @@
 #include "vilmenu.h"
 #include "vilshop.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00060174. Screen x of each village destination (leave, bar, church, items,
+   weapons, secret shop) in the 320-pixel-wide village map; these are the fixed
+   pixel positions the marker is blitted at, the zoom centres, and the walk
+   animation endpoints. */
+int data_fdps_village_signboard_destination_x_table[6] = { 138, 214, 253, 46, 54, 4 };
+
+/* 0006018c. Screen y coordinates of the six village destinations (slot 0 = the
+   exit, then bar, church, items, weapon shop, secret), used as zoom-transition
+   centres and as the walk animation's endpoints. Paired index-for-index with
+   the x table at 0x00060174. */
+int data_fdps_village_destination_marker_y_table[6] = { 0, 74, 151, 135, 49, 160 };
+
+/* 000601a4. Starts at 0, so the village marker first shows roster member 0;
+   the signboard menu clamps it back to 0 whenever it reaches the roster count
+   and advances it modulo that count. */
+int data_fdps_village_marker_roster_idx;
+
+/* 000601c0. Starts at 0 so the first key typed is compared against the first
+   character of the selected secret code; the checker resets it to 0 (or 1) on
+   a mismatch. */
+int data_fdps_secret_code_match_pos;
+
+/* End of global data. */
+
 /* The 320x200 8bpp page the whole game composes in, its pitch and its size,
    and the adapter's own linear frame buffer.  PUSH 0xfa00 at 00031d99,
    00031da9, 00031f0c, 0003205f and 00032325, PUSH 0x140 at 00031dc2 and

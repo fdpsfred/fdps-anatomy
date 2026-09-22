@@ -34,6 +34,22 @@
 #include "village.h"
 #include "vilmenu.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 000601b8. Starts at zero so the village member grid first shows from the top
+   row; fdps_village_select_member moves it in steps of 3 (one grid row) as the
+   cursor leaves the visible six-slot window. */
+int data_fdps_village_member_grid_scroll_offset;
+
+/* 000601bc. Starts at 0, so the first time the member picker opens the cursor
+   is on the first member; nothing resets it afterwards, so it keeps the last
+   position across later openings. */
+int data_fdps_village_member_select_cursor_idx;
+
+/* End of global data. */
+
 /* The grid's offscreen page: 312 bytes to a row, 76 rows, and the 0x5ca0 a
    pass mallocs is exactly that product.  It is rebuilt from nothing every pass
    and freed at the end of it, so no state carries in the pixels. */

@@ -29,6 +29,40 @@
 #include "mapdraw.h"
 #include "indicat.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00064120. Starts all zero (bss in the original). It is written as an
+   explicit zero initialiser so it lands in _DATA as the head of the contiguous
+   indicator queue block: an unbounded queue cursor overruns this array into
+   data_fdps_battle_indicator_queue_unit_idx, which must follow it directly. */
+unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 000641e8. Starts all zero. It is written with an explicit initialiser only
+   so that it lands in _DATA directly after
+   data_fdps_indicator_queue_cell_x_offset and before
+   data_fdps_indicator_queue_glyph_ids: the queue cursor is never bounded, so a
+   batch of more than 50 popups overruns each array into the next one exactly
+   as in the original. */
+unsigned char data_fdps_battle_indicator_queue_unit_idx[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 000642b0. Starts all zero; it is initialised only so it lands in _DATA
+   directly after data_fdps_battle_indicator_queue_unit_idx, because the
+   unbounded queue cursor lets a batch of more than 50 popups write unit
+   indices past that array into this one, and this array's own overrun into the
+   cursor. */
+unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 00064378. Zero in the image (empty queue). It is written as an initialised
+   zero so it lands in _DATA directly after
+   data_fdps_indicator_queue_glyph_ids, where the original keeps it: an
+   unbounded batch of more than 50 popups writes glyph_ids[200..203] onto this
+   cursor, exactly as in the original. */
+int data_fdps_indicator_queue_count = 0;
+
+/* End of global data. */
+
 /* One map tile is 24 pixels square, and the view origins are in pixels, so this
    is what turns a scroll position into the tile column and row the screen
    starts at. */

@@ -30,6 +30,51 @@
 #include "cd.h"
 #include "cdtoc.h"
 
+/* Global data owned by this file, in the original image's address order.
+ * Initialised definitions come first and their order is the layout
+ * (rebuild_info/data_emit.md); zero-filled ones follow. */
+
+/* 00069dac. Starts all zero; every int386/int386x call writes the full
+   register block before cd.c reads any field, so the initial contents never
+   matter. */
+union REGS data_fdps_cdrom_int_out_regs;
+
+/* 00069dc8. All 28 bytes are zero in the image; every field the CD code uses
+   (ax, bx, cx, bl/bh, ah/al, edi) is stored immediately before each
+   int386/int386x call, so no initial value is ever read. */
+union REGS data_fdps_cd_int_regs_in;
+
+/* 00069df0. Starts zeroed; every use first clears all 12 bytes with memset and
+   then fills es (and the other selectors) before int386x, so no initial value
+   is ever observed. */
+struct SREGS data_fdps_cd_int_sregs;
+
+/* 00069dfc. Starts at zero in BSS; fdps_cdrom_detect overwrites it with BX
+   from the MSCDEX installation check before anything could read it, so the
+   initial value has no observable effect. */
+unsigned short data_fdps_cdrom_drive_count;
+
+/* 00069dfe. Starts at zero; fdps_cdrom_detect overwrites it with the MSCDEX
+   first CD drive index before any device request reads it. */
+unsigned char data_fdps_cdrom_drive_letter_index;
+
+/* 00069e1c. Starts at zero in BSS; the only access in the image is the dword
+   store in fdps_cdrom_read_device_status, so the initial value is never
+   observed. */
+unsigned int data_fdps_cdrom_device_status;
+
+/* 00069e22. Starts all zero; fdps_cd_device_request clears the whole 50 bytes
+   with memset before filling EAX/ECX/EBX/ES for each INT 2Fh AX=1510h call, so
+   no initial content is ever observed. */
+struct fdps_dpmi_real_mode_call data_fdps_cd_real_mode_call;
+
+/* 00069e54. Starts at zero, meaning the DOS request-header buffer has not been
+   allocated yet; fdps_cdrom_detect tests it against zero to decide whether to
+   call fdps_cd_alloc_dos_buffers. */
+unsigned short data_fdps_cd_request_header_real_mode_seg;
+
+/* End of global data. */
+
 /* 0003bade.  Two DPMI INT 31h function 0100h allocations of 0x20 paragraphs
    each, published into four globals.
 

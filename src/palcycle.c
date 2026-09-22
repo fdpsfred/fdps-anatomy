@@ -33,6 +33,19 @@
    */
 int data_fdps_ui_palette_cycle_phase = 15;
 
+/* 00063fbc. Starts at zero (BSS); the first fdps_cycle_ui_palette call cycles
+   unless the tick counter also still reads zero, which matches the original's
+   zeroed storage. */
+unsigned int data_fdps_ui_palette_last_cycle_tick;
+
+/* 00069d20. Starts at zero (bss); the first call of fdps_cycle_scene_palette
+   therefore cycles unless the timer tick counter is also still zero. */
+unsigned int data_fdps_scene_palette_last_cycle_tick;
+
+/* 00069d24. Starts at zero in the image (BSS), so the first scene palette
+   cycle begins at phase 0 and advances to 1 before its first colour write. */
+int data_fdps_scene_palette_cycle_phase;
+
 /* End of global data. */
 
 /* VGA input status register 1.  Bit 3 is set while the vertical retrace is in
