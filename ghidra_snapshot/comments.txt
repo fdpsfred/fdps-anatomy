@@ -21261,6 +21261,8 @@ Pool: fdps  [only game combat and HUD code reaches it; no library touches it]
 Rebuild note:
 Entry 4 is -5, stored as fb ff ff ff. Declaring the table unsigned (or as dword) turns that into 4294967291 and the terrain penalty becomes a colossal defence bonus; the multiply and divide in the original are signed (IMUL, then SAR/IDIV by 100). The division also truncates toward zero, so the modifier vanishes entirely for small DP -- rounding it is a behaviour change.
 
+Rebuild note: shipped maps index this table and the attack table at 00060040 with terrain class 6, one past the end. In the original ap[6] reads this table's entry 0 (constant 0) and def[6] reads the dword at 00060070, i.e. data_fdps_village_mode_flag zero-extended (00060071..00060073 are zero and unreferenced; the flag is 1 only inside fdps_run_village_phase's shop loop, so 0 on every battle map). The rebuild must keep ap, def and the flag contiguous in this order, 0x18 bytes apart, to reproduce both reads.
+
 === 00060070 [PLATE]
 Non-zero while the village phase is running, so the shared window and drawing code takes its village variant and works over the static village screen instead of the live scrolling battle map.
 
