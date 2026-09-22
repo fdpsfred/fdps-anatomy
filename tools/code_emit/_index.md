@@ -9,6 +9,8 @@
 | 檔案 | 用途 |
 | --- | --- |
 | `emit_ticket22.js` | 票 22 的 Workflow 編排，遊戲本體全部 function。開跑第一段先收拾上一輪被殺後留下的殘骸，再去問 `next_batch.py` 要工作清單，序列跑 emit → review → 修正迴圈 → gate → commit，超出行數預算時插入拆檔段，**拆完重新問一次工作清單再繼續跑剩下的預算**（舊路由算出來的那份作廢，但整批不必因此收工），收尾寫 devlog。等價性疑慮只記進 `data/emit_issues.json` 不在批次裡處理，留給全部落地後的總掃。錯誤處理含單項重試、上游失效偵測、gate 失敗的修復迴圈、未完成項目的工作區清理與記帳。不看自己的預算，跑完呼叫者給的數量為止 |
+| `sweep_ticket22.js` | 票 22 收尾的疑慮總掃。收拾工作區 → 凍結疑慮清單 → 一個 agent 把未決疑慮按根因分群 → 每群一個唯讀調查 agent 平行判定、寫判定檔 → 仍有未決的群再回掃一次（可讀其他群的判定檔）→ 序列落地：要改 code 的走修改、獨立審查、build gate，要改 Ghidra 的走 bookkeeper，其餘一次轉錄 → 知識庫整合。已標 `resolved` 的疑慮每個位址一群，只複查標籤不重推結論。可續跑：判定檔與落地 commit 就是進度 |
+| `sweep.py` | 總掃的檔案面，workflow 本身沒有檔案系統。`items` 凍結疑慮清單並把 `same_as` 鏡像併回它指的那筆，`check-clusters`／`check-finding` 驗分群與判定檔是否完整（判斷「做完了沒」看檔案不看 agent 自報），`plan` 讀出每群的進度，`apply` 把判定無損轉錄進 `emit_issues.json`，`handoff` 列出交給票 23／24 的，`--selftest` 驗鏡像解析、驗證與轉錄 |
 | `emit_ticket21.js` | 票 21 的版本，工作清單由 `args` 帶入、沒有拆檔段。留著當該票的紀錄，新工作用票 22 那支 |
 | `build_emit.py` | 四個子命令。`build` 先掃 `src/`／`tests/` 有沒有 Ghidra 反編譯器的預設變數名稱（有就在啟動 DOSBox 之前以 `E9001` 中止），再把兩邊全部編譯**連結兩次**成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析、兩段式連結的判定與命名掃描的雙向正確性 |
 | `gen_stubs.py` | 產生第二次連結用的零填充 stub 模組。輸入是第一次連結報出的未定義符號，型別與大小取自 `data/routing.json`。`--selftest` 驗型別對應與該拒絕的三類符號 |
@@ -25,13 +27,13 @@
 | `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改 |
 | `data/routing.md` | 同一份路由的逐檔清單，人讀用。同樣是產生物 |
 | `data/emit_state.json` | 進度的正本，進版控。續跑的唯一依據。**不記檔案落點** |
-| `data/emit_issues.json` | 尚未收斂的等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是總掃的篩選依據，缺了就等於不存在；reviewer 與 emitter 記到同一件事時，reviewer 那則帶 `same_as` 指回去（`emit#N`），總掃據以併成一則 |
+| `data/emit_issues.json` | 等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是篩選依據，缺了就等於不存在；reviewer 與 emitter 記到同一件事時，reviewer 那則帶 `same_as` 指回去（`emit#N`），總掃據以併成一則。總掃落地後每則多一個 `sweep` 欄位（哪一群、什麼裁決），狀態多一種 `handoff`（帶 `handoff_to`：`23` 或 `24`） |
 
 `workspace/code_emit/` 下的兩個產出值得單獨提：`undefined.json` 是第一次連結報出的未定義符號，也就是票 23 的權威工作清單，每次建置重新產生；`emit_order.json` 是 callee 先於 caller 的 emit 順序，call graph 變動後重跑 `emit_order.py` 更新。
 
 落點的判定依據與超標處置規則由 [`rebuild_info/code_layout.md`](../../rebuild_info/code_layout.md) 擁有，本目錄只放表與產生器。
 
-判定檔（emitter 與 reviewer 的完整產出）落在 `workspace/code_emit/verdicts/`，`DumpRoutingInputs.java` 的輸出落在 `workspace/code_emit/routing_inputs/`，中間產物與建置產出落在 `workspace/code_emit/` 其餘位置。
+判定檔（emitter 與 reviewer 的完整產出）落在 `workspace/code_emit/verdicts/`，總掃的凍結清單、分群與判定檔落在 `workspace/code_emit/sweep/`，`DumpRoutingInputs.java` 的輸出落在 `workspace/code_emit/routing_inputs/`，中間產物與建置產出落在 `workspace/code_emit/` 其餘位置。
 
 ## 跑法
 
@@ -53,6 +55,15 @@ Workflow({ scriptPath: "tools/code_emit/emit_ticket22.js",
 **可重跑**：`emit_state.json` 是進度的正本，每支通過的 function 各自一個 commit，所以任何中斷最多損失飛在半空的那一支。跑完一次就再呼叫一次，它會從 `next_batch.py` 拿到接下來的一批。
 
 被 usage limit 就地殺掉也一樣：下一次呼叫的第一段（Recover）自己丟掉 `src/`／`tests/` 的殘骸、把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。`src/`／`tests/` 以外的地方髒了它會停下來報告而不是自行處理，那時才需要人。
+
+疑慮總掃（全部 function 落地之後）：
+
+```
+Workflow({ scriptPath: "tools/code_emit/sweep_ticket22.js", args: { label: "sweep-01" } })
+python tools/code_emit/sweep.py handoff        # 交給票 23／24 的清單
+```
+
+中斷後再呼叫一次即可：已有合格判定檔的群不重判，已落地的群不重落。
 
 Call graph 改變後（新建或刪除 function）要重算順序：
 
