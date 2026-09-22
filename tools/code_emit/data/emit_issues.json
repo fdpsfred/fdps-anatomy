@@ -377,13 +377,27 @@
       "from": "emit",
       "what": "Whether any index above row 40 is reachable in play. The accessor is unbounded and the callers form the argument as the unit record's class byte at +0x20 plus one, so a class byte above 0x27 would read past the 410-byte table; seven of the eleven callers are emitted or read far enough to see the INC, but fdps_battle_move_unit_toward, fdps_battle_unit_turn, fdps_map_cursor_select_loop and fdps_unit_resolve_attack_hit have not been read to the point where the class byte's own provenance is settled.",
       "needs": "Those four callers emitted, plus whatever writes the class byte at unit+0x20 (deployment and promotion), to establish the byte's range. Nothing changes in this function either way -- it must stay unbounded -- but it decides whether the past-the-end read is dead code or observable behaviour like the item table's FF BUG.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "No index above row 40 is reachable, so the past-the-end read of PROMAP.DAT is dead code in play. fdps_get_class_record must stay unbounded, and table.c already is. The class byte at unit+0x20 is written only by the four stores listed for 00025fe0#0 (deploy from FRIAPRDA or ENEMYDAT, roster add, church promote). The other ways a record changes are whole-record copies of records the game wrote. The shipped sources top out at FRIAPRDA 0x19, RANKUP 0x18 and ENEMYDAT (rows 0..90) 0x26. Callers that add one therefore pass at most 0x27. The raw caller fdps_map_actor_move_toward_nearest_reachable_opponent passes at most 0x26. Both are inside the 41 rows. The only units with an out-of-range class byte are the cut-scene stand-ins 0x97..0x9c. Their ENEMYDAT rows 91..96 lie past the 910-byte file, so their class byte is heap residue. They live on MAP46 (reached by no script or chapter id), MAP52 (ICON11 cut-scene) and MAP55 (ICON08 cut-scene), and neither cut-scene runs an AI step (opcode 0x62), a player phase or any other class-record caller before it switches back to the chapter map.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
       "what": "Agreeing with and carrying forward the emitter's entry: whether any row index above 40 is reachable in play. The accessor is unbounded (no CMP in the body) and the callers form the argument as the unit record's class byte at +0x20 plus one, so a class byte above 0x27 would read past PROMAP.DAT's 410 bytes. fdps_battle_move_unit_toward, fdps_battle_unit_turn, fdps_map_cursor_select_loop and fdps_unit_resolve_attack_hit have not been read far enough to settle where that byte comes from.",
       "needs": "Those four callers emitted, plus whatever writes the class byte at unit+0x20 (deployment and promotion), to bound the byte's range. This function must stay unbounded either way; the answer only decides whether the past-the-end read is dead code or observable behaviour.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "Same answer as 00018b70#0. This entry was waiting on four callers, and all four are emitted now: fdps_battle_move_unit_toward 000119e0, fdps_battle_unit_turn 00015470, fdps_map_cursor_select_loop 0002b4f0 and fdps_unit_resolve_attack_hit 0001c520. Each reads +0x20 and adds one (btlturn.c:494/501, mapcur.c:849/851, unitatk.c:389, movegrid.c:1085/1086). That byte comes only from the four stores in the image. Over every unit any of these paths can see, it is at most 0x26 (enemy rows 24/25), so the row is at most 0x27, inside PROMAP.DAT's 41 records. The cut-scene stand-ins 0x97..0x9c carry heap residue, but they never reach a battle phase: the only AI-step opcode in any ICON script is on a chapter map, and the cut-scene maps are left by a SWITCH_MAP that rebuilds the unit array.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "00018ba0": [
@@ -391,9 +405,16 @@
       "from": "emit",
       "what": "resource_info/data_tables.md still marks PROEQU.DAT's contents 尚未解讀, so nothing in the knowledge base states which item types each class may equip. The tests therefore assert only the accessor's arithmetic against staged bytes; no assertion checks a real record, and the plate comment's readings (classes 0x19/0x1a use one type, classes 0x20/0x21 carry the unmatched code 0x2d) are unverified against the shipped file here.",
       "needs": "Ticket 23 emitting data_fdps_class_equip_table_ptr's real contents, or a test that stages PROEQU.DAT itself through tests/gamefile.lst once the VFS extraction path is emitted; either would let the per-class type sets be asserted against assets/ rather than against bytes this test wrote.",
-      "status": "open",
+      "status": "resolved",
       "rescan": "STILL OPEN, but smaller and sharper by one half. What the rescan could settle: the plate comment's readings are correct against the shipped file. The 216 bytes of PROEQU.DAT are 36 records of six item type codes, each record ascending and right-padded with 0xff, and the four the plate names read record 0x19 = 06 FF FF FF FF FF and record 0x1a = 0E FF FF FF FF FF (the two single-type classes 機兵 and 魔神), record 0x20 = 02 0D 0F 11 1A 2D and record 0x21 = 0F 10 2D FF FF FF -- so the unmatched code 0x2d really is carried by both, and no record uses 0x00 as padding. Every claim the plate at 00018ba0 makes about the contents holds.\nWhat is still missing is exactly what the entry asked for and no more: no knowledge-base page states the per-class type sets (resource_info/data_tables.md still marks PROEQU.DAT 尚未解讀) and no test asserts a real record. That needs ticket 23 defining data_fdps_class_equip_table_ptr's contents, or PROEQU.DAT staged through tests/gamefile.lst once the VFS extraction path is emitted. Neither is this rescan's to write, and a test asserting bytes I read out of a dump here -- rather than bytes the project's own data path produced -- would be the fabrication the emitter correctly refused. Non-blocking: this function is address arithmetic and its equivalence does not depend on the answer.",
-      "rescan_evidence": "The shipped PROEQU.DAT, all 216 bytes, read from workspace/vfs_dump/MISC/PROEQU.DAT (regenerable from the game files; nothing written there), against the plate comment at 00018ba0 and the decompiled header for the same address. Ghidra was read only.\nGHIDRA FIX FOUND, not applied -- rescan is read-only on Ghidra, and this belongs to whichever round next touches the global: the DATA plate at 0x00063fe4 ends its record description with \"unused slots hold 0, a type no item carries\". Both halves are wrong, and the function's own plate at 00018ba0 says the opposite: the shipped file right-pads with 0xff (verified above, on every short record), and 0x00 is a LIVE item type carried by 25 of the 251 ITEM.DAT records, which is the very trap the 00018ba0 rebuild note warns about. The clause should read: unused positions are right-padded with 0xff; 0x00 is a live item type and never an empty marker."
+      "rescan_evidence": "The shipped PROEQU.DAT, all 216 bytes, read from workspace/vfs_dump/MISC/PROEQU.DAT (regenerable from the game files; nothing written there), against the plate comment at 00018ba0 and the decompiled header for the same address. Ghidra was read only.\nGHIDRA FIX FOUND, not applied -- rescan is read-only on Ghidra, and this belongs to whichever round next touches the global: the DATA plate at 0x00063fe4 ends its record description with \"unused slots hold 0, a type no item carries\". Both halves are wrong, and the function's own plate at 00018ba0 says the opposite: the shipped file right-pads with 0xff (verified above, on every short record), and 0x00 is a LIVE item type carried by 25 of the 251 ITEM.DAT records, which is the very trap the 00018ba0 rebuild note warns about. The clause should read: unused positions are right-padded with 0xff; 0x00 is a live item type and never an empty marker.",
+      "answer": "fdps_get_class_equip_record is plain address arithmetic (base + index*6, no check), and table.c matches it. The table's contents are not a rebuild data-definition question. data_fdps_class_equip_table_ptr is a zero-initialised pointer that fdps_load_data_tables fills at run time from the shipped ProEqu.dat in MISC.VFS, so the rebuild reads exactly the bytes the original reads. Those bytes are now read. The file is 36 ascending records of item type codes, right-padded with 0xFF, and none uses 0x00 as padding (full table in kb_notes). The plate is right that code 0x2d appears in records 0x20 and 0x21 and matches no ITEM.DAT type. The plate is wrong in one place, and the earlier rescan repeated the error: record 0x19 is 06 27 FF FF FF FF (two types), so class 0x1a (0E FF FF FF FF FF) is the only one-type record. That goes to Ghidra as a plate fix, together with the 0x00063fe4 data plate's wrong 'unused slots hold 0'. Behaviour does not depend on any of this.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "emit",
@@ -408,9 +429,15 @@
       "from": "review",
       "what": "PROEQU.DAT's contents are still unread in the knowledge base (resource_info/data_tables.md marks the table 尚未解讀), so no test asserts which item types any class may actually equip -- only the accessor's arithmetic against staged bytes. The plate comment's readings (classes 0x19/0x1a using a single type; code 0x2d in the records for 0x20/0x21 matching no item) are unverified here.",
       "needs": "Ticket 23 landing the real contents of data_fdps_class_equip_table_ptr, or staging PROEQU.DAT through the VFS path once it is emitted, so per-class type sets can be asserted against assets/ instead of bytes the test wrote.",
-      "status": "open",
+      "status": "resolved",
       "rescan": "STILL OPEN. Same concern as the emitter's entry above, which carries the rescan record -- what was verified against the shipped file, what is still missing, and the Ghidra plate correction found on the way; see its rescan / rescan_evidence. Recorded once on purpose.",
-      "same_as": "resource_info/data_tables.md still marks PROEQU.DAT's contents 尚未解讀, so nothing in the knowledge base states"
+      "same_as": "resource_info/data_tables.md still marks PROEQU.DAT's contents 尚未解讀, so nothing in the knowledge base states",
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00018ba0#0"
+      }
     },
     {
       "from": "review",
@@ -863,14 +890,28 @@
     {
       "what": "The scan reads all six positions of the class record with no bound of any kind, and PROEQU.DAT holds only 36 records (216 bytes) for class codes 0x00..0x23 while class codes run to 0x27. For a unit of class 0x24..0x27 the six bytes compared lie past the end of the loaded table, so the answer is decided by whatever the allocator left behind the file's buffer. The rebuild reproduces the unbounded read exactly, but it does not reproduce what lies there: its heap layout after the load is its own. I could establish from the assembly and from resource_info/data_tables.md that the read goes past the file, and from assets/tables/classes.md that codes above 0x23 exist; what the original reads there is not in the image.",
       "needs": "Whether any unit in any chapter actually carries a class code of 0x24..0x27 -- a sweep of the deployment and character tables once ticket 23 has emitted them -- and, if one does, a side-by-side run of the original and the rebuild on that unit's equip screen on a real machine or in DOSBox-X to see whether the two agree on which items it may equip.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The past-the-end read of PROEQU.DAT is unreachable in play, so src/unititem.c is right as it is and there is nothing to compare side by side. Only three callers reach fdps_unit_can_equip_item: the two shop routines, the village equip loop and the battle item menu. The first three work on roster members. The battle item menu is reached only from the player-phase action menu, which the phase loop opens only for side-2 units. Every unit in either group gets its class byte from FRIAPRDA.DAT rows 0..59 (at most 0x19) or from a RANKUP.DAT promotion (at most 0x18). Those are the only two sources: the image has exactly four byte stores to unit+0x20 (000234e4, 000235d4, 00023d58, 00034d1d), and roster adds are always PUSH 0x0..0xc. Classes 0x24..0x26 exist only on enemy (side 0) deployments and never reach this function. Every class that does reach it is 0x00..0x19, inside the 36 records.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "For a unit whose class code is 0x24..0x27 the six bytes this function compares lie past the end of PROEQU.DAT: the file is 216 bytes, 36 records of 6, covering codes 0x00..0x23 (resource_info/data_tables.md), while PROMAP.DAT defines classes up to 0x27 (assets/classes.md: 24 ？？, 25 惡靈, 26 活屍, 27 （無名）). The rebuild reproduces the unbounded read faithfully -- there is no bound in the original and none was added -- but it cannot reproduce what those bytes hold, because that is whatever the allocator left behind the loaded file and the rebuild's heap layout is its own. Confirmed from the assembly (no CMP against any record count anywhere in 00025fe0 or in fdps_get_class_equip_record at 00018ba0) and from the two knowledge-base pages above; the residue itself is not in the image.",
       "needs": "Whether any unit in any chapter actually carries a class code of 0x24..0x27. That is a sweep of the enemy and deployment tables, which cannot be done yet: data_fdps_battle_enemy_data_table_ptr is still on workspace/code_emit/undefined.json and the knowledge base has no unit-to-class listing (grep for 惡靈/活屍 over chapters/, assets/, resource_info/ and program_info/ finds only the two assets/classes.md rows). If a unit does carry one, the answer then needs the original and the rebuild run side by side on that unit's equip screen in DOSBox-X to see whether they agree on which items it may equip.",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "answer": "Same answer as 00025fe0#0. The unit-to-class sweep this entry was waiting for can be done now, from the shipped files and without ticket 23. The deployment records sit in FIELD.VFS's MAP%02d.DAT blocks, and ENEMYDAT.DAT is read at run time from the same file by both builds. The sweep shows that units of class 0x24 (enemy row 68), 0x25 (rows 45/46) and 0x26 (rows 24/25) are all side-0 enemies. The only path from a battle unit to the equip scan is fdps_battle_action_menu, and it runs only for side-2 units. The roster, which the shop and village paths use, only ever holds FRIAPRDA rows 0..12 and their RANKUP promotions, all class <= 0x19. So the original and the rebuild never compare bytes past PROEQU.DAT's end, and no playtest is needed.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c02",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "00013920": [
