@@ -2507,14 +2507,27 @@
       "from": "emit",
       "what": "None of the eleven behaviour arms, and none of the shared tail, is exercised by a unit test. What is established is static and complete: every arm was read off the disassembly at 00010010 instruction by instruction, every CALL's argument order was taken from the PUSH order and every use of EAX after a CALL was checked against the assembly, and the emitted C is a literal transcription of that. What is NOT established is that the arms behave as emitted when they actually run, because they cannot be reached from a test process: every arm ends in the tail at 000106f7 and the tail ends in fdps_render_view_frame, which spins on the VGA Input Status 1 retrace bit and then on data_fdps_timer_tick_counter, and no test installs the timer handler that moves it. The three cases that do run cover only the two paths that return before the tail -- the retired gate and behaviour 8. Scanning the spawn tables of all 63 shipped MAP%02d.DAT files says which arms a playtest would actually meet: the behaviour nibbles that appear in deployment data are 0 (1043 records), 1 (14), 2 (500), 3 (73), 5 (5), 7 (27), 8 (8) and 11 (6); nibbles 4, 9 and 10 appear in no shipped deployment record at all and can only be reached by a runtime write to record byte 0x34.",
       "needs": "A DOSBox-X playtest of an enemy phase and an NPC phase on maps carrying the eight behaviours the scan lists -- watching that a behaviour-5 actor walks to its chest, receives the item, switches to behaviour 7 and plays Chess.wav; that a behaviour-7 actor on portrait 0x24..0x27 plays Posion.saf and disappears on arrival; and that a behaviour-8 actor costs the turn no frame. For the three arms with no shipped deployment (4, 9, 10), a sweep of every writer of unit record byte 0x34 in the image would first have to establish whether they are reachable at runtime at all.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "src/mapai.c's fdps_map_actor_behavior_step behaves as the original on every arm. Each of the eleven behaviour arms and the shared tail was compared branch by branch with the assembly at 00010010..00010754: the callee chain and short-circuit order of arms 0, 1, 2, 3, 9 (00012c10 / 000126b0 / 000127c0 / 00012230 / 000120d0), the zero stores to data_fdps_map_cursor_draw_mode in arms 3, 4, 5, 7 (000101ee, 00010239, 0001029e, 000103f1), behaviour 5's chest path (triggered-flag test at 000102b7, 00013e10 with the event slot, opcode byte and MOVSX operand at 0x53/0x54 of the three-byte entry, the <2 and ==0 gates, add_item(index, operand), flag set, 0002e910, whole-byte store of 7 into +0x34, sfx 0x61550 which read_memory shows is 'Chess.wav'), behaviour 7's arrival test against the latched destination, the 0x24..0x27 portrait gate and 00026e00(1, ids, 0x6155c = 'Posion.saf'), the whole-byte retire MOV byte [+5],1, behaviour 8's jump to the epilogue at 000104c5, behaviours 10 and 11 with their >=6 gates on 0x63f8c / 0x63f88 / 0x63f78, and the tail 0002e030(x, y, 1), [0x69cd8]+index*0x50 |= 0x80, 0002beb0. The C matches every call, argument order and extension. Whether behaviours 4, 9 and 10 occur in shipped play does not bear on equivalence: the rebuild dispatches them exactly as the original would, whoever writes the nibble. The premise that four callees are stubs is obsolete: src/aiact.c now holds the emitted bodies of 00012e50, 00013c90 and 00027180, and tests/mapai.c already carries a moving-timer fixture (tba_timer_isr) for code that reaches presented frames. Nothing needs changing.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
       "what": "I reached the same gap independently -- no unit test drives any of the eleven arms or the shared tail, because every arm falls into a tail that ends in fdps_render_view_frame -- and I confirm the emitter's static work is what stands in for it: I re-derived every arm, every argument order and every post-CALL value from the assembly myself and found no disagreement. Two things my pass adds. First, a correction to the stated reason: the tail is not strictly unreachable from a test process. The tick spin is escapable exactly as the emitter's own bs_guard_the_tail escapes it, and the two retrace spins terminate under DOSBox; what actually blocks arm coverage is fdps_render_view_frame's blit to VGA_SCREEN_BASE and its palette write, plus the four callees that are still stubs returning 0 (fdps_map_actor_take_best_action, fdps_map_actor_use_item, fdps_map_actor_move_and_attack, fdps_map_actor_cast_chosen_spell), which would make most arms assert nothing about the real handlers even if they ran. Second, I went and did the writer sweep the emitter left in its needs field: search_instructions for byte stores to record offset 0x34 across the image returns, in the game pool, exactly this function (writes 7 at 0001039a), fdps_deploy_unit (00023ac9d -- MOV byte ptr [EAX+0x34],DL at 0002379d, the MAP-data path the emitter already scanned), fdps_chapter_15_end (writes 0 at 0003ac74), the helper fdps_object_set_field34_low_nibble_range at 00036ba4, and about twenty chapter-event handlers each carrying an inline expansion of that helper (00036d6e, 000370c6, 0003715e, 00037235, 000372be, 000373a6, 000374ae, 0003758b, 00037a3e, 00037b5e, 00038097, 000384d1, 00038836, 00038b4f, 00038fbd, 00039221, 00039397, 0003952e, 00039656, 000396fa and their siblings). So the reachability of behaviours 4, 9 and 10 is not an open Ghidra question any more: it reduces to which nibble values those chapter-event handlers pass to 00036ba4, which is a per-chapter fact belonging to those functions' own emits and not to this one. Nothing in this sweep changes the emitted C.",
       "needs": "A DOSBox-X playtest of an enemy phase and an NPC phase on maps carrying the behaviours the shipped deployment data does use -- watching a behaviour-5 actor walk to its chest, take the item, switch to behaviour 7 and play Chess.wav; a behaviour-7 actor on portrait 0x24..0x27 play Posion.saf and disappear on arrival; and a behaviour-8 actor cost the turn no frame. The arms that call the four stubbed handlers cannot be judged until those land, whichever way they are reached.",
-      "status": "open",
-      "same_as": "emit#0"
+      "status": "resolved",
+      "same_as": "emit#0",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00010010#0"
+      }
     }
   ],
   "00012c10": [
@@ -2522,14 +2535,27 @@
       "from": "emit",
       "what": "Which of the five dispatch arms ran cannot be asserted. All three action routines -- fdps_map_actor_move_and_attack (00012e50), fdps_map_actor_cast_chosen_spell (00013c90) and fdps_map_actor_use_item (00027180) -- are still zero-returning stubs with no side effects, so from outside this call every arm looks alike: the only observables are the answer and data_fdps_map_cursor_draw_mode, which are identical on all five. What the tests therefore establish is the threshold gate, the forwarding of both arguments, that all three searches run, that the tie arm reaches fdps_get_spell_record, and that the all-equal arrangement still reports that the actor acted. What they do not establish is that A>S&&A>I reaches move_and_attack rather than use_item, that the spell-id 0x12 cut sends the tie the way the assembly does, or that the behaviour bit 0x40 arms are wired to the routines the assembly names.",
       "needs": "The three aiact.c routines emitted, at which point each one has an observable effect (a unit that moved, a spell cast, a bag entry spent) and a fixture can be built for each of the five comparisons and for both sides of the 0x12 cut and of the 0x40 flag. Note that the 0x40 arms cannot be reached from a fixture built out of shipped data -- nothing in the image can raise that bit -- so exercising them means staging the behaviour byte directly.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "src/mapai.c's fdps_map_actor_take_best_action dispatches exactly as the assembly at 00012c10: scorers 00012230, 00013420, 00013040 in that order; both records and the flag/estimate computed before any branch; the three-way below-6 gate returning 0 with no cursor store; arm 1 physical > spell && physical > item -> 00012e50 (move_and_attack); arm 2 physical == spell && spell > item -> 00018bd0 unconditionally, then spell id < 0x12 (CMP/JGE at 00012d1b): estimate > power -> 00012e50 else 00013c90 (JLE at 00012d33 sends equality to the spell), id >= 0x12: bit 0x40 clear -> 00013c90 else 00012e50; arm 3 physical == item && item > spell: bit clear -> 00027180 (use_item) else 00012e50; arm 4 spell > physical && spell >= item -> 00013c90; arm 5 item > physical && item > spell -> 00027180; every dispatching path, including the all-equal one that calls nothing, stores 0 to 0x69cd0 and returns 1. The C has the same five conditions in the same order with the same strict/non-strict compares and the same tie rules, and the call targets are the correct routines by address. The concern's premise that the three routines are stubs is obsolete: src/aiact.c holds their emitted bodies (verdicts 00012e50, 00013c90, 00027180 exist). Arm identity is established by this comparison; no behaviour difference exists.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
       "what": "Confirmed independently that the five dispatch arms are indistinguishable from outside this call while src/aiact.c is stubbed: get_function_callees puts move_and_attack at 00012e50, cast_chosen_spell at 00013c90 and use_item at 00027180, and undefined.json lists exactly those three as the only undefined functions in the build, so none of them has an observable effect yet. My pass adds one site the emitter did not name: the 0x12 cut itself is also unobservable, because both of its outcomes reach the same tail at 00012e26 and differ only in which stub is called.",
       "needs": "The three aiact.c routines emitted.",
-      "status": "open",
-      "same_as": "emit#0"
+      "status": "resolved",
+      "same_as": "emit#0",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00012c10#0"
+      }
     }
   ],
   "00012e50": [
@@ -2813,56 +2839,108 @@
     {
       "what": "The score gate's POSITIVE side is unverified by test: no case here reaches fdps_map_actor_behavior_step through `data_fdps_battle_ai_best_spell_score >= 6 || data_fdps_battle_ai_best_item_score >= 6`. What is established is the negative side and the gate's operands -- both scorers are shown running, both come back 0, and the unit is refused -- plus, from the assembly, that the compare is signed (JGE at 000129fd, JL at 00012a06) and that the two tests are a short-circuited OR with the spell score first. The obstacle is not this function: a score of six or more needs the loaded MAGICDAT.DAT / ITEM.DAT tables and a live movement grid, and the behaviour step it would then call ends in fdps_render_view_frame, which spins on the VGA retrace bit and then on a tick counter no test process moves (tests/mapai.c documents the same wall).",
       "needs": "Either a harness that can drive fdps_render_view_frame to completion -- a stand-in timer tick, which ADR-0003 rules out inside src/ -- or an observation of a real enemy phase in DOSBox-X: an enemy holding a healing item or an offensive spell with a target in range should move in the FIRST sweep, before an enemy whose only option is to walk up and swing.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The gate's positive side in src/btlturn.c's fdps_battle_enemy_turn_phase is the original's. After the eligibility tests (side byte +6 == 0, flags +5 & 0x81 == 0, byte +0x26 == 0) the assembly calls 00013420(i,0) then 00013040(i,0), and CMP [0x63f88],6 / JGE at 000129f6 short-circuits to the call, CMP [0x63f8c],6 / JL at 000129ff falls out; the call is PUSH 0 / PUSH i / CALL 00010010. The C is spell score >= 6 || item score >= 6 on signed ints, spell first, then fdps_map_actor_behavior_step(unit_index, 0). The callee it reaches has itself been compared arm by arm with its assembly (ruling 00010010#0). There is no input on which the rebuild takes the gate differently, so no playtest is needed to rule on it.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "The event dispatch at 00012a22 / 00012ad9 is likewise verified only on its negative side: no test can make data_fdps_chapter_pending_event_idx non-0xff at the moment the phase tests it. The slot is seeded with 0xff at the top of each iteration and the only code between that seed and the test is the two scorers, which never write it, and the behaviour step, which is out of reach for the reason above. fdps_map_set_pending_tile_event (maptile.h), called from inside the behaviour step's tail, is the writer the original relies on. What IS pinned is that the seed happens once per unit rather than once per phase, and that the handler is called with the unit index rather than with a literal (PUSH EAX at 00012a2f and 00012ae6, against PUSH 0x0 at the one site in fdps_battle_run_turn_events).",
       "needs": "The same real enemy phase in DOSBox-X: an enemy that finishes its move on a tile carrying a turn-end event should fire that event's handler before the chapter's post-action handler runs, and before the next enemy is looked at.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The event dispatch in both sweeps of fdps_battle_enemy_turn_phase matches the original. The slot data_fdps_chapter_pending_event_idx (0x69d90) is seeded with 0xff once per iteration after the record fetch (000129a9 in the first sweep, 00012a8e in the second); CMP [0x69d90],0xff / JZ at 00012a16 and 00012acd skips the call; otherwise CALL dword ptr [idx*4+0x601c4] with PUSH EAX where EAX = [EBP-0x8], the loop index (00012a2f, 00012ae6), cleaned by ADD ESP,4; then the post-action handler [[0x69cf4]*4+0x6028c] with no argument, and a non-zero [0x69da0] leaves the whole function. src/btlturn.c writes the seed at the same point in both loops, compares against 0xff, calls data_fdps_chapter_event_handler_table[idx](unit_index) through a table declared void (*)(int) in chapter.h, then the post-action table with (void), then returns on a non-zero end code. What value the slot receives is fdps_map_set_pending_tile_event's own behaviour, reached through the behaviour step's tail which was compared in ruling 00010010#0; this function's part of the contract is fully accounted for.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "Reached the same wall independently and confirmed it is a real one rather than a lookup the emitter skipped. The gate's positive side cannot be staged from a test: a test cannot simply plant a score of 6 and call the phase, because fdps_map_actor_score_best_spell's first statement (src/aiscore.c:547) stores 0 into data_fdps_battle_ai_best_spell_score and the item scorer does the same, so the scorers overwrite anything planted before the CMP at 000129f6 ever runs. Reaching six needs real MAGICDAT.DAT / ITEM.DAT tables and a live movement grid, and the fdps_map_actor_behavior_step the gate would then call ends in fdps_render_view_frame's frame clock. So the evidence genuinely does not exist yet. What I add: the operands and the branch sense are settled from the assembly regardless -- JGE at 000129fd taking the OR's short-circuit arm, JL at 00012a06 falling out, spell score first -- and the emitter's needs field describes an observation rather than instructing a later stage, so it is within bounds.",
       "needs": "An observation of a real enemy phase in DOSBox-X: an enemy holding a usable healing item or an offensive spell with a target in range should move during the FIRST sweep, ahead of an enemy whose only option is to close and swing.",
       "same_as": "emit#0",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00012960#0"
+      }
     },
     {
       "what": "Confirmed for myself that no test can drive the event dispatch's positive side. MOV dword ptr [0x00069d90],0xff at 000129a9 and 00012a8e seeds the slot after the record fetch and before the gate, and the only code between that seed and CMP dword ptr [0x00069d90],0xff at 00012a16 / 00012acd is the two scorers and the behaviour step -- the scorers do not touch 0x69d90 and the behaviour step is unreachable for the reason above -- so the slot is provably 0xff at the test in any staged run. Nothing to add beyond that; the emitter's account matches what I read, and what it did pin (the per-iteration seed, and PUSH EAX rather than a literal at 00012a2f / 00012ae6) is the part that was reachable and it went and got it.",
       "needs": "The same real enemy phase in DOSBox-X: an enemy finishing its move on a tile carrying a turn-end event should fire that event's handler before the chapter's post-action handler and before the next enemy is looked at.",
       "same_as": "emit#1",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00012960#1"
+      }
     }
   ],
   "00012b20": [
     {
       "what": "The eligibility gate's POSITIVE side is unverified by test, and here that covers more than it does for the enemy twin: no case can show that an eligible NPC actually reaches fdps_map_actor_behavior_step, nor that the side literal pushed at 00012bab is 1 rather than 0, nor that the side compare at 00012b88 is against 1. What is established comes from the assembly alone: CMP EAX,0x1 / JNZ for the side, AND AL,0x81 for the two busy bits, CMP byte ptr [EAX+0x26],0x0 for paralysis, and PUSH 0x1 / PUSH index / CALL 0x00010010 / ADD ESP,0x8 for the call the three tests guard. The obstacle is that the call has no observable effect in a test process: fdps_map_actor_behavior_step's only arm that returns before the fdps_render_view_frame tail -- behaviour 8, the one an eligible fixture must carry or the run hangs on the VGA retrace spin (tests/mapai.c documents the same wall) -- writes nothing whatever, so an eligible NPC and an ineligible one leave byte-identical state behind. What the tests do pin is everything around the gate, and in particular that no scorer is called, which is the difference between this phase and the enemy one.",
       "needs": "An observation of a real NPC phase in DOSBox-X: on a chapter with friendly NPCs on the field, every side-1 unit that is not retired, not already marked done and not paralysed should take exactly one AI turn during the NPC phase, in index order, and no side-0 or side-2 unit should move during it. A paralysed NPC should stand still for that phase and act again once the counter runs out.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "fdps_battle_npc_turn_phase's eligibility gate and call are the original's. Assembly: side byte +6 zero-extended, CMP EAX,0x1 / JNZ at 00012b88; flags +5 AND AL,0x81 / JZ at 00012b93; CMP byte [+0x26],0 / JZ at 00012ba3; then PUSH 0x1 / PUSH i / CALL 00010010 / ADD ESP,8 at 00012bab. No scorer is called anywhere in the body, and data_fdps_map_cursor_draw_mode is cleared once before the loop (00012b2c) and once per iteration (00012b55), with the relocation and the record fetch in that order. src/btlturn.c:301 is (int)unit->side == 1, (unit->flags & 0x81) == 0, unit->status_timers[4] == 0 (status_timers begins at record +0x22, so [4] is +0x26), then fdps_map_actor_behavior_step(unit_index, 1), with both cursor clears in place. The callee reached was compared arm by arm (ruling 00010010#0), so what an eligible NPC does follows from those two comparisons without needing an observable test effect.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "The event dispatch at 00012bd6 is verified only on its negative side: no test can make data_fdps_chapter_pending_event_idx non-0xff at the moment the phase tests it. The slot is seeded with 0xff at the top of every iteration and the only code between that seed and the test is fdps_map_actor_behavior_step, which is out of reach for the reason above; fdps_map_set_pending_tile_event (maptile.h), called from inside that step's tail, is the writer the original relies on. What IS pinned is that the seed happens once per unit rather than once per phase, and, from the assembly, that the handler is called with this unit's index (PUSH EAX at 00012bd5 / ADD ESP,0x4 at 00012bdc) and not with a literal -- which is where Ghidra's decompilation of this function is wrong, showing a bare `()`.",
       "needs": "The same real NPC phase in DOSBox-X: an NPC that finishes its move on a tile carrying an event should fire that event's handler before the chapter's post-action handler runs and before the next NPC is looked at. Chapter 26's fdps_chapter_26_event_deploy_waves_2_and_3, which refuses to fire unless the unit index it is handed names a side-2 unit, is the handler that would show the argument is really passed.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The NPC phase's event dispatch matches the original: seed of 0xff into 0x69d90 at 00012b73 each iteration, CMP [0x69d90],0xff / JZ at 00012bb9, MOV EAX,[EBP-0x8] / PUSH EAX / CALL [EDX+0x601c4] / ADD ESP,4 at 00012bd2..00012bdc, i.e. one argument, the unit index; then the argument-less post-action call at 00012beb and the end-code return. src/btlturn.c calls data_fdps_chapter_event_handler_table[idx](unit_index) at the same point. The concern's remark that Ghidra decompiles this call as a bare () no longer holds: the current decompilation of 00012b20 shows (*data_fdps_chapter_event_handler_table[...])(local_18). The plate comment's Rebuild note still describes the old decompiler output and is corrected in ghidra_fixes; the fact it protects (the handler reads the unit index, e.g. fdps_chapter_26_event_deploy_waves_2_and_3) is kept.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "Reached the same wall independently and confirmed its cause inside the callee rather than assuming it: fdps_map_actor_behavior_step's behaviour-8 arm is CMP dword ptr [EBP-0x14],0x8 / JZ 0x0001074e at 000104c1, jumping straight to the epilogue with no store of any kind, so the fixture's only non-hanging behaviour is also its only silent one. One site the emitter did not name: that same callee's retirement test at 0001004b (AND AL,0x1 / JNZ 0x0001074e) is a second silent early return, so even a fixture that tried to reach an observable arm through a retired unit would return without a trace. Nothing in a test process can distinguish an eligible NPC from an ineligible one here.",
       "needs": "An observation of a real NPC phase in DOSBox-X: on a chapter with friendly NPCs on the field, every side-1 unit that is not retired, not already marked done and not paralysed takes exactly one AI turn during the NPC phase, in index order, and no side-0 or side-2 unit moves during it.",
       "same_as": "emit#0",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00012b20#0"
+      }
     },
     {
       "what": "Confirmed for myself that the dispatch at 00012bd6 is tested only on its negative side, and that the argument question is settled by assembly alone: PUSH EAX at 00012bd5 with EAX loaded from [EBP-0x8] at 00012bd2, cleaned by ADD ESP,0x4 at 00012bdc, is one stack argument and it is this unit's index, while Ghidra's decompiled C for this function shows a bare () and is wrong. My pass adds nothing to the emitter's reading of why no test can make the slot non-0xff at the moment of the compare -- the only code between the seed at 00012b73 and the compare at 00012bb9 is the unobservable behaviour step above.",
       "needs": "The same real NPC phase in DOSBox-X: an NPC finishing its move on an event tile should fire that event's handler before the chapter's post-action handler and before the next NPC is looked at. fdps_chapter_26_event_deploy_waves_2_and_3, which refuses to fire unless the index it is handed names a side-2 unit, is the handler that would show the argument is really passed.",
       "same_as": "emit#1",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c34",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "00012b20#1"
+      }
     }
   ]
 }
