@@ -6909,6 +6909,9 @@ Name: fdps pool, so fdps_ + snake_case; no vendor symbol is claimed and none cou
 Boundary: 0002b4f0-0002b9f4, opens on the Watcom prologue 53 56 57 55 89 e5 81 ec 7c and closes on the matching 89 ec 5d 5f 5e 5b c3; the 11 bytes that follow are LEA/MOV alignment padding (defined data, not instructions) before fdps_map_load_tile_info at 0002ba00.
 Signature: __cdecl, int (int mode, int count, uchar *list). Arguments are read from [EBP+0x14], [EBP+0x18] and [EBP+0x1c] past the pushed ebx/esi/edi/ebp and the return address, and the function ends in a plain RET with no stack purge, so the caller cleans up. mode selects the confirm path (4, 5 and 6 are special, other values go to fdps_collect_targets_in_area); count is the candidate list length, 0 disabling list cycling, and mode 6 saves it as the acting unit index before forcing it to 0; list is an array of unit indices. Returns 1 on a confirmed valid selection and -1 on cancel, leaving the chosen tile in the cursor globals 0x00069cd4 (X) and 0x00069ccc (Y).
 
+=== 0002b578 [EOL]
+Portrait 0x79 = ENEMYDAT.DAT row 61, a filler template row; no MAP00-MAP29 deployment carries it (only unused MAP34/MAP59), so this skip never fires in shipped play.
+
 === 0002b9f5 [EOL]
 Alignment padding: lea eax,[eax+0] / lea edx,[edx+0] / mov ebx,ebx filling 11 bytes to the 0002ba00 boundary.
 

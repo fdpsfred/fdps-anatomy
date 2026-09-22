@@ -14,7 +14,7 @@ block .object3 | 00070000-00070053 | rw- | init=true | 0x54
 block .image | .image::00000000-.image::000587e4 | --- | init=true | 0x587e5
 
 counts.bookmarks = 65
-counts.comments = 3145
+counts.comments = 3146
 counts.dataTypes = 58
 counts.definedData = 1631
 counts.excluded.loaderFixupComments = 6844
