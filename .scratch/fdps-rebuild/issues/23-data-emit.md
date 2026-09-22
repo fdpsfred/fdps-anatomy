@@ -29,6 +29,23 @@
 
 回掃段在這裡對應的是：型別判定為低信心的符號，在相鄰符號都還原完之後重讀一次——資料表的欄位語意常常要看過相鄰表才明朗。
 
+## 票 22 交接過來的：資料定義必須帶上的性質
+
+票 22 的疑慮總掃留下 12 則只有本票答得了的疑慮（`python tools/code_emit/sweep.py handoff` 印出每則全文，`emit_issues.json` 裡 `status` 為 `handoff`、`handoff_to` 為 `23`）。共同點是：**零填充的 stub 或 routing 的預設型別會讓重建版行為與原版分岔**，本票定義這些符號時要照下表做，並在連結結果（link map 或 `WDISASM`）裡確認。
+
+| 疑慮 | 符號 | 本票必須做到的 |
+| --- | --- | --- |
+| `00015be0#0` | `data_fdps_ui_palette_cycle_phase` | 初值 15（原版 `0x60014` 是 `0f 00 00 00`），不是零 |
+| `00015be0#1` | `data_fdps_timer_tick_counter` | 定義帶 `volatile unsigned int`，與 `gamedata.h` 一致；`gamedata.c` 要 include `gamedata.h` |
+| `0001f510#0`／`#1` | 浮動指示佇列四個符號 | `cell_x_offset[200]`、`unit_idx[200]`、`glyph_ids[200]`、`count` 依序緊鄰無填充（原版 `0x64120`／`0x641e8`／`0x642b0`／`0x64378`）；游標會越界寫進下一張表，佈局就是行為。`0x6437c` 之後原版擺的東西也要跟著擺 |
+| `0001c520#0`／`#1`、`00019f80#0`、`0002dcf0#0` | 地形修正表 ap／def 與 `data_fdps_village_mode_flag` | ap `int[6]`、def `int[6]`、village flag（零填充 dword 的低 byte）依序緊鄰，def 在 ap 之後 `0x18`、flag 在 def 之後 `0x18`；索引 6 讀過表尾靠的就是這個相鄰 |
+| `00030740#0` | `data_fdps_audio_sample_handle_table` | 元素 0 前面 4 byte 必須是重建版自己擁有、初值為零、沒人寫的儲存（例如同一物件裡前置一個零 dword）；`-1` 索引會讀到它。不能靠獨立 tentative 定義的相鄰。沒做到會讓無音效時的升級視窗卡死 |
+| `0003bade#1` | `data_fdps_cd_int_regs_in`、`data_fdps_cdrom_int_out_regs`、`data_fdps_cd_int_sregs` | 型別用 `cd.h` 宣告的 `union REGS`／`struct SREGS`，不是 routing 的 `unsigned char[]`，檔案要 include `cd.h` |
+| `000567a0#2` | `data_fdps_input_scancode_queue_write_index` | 定義帶 `volatile int`，與 `keybd.h` 一致 |
+| `0002dcf0#1` | `data_fdps_ui_terrain_hud_panel_offset` | `short`，初值 `0x19` |
+
+另外一則不在疑慮清單裡、同樣歸本票：`routing.json` 把 `data_fdps_battle_ai_best_physical_target_x` 記成 `/uint`，`src/gamedata.h` 宣告的是 `extern int`。定義時以號性判定為準（看讀取端的比較指令），兩邊對齊；不一致會直接編譯錯誤，不會靜默跑錯。
+
 **Blocked by:** 21.5, 21.6, 22
 
 **Status:** ready-for-agent
@@ -47,3 +64,4 @@
 - [ ] 連結器不再回報未定義符號
 - [ ] 每個資料符號落在票 21.5 routing 指定的檔案
 - [ ] 資料符號的分類與判定依據進知識庫
+- [ ] 「票 22 交接過來的」那張表逐項做到並在連結結果裡確認

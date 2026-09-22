@@ -57,102 +57,24 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 - **拆檔之後重抓工作清單繼續跑**，不再整批收工。本票共拆 12 次檔。
 - **進度記錄寫錯層級會讓 function 被 emit 兩次**，已加結構性防呆：`next_batch.py` 讀到 `functions` 外層有位址形狀的 key 就報錯停下。實際沒有任何一支被做兩次。
 
-## 接續：疑慮總掃（新 session 從這裡開始）
+## 疑慮總掃：已完成
 
-emit 做完了，**本票還差最後一段：對 `tools/code_emit/data/emit_issues.json` 做一次總掃**，總掃結束本票才算完成。這支 workflow 還沒寫。
+由 `tools/code_emit/sweep_ticket22.js` 一次跑完（`sweep-01`：90 個 agent、0 錯誤、約 71 分鐘），檔案面的正確性由 `tools/code_emit/sweep.py` 把關。經過、死路與量測在 `devlog/2026-09-22-sweep-t22.md`，run 回報在 `devlog/runs/2026-09-22-sweep-01.json`。
 
-### 開工前先確認三件事
+`emit_issues.json` 346 筆全部帶 `sweep` 欄位，最終 311 resolved、35 handoff、0 open。170 則獨立的未決疑慮：148 則答出（0 則需要改 `src/`；最後一則是 `tests/title.c` 的偶發失敗，根因是 DOS/4GW 在同一個 timer tick 內記住「沒有鍵」，測試改成先等 tick）、12 則交給票 23、10 則交給票 24，交接清單寫在那兩張票裡。已解條目的標籤複查 32 則，31 則成立，`0002af60` 撤銷 BLOCKING。
 
-1. **Ghidra MCP 真的連得上。** 呼叫 `get_current_program_info`，要回 `FDPS.LE`。常見的坑：MCP 橋接程式比 Ghidra 本體先啟動時，session 會顯示 ghidra 斷線、叫不到任何工具——Ghidra 本體可以用 `http://127.0.0.1:8089/get_current_program_info` 直接確認有沒有起來，session 那端要**請使用者下 `/mcp` 重連**，自己做不到。連不上就停下來等人（CLAUDE.md 的規定）。
-2. **工作區乾淨**：`git status --porcelain` 沒有輸出。
-3. **emit 真的做完**：`python tools/code_emit/next_batch.py --stats` 回報 514 committed。
+### 其他尾巴的處置
 
-### 要先讀的正典
-
-| 文件 | 提供什麼 |
-| --- | --- |
-| [ADR-0007](../../../docs/adr/0007-workflow-automation-and-agent-context.md) | workflow 的五條必要條件，寫之前必讀 |
-| [`rebuild_info/emit_pipeline.md`](../../../rebuild_info/emit_pipeline.md) 的「回掃是一次總掃，不是每批一次」 | 總掃的形狀、範圍不只 `open`、`same_as` 的語意 |
-| [票 22.1](22.1-remove-per-batch-rescan.md) 的「總掃的形狀」與「票 22 收尾時做」 | 為什麼改成一次總掃、總掃的具體待辦（那張票的勾選也要一起勾） |
-| [ADR-0001](../../../docs/adr/0001-only-functional-equivalence.md) | 等價的標準：行為等價，不含指令選擇、暫存器配置與原始碼字面 |
-| `tools/code_emit/emit_ticket22.js` | 錯誤處理寫得最完整的一支（單項重試、上游失效停批、中斷復原、分段），可以參考寫法，但依 ADR-0007 **自己寫一支，不要改造它** |
-
-### 總掃的輸入：`emit_issues.json`
-
-以位址為 key、值是該位址的疑慮陣列。目前 **133 個位址、346 筆**：
-
-| | open | resolved |
-| --- | ---: | ---: |
-| emitter 記的 | 141 | 31 |
-| reviewer 記的 | 150 | 24 |
-
-`status` 與 `from` 兩個欄位 346 筆全部齊全，可以放心依它篩。open 的 291 筆裡有 **169 筆是獨立的疑慮**，其餘是指回另一筆的鏡像（`same_as`）。
-
-欄位要知道的：
-
-- `what` / `needs` / `status` / `from`：每筆都有。
-- `same_as`：這筆是另一筆的鏡像。**有兩種格式**——早期是引一段對方的 `what` 原文，`t22-04` 之後是 `emit#N`（同一位址第 N 筆 `from: emit` 的條目）。分群時要把鏡像併回它指的那筆，只調查一次。
-- `answer`：已解的結論（55 筆）。
-- `settled_by`、`residual`、`rescan`、`rescan_note`、`rescan_evidence`：`t22-01` 那個時期每批回掃留下的欄位，只出現在早期條目。
-
-### 總掃必須做到的
-
-- **一次一則，不批次**（CLAUDE.md 鐵則）。工作清單只存在於 workflow 腳本裡，每次 agent 呼叫只帶一則（或一個根因群）。
-- **先按根因分群，再派工。** 這是總掃相對每批回掃的主要優勢，不做就白拆了。
-- **判定寫檔，只回傳摘要**；判定階段的 agent **不寫 `src/`、不寫 Ghidra**。需要改程式碼的裁決記成 finding，交給獨立的落地階段，落地後跑 gate。
-- **範圍不只 `status: open`**：已標 `resolved` 的也要複查**標籤**是否成立（不重新推導結論）。已知要處理的：
-  - `0002af60`：標成 BLOCKING 是誤判，要撤銷並記明理由，`src/palette.c` 維持 open-coded 不動（理由見票 22.1「順帶要修的」那節）。
-  - `00018c30`：另一筆提到 BLOCKING 的已解條目，要對過 ADR-0001 看標籤站不站得住。
-  - `t22-01` 那個時期已標 `resolved` 的 30 筆（帶 `settled_by` 欄位的那些）。
-- **blocking 成立前先分辨**：行為不同才是 blocking，原始碼字面還原不是（ADR-0001）。
-- **殘留要交接**：總掃後仍無解、卡在票 23（資料）或票 24（實機遊玩）的，列成交接清單，**不混進「已處理」**。
-- **五條錯誤處理全套，可續跑**——總掃的規模保證會中斷。
-- **devlog 一篇**。
-
-### 分群的起點
-
-獨立疑慮依它們在等什麼，粗分大約是（關鍵字比對的估計，不是定論）：
-
-| 在等什麼 | 約略筆數 | 總掃裡的處置 |
-| --- | ---: | --- |
-| 實機遊玩（票 24） | 79 | 多半會進交接清單 |
-| 某支鄰居 function 先 emit | 32 | **現在全部答得出來了**——514 支都已落地，這一群是總掃最大的收穫 |
-| 票 23 的資料定義 | 29 | 多半會進交接清單 |
-| 其他 | 29 | 逐一看 |
-
-已經在各批 devlog 裡被點名過的根因族，可以當分群的種子：
-
-- 地形修正表以索引 6 讀過表尾，答案取決於相鄰那張表（`0001c520`、`00019f80`、以及 `fdps_draw_cursor_info_panel`）
-- `PROEQU.DAT` 只涵蓋職業代碼 `0x00`–`0x23`，代碼到 `0x27`（`00025fe0`）
-- CD 請求標頭有幾個 byte 從沒被寫、送出去的是堆疊殘留（`0003be36`、`0003c51c`、`0003c7aa`、`0003c0c8`）
-- 浮動指示佇列的游標沒有上界（`0001f510`）
-- 未初始化的 tick 變數、堆疊殘留決定行為（`00031780`、`000232b0`）
-- 某個索引會不會超出緩衝區（`00011da0`、`00023050`、`00014550`）
-- `_inline` 展開的讀法（`0002af60`、`00014550`）
-
-### 本票結束前還要收掉的其他尾巴
-
-CLAUDE.md 規定工作過程中產生的待辦要在整件工作結束前處理完；真的處理不了，要先問使用者、使用者確認後才能留在 `open_issues.md`。下面這些是 emit 期間留下、還沒收掉的：
-
-- **`00014ab0` 的 Ghidra 型別修正沒套用**：`000601c4` 那張表的元素型別 `void_int_fn` 其實被定義成 `void(void)`，應該改成 `void(int unit_index)`（沒有別處用這個型別）。落地者要改時被權限分類器擋下（判定為「修改共用資源」），所以沒改。
-- **快照裡有一個不存在的函式名**：`fdps_collect_defeated_unit_events` 在 `ghidra_snapshot/comments.txt` 還出現 5 次，實名是 `fdps_collect_death_script_events`（`000274e0`）。
-- **plate comment 裡還有 458 個 `FUN_` 佔位名**，指的函式多數現在都有名字了。要不要一次清掉、怎麼清（這是機械式的名稱替換，不是逐支判斷），先跟使用者確認。
-- **`open_issues.md` 的兩條是本票寫進去的，還沒經使用者確認無法當下解決**：
-  - 「CD 模組的 stack probe 要補回來還是明文放棄」——是一個決定，不是證據問題，要問使用者。
-  - 「遊戲段那 150 個直接推送的引數是什麼」——有具體的下一步可以做（看那 150 個呼叫點的 callee 原型與被推的槽位是否相鄰成組），做得到。它的答案也會決定定案旗標組的 `-od` 要不要重新評估，見 `rebuild_info/build_flags.md` 的「引數推送形式」一節。
-- **歸票 23 的**：`routing.json` 對 `data_fdps_battle_ai_best_physical_target_x` 的號性與 `src/gamedata.h` 的 `extern int` 不一致；票 23 定義它時會直接編譯錯誤而不是靜默跑錯，列進交接清單即可。
-
-### 寫 workflow 前要知道的坑
-
-- **開跑 workflow 之前，先把自己改過的文件 commit 掉。** 落地階段看到 pipeline 路徑以外的髒檔案會把它當「雜項」單獨 commit，你寫到一半的票或 devlog 會被夾帶進去。
-- **workflow 腳本要存成 LF**，而且 prompt 字串陣列裡**不要放反引號**——曾經有一個反引號提前結束了模板字串，整支腳本跑不動。Python 沒有 JS 語法檢查器可用時，至少檢查括號配對。
-- **build gate 現在一次要十幾分鐘**（整套測試約 1.6 萬條檢查），前台跑會逾時。放背景跑，用 Monitor 等結果。
-- **不要用 PowerShell 讀寫 UTF-8 檔**（`Get-Content`／`Set-Content` 會把中文毀成亂碼、沒有錯誤訊息）；也**不要把中文印到 console 來「驗證」**，console 的亂碼不代表檔案壞了，要在程式裡比對位元組。commit 訊息寫進 UTF-8 檔再 `git commit -F`。
-- **`emit_state.json` 的記錄一律在 `functions` 底下**，`next_batch.py` 會擋外層的位址 key。其中 37 筆欄位不齊（缺 `name`／`target`），那是早期寫在途標記時沒帶，不影響任何判斷（過期檢查只看 `emitted_against`），不用修。
+- `00014ab0` 的型別修正：已套用，`void_int_fn` 改為 `void(int unit_index)`。
+- 快照裡不存在的函式名 `fdps_collect_defeated_unit_events`：5 處改為實名。
+- plate comment 的 `FUN_` 佔位名：使用者同意一次替換，673 個換成現名；剩下的都指向至今仍無正式名稱的 vendor／CRT function。
+- CD 模組的 stack probe：使用者先決定明文放棄，後來改為隨旗標一起對齊原版，歸票 22.2。
+- 遊戲段那 150 個直接推送：查清了，全部落在 `-oe` 展開的副本裡。連帶查出原版遊戲段的旗標是 `-s -ot -oe=25 -d2`、10.0a 的 C 沒有 `_inline`，`rebuild_info/build_flags.md` 已依 `tools/build_flags/` 的可重現量測改寫。使用者決定重建版完全對齊（含依原版 translation unit 重新分檔），開成票 22.2。
+- `routing.json` 對 `data_fdps_battle_ai_best_physical_target_x` 的號性：列進票 23 的交接表。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成
 
-**Status:** in-progress — emit 已完成（514/514），**剩收尾的疑慮總掃**，從上面「接續：疑慮總掃」那節開始。
+**Status:** done
 
 ### emit 階段（已完成）
 
@@ -166,20 +88,20 @@ CLAUDE.md 規定工作過程中產生的待辦要在整件工作結束前處理�
 - [x] 純機械計算的 function 有單元測試，期望值來自攻略公式或 Ghidra emulator，非臆測——reviewer 檢查表逐支對過
 - [x] 讀取真實遊戲檔的測試讀真檔，不捏造假檔——經 `tests/gamefile.lst` 暫存真檔
 - [x] 行為由靜態表決定的 function 以局部 fixture 表測試，未提前 emit 任何資料符號的真值
-- [ ] 過程中發現的 Ghidra 描述錯誤當場修正並同步知識庫——每支都由落地階段套用，**唯一的例外是 `00014ab0` 的型別修正被權限擋下沒套用**，見「本票結束前還要收掉的其他尾巴」
+- [x] 過程中發現的 Ghidra 描述錯誤當場修正並同步知識庫——每支都由落地階段套用；`00014ab0` 當時被權限擋下的型別修正在收尾時補上（`void_int_fn` 改為 `void(int unit_index)`）
 - [x] 無法當下確認的等價性疑慮明確記錄進 `emit_issues.json`，不遺漏；`status` 與 `from` 欄位齊全——346 筆全部齊全
 - [x] 疑慮只在「答案所需的證據還不存在」時才記，不是「還沒去查」（票 22.1 的收斂門檻）
 - [x] 絕無半成品、無為遷就測試而扭曲的程式碼——最後一次 gate PASS
 - [x] 每個 function 落在票 21.5 routing 指定的檔案，實際行數超標時依 routing 正典的處置規則拆檔並更新正典——共拆 12 次，全部經 `build_routing.py` 重新產生路由並更新 `rebuild_info/code_layout.md`
 - [x] `src/` 裡沒有任何 Ghidra 反編譯器的預設變數名稱——每次建置都在啟動 DOSBox 前掃一遍，命中就以 `E9001` 中止
 
-### 疑慮總掃（未開始）
+### 疑慮總掃
 
-- [ ] 514 支全部落地後跑一次總掃，逐條處理 `emit_issues.json` 的每一則，一次一則、不批次
-- [ ] 總掃先按根因分群再調查，不逐支各自重新推導
-- [ ] 總掃中需要改 code 的裁決由獨立落地階段處理，判定階段的 agent 不寫 `src/`
-- [ ] 總掃後仍無解、卡在票 23／24 的疑慮列成交接清單，不混在「已處理」裡
-- [ ] blocking 標記成立前先分辨它是等價性問題還是原始碼字面還原問題，後者不是 blocking（ADR-0001）；`0002af60` 撤銷、`00018c30` 與 `t22-01` 那 30 筆已解條目複查標籤
-- [ ] 「本票結束前還要收掉的其他尾巴」那節逐項處理完，處理不了的先問使用者
-- [ ] 票 22.1「票 22 收尾時做」那節的勾選一併勾掉
-- [ ] 每個工作段落有對應的 devlog——emit 的十一批都有了，總掃還要一篇
+- [x] 514 支全部落地後跑一次總掃，逐條處理 `emit_issues.json` 的每一則，一次一則、不批次——`sweep_ticket22.js`（`sweep-01`），346 筆全部帶 `sweep` 欄位
+- [x] 總掃先按根因分群再調查，不逐支各自重新推導——170 則未決分成 47 群，已解的 32 則按位址分 25 群複查標籤
+- [x] 總掃中需要改 code 的裁決由獨立落地階段處理，判定階段的 agent 不寫 `src/`——落地階段有修改、獨立審查、gate 三段；實際 0 群需要改 code
+- [x] 總掃後仍無解、卡在票 23／24 的疑慮列成交接清單，不混在「已處理」裡——狀態 `handoff`，票 23 收 12 則、票 24 收 10 則，各自寫進該票
+- [x] blocking 標記成立前先分辨它是等價性問題還是原始碼字面還原問題，後者不是 blocking（ADR-0001）；`0002af60` 撤銷、`00018c30` 與 `t22-01` 那 30 筆已解條目複查標籤——32 則裡 31 則成立、`0002af60` 更正
+- [x] 「本票結束前還要收掉的其他尾巴」那節逐項處理完，處理不了的先問使用者——處置見「其他尾巴的處置」
+- [x] 票 22.1「票 22 收尾時做」那節的勾選一併勾掉
+- [x] 每個工作段落有對應的 devlog——emit 的十一批加上 `devlog/2026-09-22-sweep-t22.md`
