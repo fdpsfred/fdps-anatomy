@@ -12,11 +12,14 @@
 
 | 映像內容 | 定義 |
 | --- | --- |
-| 全為 0 | tentative 定義（`int x;`），除非有下一節的佈局約束 |
+| 全為 0、沒有佈局約束 | tentative 定義（`int x;`），落進 `_BSS` |
+| 全為 0、帶佈局約束 | 帶初值的定義（`char x = 0;`）。值是 0 不改變寫法的理由：tentative 進 `_BSS`，就不在它必須緊貼的鄰居旁邊（下一節） |
 | 非 0 | 帶初值的定義，值照型別的讀法寫：有號量寫有號十進位、旗標與遮罩寫十六進位 |
-| 重定位過的指標 | 寫成它指向的符號名（章節四張 dispatch 表的每一格都是 function 名） |
+| 重定位過的指標 | 寫成它指向的符號名（章節 dispatch 表的每一格都是 function 名） |
 
-型別照擁有者 `.h` 的 `extern` 一字不差，含 `volatile` 與元素數；定義所在的 `.c` 一律 include 自己的 `.h`，讓編譯器看到宣告與定義並排比對。`.h` 本身若與 assembly 矛盾（存取寬度、`MOVSX`／`MOVZX`、比較用 `JL` 還是 `JB`）就改 `.h`，不在定義那邊將就。程式庫型別（`union REGS`、`struct SREGS`）照標頭的拼法，不照 Ghidra 記的 byte 陣列。
+「零值」與「帶初值」的分界因此不是值，而是「它在重建版裡必須落在哪一段」。
+
+型別照擁有者 `.h` 的 `extern` 一字不差，含 `volatile` 與元素數；定義所在的 `.c` 一律 include 自己的 `.h`，讓編譯器看到宣告與定義並排比對。`.h` 本身若與 assembly 矛盾（存取寬度、`MOVSX`／`MOVZX`、比較用 `JL` 還是 `JB`）就改 `.h`，不在定義那邊將就。程式庫型別（`union REGS`、`struct SREGS`）照標頭的拼法，不照 Ghidra 記的 byte 陣列。function 指標陣列（`void (*x[30])(void)`）在定義那邊透過檔內的 `typedef` 拼寫：型別與 `.h` 的宣告相同，而 `land.py` 的宣告子檢查不認得裸的 function 指標陣列宣告子。
 
 ## 工具鏈怎麼擺全域（實測）
 
@@ -27,7 +30,7 @@
 | 帶初值（含 `= 0`、`= { 0 }`） | `_DATA`，**同一個 `.c` 內照原始碼順序**，每個物件按自己的自然對齊擺：`char` 1、`short` 2、`int` 與指標 4、陣列照元素。兩個 200 byte 的 `char` 陣列接一個 `int` 恰好相鄰；一個 `char` 後面接 `int` 會留三個填充的 0 |
 | 不帶初值（tentative） | `_BSS`，順序由工具鏈決定，**不是**原始碼順序（實測四個 tentative 被排成 1、2、4、3） |
 | `#pragma pack(1)` | 對全域無效。不對齊的佈局（奇數位址上的 `short`、緊跟在 byte 後的 `int`）用分開的全域寫不出來 |
-| 兩個 `.c` | `_DATA` 照連結順序接起來 |
+| 兩個 `.c` | `_DATA` 照連結順序接起來。後一個模組的 `_DATA` 從前一個結束處的哪個對齊開始沒有量到：量測的第一個 unit 結束在 4 的倍數上 |
 
 所以「兩個符號必須相鄰」只有一種寫法：兩者都帶初值、落在同一個 `.c`、在原始碼裡前後緊接，而且對齊允許。tentative 定義的相鄰永遠不能依賴（[`pitfalls.md`](pitfalls.md) 的 B 類）。
 
@@ -46,6 +49,17 @@
 | `follows: X` | 這個符號必須從 X 結束的地方開始 | 兩者都帶初值、同一個 `.c`，`land.py` 依位址把 X 排在它正前方 |
 | `zero_guard_before` | 這個符號前面 4 byte 必須是重建版自己擁有、初值 0、沒有人寫的儲存（`-1` 索引會讀到） | 定義本身以一個帶初值的 `static` 0 dword 開頭，緊接在符號前 |
 
+現有的約束：
+
+| 符號 | 約束 | 需要它的讀取 |
+| --- | --- | --- |
+| `data_fdps_battle_tile_attr_def_modifier_table`（`0x60058`） | `follows: data_fdps_battle_tile_attr_ap_modifier_table` | 地形類別 6 讀 AP 表 `[6]`，原版落在 DEF 表 `[0]`（常數 0）。讀取端是 `fdps_combat_compute_hit_outcome`（`00019f80`）、`fdps_unit_resolve_attack_hit`（`0001c520`）、`fdps_draw_cursor_info_panel`（`0002dcf0`） |
+| `data_fdps_village_mode_flag`（`0x60070`） | `follows: data_fdps_battle_tile_attr_def_modifier_table` | 同三個讀取端對 DEF 表 `[6]` 的 dword 讀取（`0001a148`、`0001c6aa`、`0002de59`），原版落在旗標與它後面三個 byte 上，值為 0。旗標初值 0，因此寫成 `= 0` 的帶初值定義，且是 `gamedata.c` 資料區塊中最後一個帶初值的物件 |
+
+兩個約束串成一條鏈：AP 表、DEF 表、旗標必須依序相鄰、同屬 `gamedata.c`。`zero_guard_before` 目前沒有已落地的符號使用；已知的候選是 `data_fdps_audio_sample_handle_table`（`0x69d30`）的 `[-1]` 讀取，見 [`pitfalls.md`](pitfalls.md)。
+
+DEF 表 `[6]` 的高三 byte 不屬於任何已落地符號：旗標只有 1 byte，後面三個 byte 是 `_DATA` 的對齊填充或下一個 object 的 `_DATA` 開頭。目前的連結結果裡，下一個物件是 `palcycle.c` 的 `data_fdps_ui_palette_cycle_phase`，落在旗標後 4 byte，DEF 表 `[6]` 讀出 `00000000`。模組之間 `_DATA` 的起點對齊 `layout_probe.py` 沒有量到（它的第一個 unit 結束時剛好是 4 的倍數），所以這三個 byte 為 0 目前靠的是「下一個模組的第一個帶初值物件是 dword」，不是工具鏈的保證。
+
 兩個必須相鄰的符號若被路由到不同的檔，擁有權跟著佈局走：`tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES` 記下理由，`extern` 連同說明搬到新擁有者的 `.h`。
 
 ## 閘門：與原版逐 byte 比對
@@ -60,7 +74,12 @@ build gate 的 `emittest` 目標帶一個測試套件 `data_emit.check`（`tools
 | `follows` | 位址恰好等於前一個符號的位址加它的大小 |
 | `zero_guard_before` | 前 4 byte 為 0，而且沒有任何公開符號從那 4 byte 開始 |
 
-它看不見的：存同樣 byte 的兩種型別（有號或無號）——那由編譯器對 `.h` 的比對與判定時讀 assembly 負責；以及沒有人記下來的佈局依賴。
+它看不見的：
+
+- 存同樣 byte 的兩種型別（有號或無號）——那由編譯器對 `.h` 的比對與判定時讀 assembly 負責。
+- 沒有人記下來的佈局依賴。
+- 已落地符號範圍以外、卻被越界讀取碰到的 byte。它比對的是每個符號自己的大小，`follows` 只驗起點；DEF 表 `[6]` 讀到的旗標後三個 byte 就在這個盲區裡，連結結果改變時要重讀那個 dword 確認為 0。
+- 還沒落地的符號。它們在 `EMITTEST.EXE` 裡是 stub 模組的零值，閘門只看 manifest 裡的符號。
 
 ## 中斷復原的界線與足跡
 
@@ -83,3 +102,18 @@ tools/code_emit/data/routing.md  rebuild_info/code_layout.md
 ## 落地的批次
 
 一次 gate 要二三十分鐘（建置約 7 分鐘，其餘是測試）。所以先把全部就緒的判定一次落地、一次 gate；過了就一個 commit。紅燈先交給修復段（改錯的判定、或改斷言了 stub 值的測試），修不好就整批丟棄，改成一個檔一個檔重來，讓一個錯的判定只拖累它自己的檔。
+
+## 數量
+
+正本是 `tools/data_emit/data/manifest.json`（已落地）與連結器的未定義清單（未落地），這裡的數字以它們為準。
+
+| 分類 | 數量 |
+| --- | --- |
+| 已落地 | 12 |
+| 　零值（tentative） | 5 |
+| 　帶初值 | 7（其中 1 個值為 0、因佈局約束而帶初值；1 個是 30 格 function 指標表） |
+| 　帶 `follows` 約束 | 2 |
+| 　帶 `zero_guard_before` 約束 | 0 |
+| 連結器清單上尚未定義 | 220 |
+
+已落地的分佈：`gamedata.c` 8、`btlturn.c`、`chapter.c`、`keybd.c`、`palcycle.c` 各 1。

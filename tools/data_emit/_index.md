@@ -27,7 +27,9 @@
 ```
 python tools/data_emit/worklist.py --build        # 還剩哪些未定義
 python tools/data_emit/land.py plan               # 哪些判定就緒
+python tools/data_emit/land.py summary            # 已落地的精簡索引：分類、目標檔、佈局約束、交接疑慮
 python tools/data_emit/check_data.py              # 已落地的與原版比對（先建置）
+python tools/data_emit/layout_probe.py            # 重量工具鏈的全域擺放規則
 python tools/build_gate/gate.py check --target emittest   # 正式閘門，含上一行
 ```
 
