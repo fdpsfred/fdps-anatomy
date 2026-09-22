@@ -1,0 +1,71 @@
+{
+  "label": "t23-01",
+  "recovered": [],
+  "judged": 12,
+  "judge_failed": [],
+  "rescanned": 1,
+  "rerouted": [],
+  "batches": [
+    {
+      "batch": "t23-01-1",
+      "targets": [
+        "gamedata.c",
+        "btlturn.c",
+        "chapter.c",
+        "keybd.c",
+        "palcycle.c"
+      ],
+      "landed": [
+        "data_fdps_audio_bgm_enabled_flag",
+        "data_fdps_battle_tile_attr_ap_modifier_table",
+        "data_fdps_battle_tile_attr_def_modifier_table",
+        "data_fdps_current_chapter_text_ptr",
+        "data_fdps_number_glyph_color_row",
+        "data_fdps_portrait_sprite_buf_ptr",
+        "data_fdps_ui_battle_animation_enabled",
+        "data_fdps_village_mode_flag",
+        "data_fdps_battle_action_cancel_ends_turn_flag",
+        "data_fdps_chapter_init_handler_table",
+        "data_fdps_input_key_repeat_counter",
+        "data_fdps_ui_palette_cycle_phase"
+      ],
+      "refused": [],
+      "gate_pass": true,
+      "committed": true,
+      "repairs": 0
+    }
+  ],
+  "landed": [
+    "data_fdps_audio_bgm_enabled_flag",
+    "data_fdps_battle_tile_attr_ap_modifier_table",
+    "data_fdps_battle_tile_attr_def_modifier_table",
+    "data_fdps_current_chapter_text_ptr",
+    "data_fdps_number_glyph_color_row",
+    "data_fdps_portrait_sprite_buf_ptr",
+    "data_fdps_ui_battle_animation_enabled",
+    "data_fdps_village_mode_flag",
+    "data_fdps_battle_action_cancel_ends_turn_flag",
+    "data_fdps_chapter_init_handler_table",
+    "data_fdps_input_key_repeat_counter",
+    "data_fdps_ui_palette_cycle_phase"
+  ],
+  "land_failed": [],
+  "not_reached": [
+    "data_fdps_village_skip_save_prompt_flag",
+    "data_fdps_cel_sprite_cache_ptr",
+    "data_fdps_tile_event_data_table_ptr",
+    "data_fdps_map_spawn_pos_table_ptr",
+    "data_fdps_battle_move_grid_ptr",
+    "data_fdps_map_cell_event_code_layer_ptr",
+    "data_fdps_map_unit_shadow_pass_flag",
+    "data_fdps_map_unit_count",
+    "data_fdps_scene_marked_tile_tint_color",
+    "data_fdps_ui_terrain_hud_user_enabled",
+    "data_fdps_ui_play_active_flag",
+    "data_fdps_marked_tile_blend_phase"
+  ],
+  "still_undefined": 220,
+  "stopped": null,
+  "notes": [],
+  "unfinished": []
+}
