@@ -125,6 +125,34 @@
 #define MOVIE_QUEUED_KEY 0x1c0d
 #define MOVIE_QUEUED_KEY_COUNT 2
 
+/* WHY EVERY STUFFING WAITS FOR A TIMER TICK.  Keys written straight into the
+   BIOS ring are not visible to kbhit at once when kbhit (or INT 16h AH=01h)
+   has answered "no key" earlier within the same 55 ms timer tick.  Measured
+   with a stand-alone DOS/4GW probe under the same DOSBox-X: after one empty
+   poll, every further INT 21h AH=0Bh and INT 16h AH=01h poll answers "no key"
+   whatever the ring holds, until the BIOS tick count at 0x46c next advances;
+   with no empty poll before the stuffing, the first poll sees the keys every
+   time.  The same program built as a real-mode .EXE, with no extender, sees
+   the keys on the first poll in every arrangement -- so the "no key" answer is
+   remembered somewhere on the protected-mode path through DOS/4GW and
+   forgotten at the next timer interrupt, not in the BIOS data area the ring
+   lives in.  A real keystroke comes with its own IRQ1 and is not what these
+   cases exercise; only a hand-poked ring is.
+
+   The CRT's kbhit (00043570: the ungetch byte at [0x60440], then INT 21h
+   AH=0Bh) and the drain loop in fdps_play_movie (00030f56..00030f64) are both
+   ordinary pollers and both see the same thing the original would.  What made
+   the cases below flaky was only whether some earlier poll of an empty queue
+   happened to fall in the same tick as the stuffing -- the premise case's own
+   closing kbhit does exactly that ahead of run_movie.  Waiting for 0x46c to
+   move after stuffing, with nothing polling in between, removes that
+   dependence: once the tick has passed, the first poll sees the keys.
+
+   The wait is bounded so that a machine whose timer never ticks fails the
+   check on the wait's result instead of hanging the whole run. */
+#define BIOS_TICK_COUNT_ADDR (BIOS_DATA_BASE + 0x6c)
+#define MOVIE_TICK_WAIT_LIMIT 400000000UL
+
 /* AIL hands out timer handles as byte offsets into its fifteen-slot table, 0,
    4, 8 and so on (the allocator at 00044f4e), so the next free slot after
    exactly one registration is 4. */
@@ -208,15 +236,14 @@ static int movie_dac_last_green;
 static int movie_dac_last_blue;
 static int movie_queue_pending_after;
 static int movie_kbhit_after;
-/* Read the moment the stuffing is done, before fdps_play_movie is entered.
-   movie_drains_the_keyboard_queue fails intermittently on a binary that does
-   not otherwise change (measured: five runs of one EMITTEST.EXE gave fail,
-   pass, fail, pass, fail, always the same single check), and the two readings
-   below are what separate the two candidate explanations: either the setup
-   never held the keys the drain assertion assumes, or the drain really did not
-   happen.  Recorded rather than asserted inside run_movie, because run_movie
-   is shared by every case in this group and must not gain a failure of its
-   own. */
+/* Read once the stuffing is done and the timer has ticked, before
+   fdps_play_movie is entered: that the tick came, that the ring held both
+   keys, and that kbhit could see them.  Together they are the precondition
+   the drain assertion rests on, so movie_queue_really_held_two_keys_at_entry
+   asserts them.  Recorded rather than asserted inside run_movie, because
+   run_movie is shared by every case in this group and must not gain a failure
+   of its own. */
+static int movie_tick_passed_at_stuff;
 static int movie_queue_pending_at_stuff;
 static int movie_kbhit_at_stuff;
 static int movie_scancode_after;
@@ -277,6 +304,26 @@ static void movie_queue_clear(void)
 {
     *(unsigned short *) BIOS_KBD_TAIL_ADDR =
         *(unsigned short *) BIOS_KBD_HEAD_ADDR;
+}
+
+/* Spin until the BIOS tick count changes, polling nothing, so that the next
+   poll of the keyboard is answered from the ring as it now stands (see
+   BIOS_TICK_COUNT_ADDR above).  Returns 1 once the tick has moved, 0 if it
+   never did within the bound. */
+static int movie_wait_for_timer_tick(void)
+{
+    volatile unsigned short *ticks;
+    unsigned short start;
+    unsigned long spins;
+
+    ticks = (volatile unsigned short *) BIOS_TICK_COUNT_ADDR;
+    start = *ticks;
+    for (spins = 0; spins < MOVIE_TICK_WAIT_LIMIT; spins++) {
+        if (*ticks != start) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void movie_read_dac(void)
@@ -372,6 +419,7 @@ static void run_movie(void)
     movie_set_mode(MOVIE_MODE_320X200X256);
     memset((void *) MOVIE_BASE, MOVIE_SENTINEL, (size_t) MOVIE_WINDOW_BYTES);
     movie_queue_stuff();
+    movie_tick_passed_at_stuff = movie_wait_for_timer_tick();
     movie_queue_pending_at_stuff = movie_queue_pending();
     movie_kbhit_at_stuff = kbhit();
 
@@ -429,22 +477,28 @@ static void movie_premise_the_aperture_reads_back(void)
    are keys the CRT's kbhit reports, so an empty queue afterwards is a drain
    and not an arrangement that never held any keys in the first place.  The
    queue is emptied here by moving its tail and not by reading it, so nothing
-   in this case can block. */
+   in this case can block.  The timer tick in between is what makes the first
+   kbhit read the ring rather than a "no key" some earlier test's poll left
+   behind in the same tick (see BIOS_TICK_COUNT_ADDR); without it this case
+   failed on about one run in six of an unchanged binary. */
 static void movie_premise_the_queue_can_be_stuffed(void)
 {
     unsigned char saved_irq_mask;
+    int tick_passed;
     int pending;
     int seen;
     int seen_empty;
 
     saved_irq_mask = movie_mask_irq1();
     movie_queue_stuff();
+    tick_passed = movie_wait_for_timer_tick();
     pending = movie_queue_pending();
     seen = kbhit();
     movie_queue_clear();
     seen_empty = kbhit();
     movie_restore_irq_mask(saved_irq_mask);
 
+    CHECK_EQ(tick_passed, 1);
     CHECK_EQ(pending, MOVIE_QUEUED_KEY_COUNT);
     CHECK_EQ(seen != 0, 1);
     CHECK_EQ(seen_empty, 0);
@@ -488,55 +542,32 @@ static void movie_leaves_the_master_palette_unbiased_over_the_whole_dac(void)
 }
 
 /* CALL kbhit / TEST EAX,EAX / JZ / CALL getch / JMP: the loop runs while kbhit
-   answers non-zero and throws each character away.  The loop is the only branch
-   in the body and kbhit's is the only returned value the body uses -- which is
-   exactly why this case has to branch on kbhit too.
-
-   Writing keys into the BIOS ring does not reliably make kbhit report them once
-   run_movie has installed the game's INT 9 handler: measured over six runs of
-   one unchanged EMITTEST.EXE, three had the ring holding both keys with kbhit
-   already answering 0 at the moment of stuffing, before fdps_play_movie was
-   entered at all.  On those runs the loop was right to do nothing, and the old
-   unconditional "the queue is empty afterwards" was not measuring a drain; it
-   was measuring whether the setup had happened to work, and it reddened the
-   emit gate for functions that have nothing to do with any of this.
-
-   So both arms assert.  When kbhit could see the keys the ring must come back
-   empty, which is the drain.  When it could not, the ring must come back
-   holding exactly what was put in it, which says the loop did nothing rather
-   than something arbitrary.  Either way the case measures the body. */
+   answers non-zero and throws each character away, so the two keys the run
+   put in the BIOS ring are gone from it when the call returns, and kbhit has
+   nothing left to report.  That rests on kbhit having been able to see the
+   keys on the way in, which movie_queue_really_held_two_keys_at_entry
+   asserts separately; run_movie's tick wait after the stuffing is what makes
+   that true on every run and not only on the runs where no earlier poll of an
+   empty queue fell in the same timer tick. */
 static void movie_drains_the_keyboard_queue(void)
 {
     run_movie();
-
-    if (movie_kbhit_at_stuff == 0) {
-        CHECK_EQ(movie_queue_pending_after, MOVIE_QUEUED_KEY_COUNT);
-        CHECK_EQ(movie_kbhit_after, 0);
-        return;
-    }
 
     CHECK_EQ(movie_queue_pending_after, 0);
     CHECK_EQ(movie_kbhit_after, 0);
 }
 
-/* The half of the setup that IS deterministic, asserted on its own so the case
-   above can branch on the half that is not.  The write into the BIOS ring lands
-   every time -- the ring held both keys on all six runs of the measurement,
-   including the three where kbhit could not see them -- so a failure here would
-   mean the stuffing itself broke, which is a different fault from the one the
-   drain case handles.
-
-   kbhit's answer at the same instant is deliberately NOT asserted here.  What
-   makes it vary is somewhere in fdps_install_keyboard_isr, the mode change and
-   AIL being up, none of which this file owns; movie_premise_the_queue_can_be_-
-   stuffed does the same stuffing with none of them in place and has never
-   failed.  Tracked as an open issue against src/title.c rather than pinned to
-   whatever the environment happens to do today. */
+/* The precondition of the drain case, asserted on its own so that a setup
+   that failed is reported as a setup failure and not as a drain that did not
+   happen: the timer ticked after the stuffing, the ring held both keys, and
+   the CRT's kbhit saw them before fdps_play_movie was entered. */
 static void movie_queue_really_held_two_keys_at_entry(void)
 {
     run_movie();
 
+    CHECK_EQ(movie_tick_passed_at_stuff, 1);
     CHECK_EQ(movie_queue_pending_at_stuff, MOVIE_QUEUED_KEY_COUNT);
+    CHECK_EQ(movie_kbhit_at_stuff != 0, 1);
 }
 
 /* CALL 0x00056818 at 00030f51, before anything else touches the keyboard: the
