@@ -2931,6 +2931,8 @@ Pool: fdps  [walks the game unit table, reads the camera globals and opens Explo
 Rebuild note:
 Two places where the obvious C differs. Marking the dead is a whole-byte store, unit_record[5] = 1, not a bit set: byte 5 is a multi-bit flags byte -- fdps_map_actor_behavior_step ORs 0x80 into it at 0x00010745, and fdps_icon_script_run sets and clears bit 0 with OR/AND at 0x00021b11 and 0x00021b51 -- so writing flags |= 1 would leave those other bits standing where the original wipes them. And the local the explosion loop compares against DAT_00069d64 is never initialised, so the first frame does not wait for a tick; declaring it initialised from DAT_00069d64 costs one extra tick, the same way it does in fdps_animate_turn_banner.
 
+Bound note: the 80-slot dying list is never overrun by shipped data. MAP%02d.DAT byte 2 (scripted deployments) is at most 80 on every map, so at most 80 enemies exist at once (MAP28), the player side is at most 12, and each call only sees one action's zero-HP victims of one side selection.
+
 === 0001d986 [EOL]
 Alignment padding: lea eax,[eax+0] (6) + lea edx,[edx+eiz*1+0] (4), aligns fdps_run_death_scripts to 16 bytes.
 
@@ -3235,6 +3237,8 @@ Pool: fdps  [calls the game function fdps_get_unit_record, which a pre-compiled 
 
 Rebuild note:
 The visible-window cull is deliberately asymmetric and writing it symmetrically changes which units get a number at the map edge: the x test rejects the column at scroll_x/24 - 1 (both edges exclusive, columns scroll_x/24 .. scroll_x/24 + 12) while the y test accepts the row at scroll_y/24 - 1 (both edges inclusive, rows scroll_y/24 - 1 .. scroll_y/24 + 8). Also, the x offset written into DAT_00064120 is i*6 + 2 for all four cells here, not the i*6 + 1 with a cell-1 nudge that the fixed-word siblings at 0001f690 and 0001f7d0 use, so folding the three producers onto one shared helper shifts the digits one pixel.
+
+Overrun note: the cursor at 0x64378 is never bounded, and a map-wide quake (spell 0x0A/0x0B) can queue more than 50 on-screen popups before the drain in fdps_cast_spell_on_targets (MAP25's opening placement has 52 enemies in one radius-6 diamond and view window). The 201st cell's writes then land in the next array (0x64120 -> 0x641e8 -> 0x642b0) and the third array's overflow lands on the cursor itself; the four symbols must stay contiguous in that order.
 
 === 0001f686 [EOL]
 Alignment padding: lea eax,[eax+0] (6-byte nop) + lea edx,[edx+eiz*1+0] (4-byte nop), aligning fdps_show_miss_indicator to 16 bytes.

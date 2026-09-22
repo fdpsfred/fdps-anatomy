@@ -832,14 +832,30 @@
     {
       "what": "Nothing bounds the indicator queue cursor. This function appends four cells at data_fdps_indicator_queue_count and adds 4 to it with no comparison against the arrays' 200 cells, and neither do the other three producers (0001f690 and 0001f7d0 add 4, 0001fce4 adds a variable count at 0001fd41). A full sweep of every reference to 0x00064378 returns 24 instructions and no others: the four adds, the reads inside the producers and inside fdps_play_indicator_queue (CMP at 0001f35c and 0001f3a9), and exactly two stores of zero -- 0001f4ff in fdps_play_indicator_queue after it animates everything queued, and 000262ac in the prologue of fdps_apply_item_effect_to_targets. So a batch that queues more than 50 popups before draining runs off the end of each array. In the original the three arrays are contiguous (0x64120, 0x641e8, 0x642b0, 200 apart) and the overrun lands in the next array and then in the cursor itself; in the rebuild they are three separate objects and it would land on whatever the linker put after each. Whether the batch size can reach 50 is set by the callers, not here: fdps_apply_damage_to_targets loops over a target count it is passed (CMP EAX,[EBP+0x14] / JL at 00026246) and drains the queue immediately after the loop.",
       "needs": "The maximum target count that reaches fdps_apply_damage_to_targets, fdps_apply_heal_to_targets, fdps_apply_item_effect_to_targets, fdps_cast_spell_on_targets and fdps_battle_tick_status_effects, together with the largest data_fdps_map_unit_count a shipped chapter loads. Those five decide whether the cursor can reach 197 before a drain, and none of them is emitted yet, so the evidence does not exist at this point in the batch.",
-      "status": "open",
-      "from": "emit"
+      "status": "handoff",
+      "from": "emit",
+      "answer": "The overrun is reachable: a single 裂地術 (0x0A) or 封神裂震 (0x0B) cast queues one four-cell popup per on-screen target and drains only once at the end of fdps_cast_spell_on_targets, and the shipped MAP25 opening already has 52 enemies inside one radius-6 diamond and one 13x10-tile view window, so the cursor passes 200. The code in src/indicat.c reproduces the original's store sequence (it re-reads the cursor before every store, confirmed in INDICAT.OBJ), so what remains is purely the data layout. In the original the 201st cell's writes land in the NEXT array and the third array's overflow lands on the cursor itself: data_fdps_indicator_queue_cell_x_offset at 0x64120, data_fdps_battle_indicator_queue_unit_idx at 0x641e8, data_fdps_indicator_queue_glyph_ids at 0x642b0, data_fdps_indicator_queue_count at 0x64378, each array 200 bytes, no gaps. Ticket 23 must define these four symbols as one contiguous block in exactly that order with no padding (for example a single object whose members are the three 200-byte arrays followed by the int cursor, with the four names bound to its parts), and check in the linked map that the cursor ends up at glyph_ids+200. What follows 0x6437c in the original is also written by a long enough batch (cells 204+ of glyph_ids), so ticket 23 should keep whatever the original places after the cursor next to it as well.",
+      "blocking": true,
+      "handoff_to": "23",
+      "sweep": {
+        "cluster": "c06",
+        "ruling": "handoff_t23",
+        "pass": "first"
+      }
     },
     {
       "what": "Nothing bounds the indicator queue cursor, and I confirmed that myself rather than inheriting it. search_instructions over operand 0x00064378 returns 24 instructions across the whole image: four unconditional advances (ADD 4 at 0001f678, 0001f7ba, 0001f8fa and ADD EAX at 0001fd41 in fdps_show_sprite_indicator, which adds a variable count), the reads inside the four producers and inside fdps_play_indicator_queue (CMP at 0001f35c and 0001f3a9), and exactly two stores of zero -- 0001f4ff after playback and 000262ac in fdps_apply_item_effect_to_targets' prologue. No comparison against the arrays' 200 cells exists anywhere. A batch that queues more than 50 popups before draining therefore runs off the end of each array; in the original the overrun lands in the next array and finally in the cursor itself, and in the rebuild it lands on whatever the linker placed after each of the three now-separate objects.",
       "needs": "The largest target count that can reach fdps_apply_damage_to_targets, fdps_apply_heal_to_targets, fdps_apply_item_effect_to_targets, fdps_cast_spell_on_targets and fdps_battle_tick_status_effects, together with the largest data_fdps_map_unit_count a shipped chapter loads. Those five decide whether the cursor can reach 197 before a drain and none of them is emitted yet, so the evidence does not exist at this point in the batch. This is the emitter's entry and I endorse it as written -- it states what is unknown and does not instruct a later stage.",
-      "status": "open",
-      "from": "review"
+      "status": "handoff",
+      "from": "review",
+      "answer": "Same concern as 0001f510#0 from the reviewer, same answer: the batch size can exceed 50 in shipped play (map-wide quake spells, 52 enemies in one radius-6 diamond and view window on the MAP25 opening placement), the rebuilt producers repeat the original's per-store cursor reads, and the only open part is the layout ticket 23 gives the queue. Ticket 23 must place data_fdps_indicator_queue_cell_x_offset[200], data_fdps_battle_indicator_queue_unit_idx[200], data_fdps_indicator_queue_glyph_ids[200] and the int data_fdps_indicator_queue_count contiguously in that order with no padding, as at 0x64120/0x641e8/0x642b0/0x64378 in the original, and verify it in the link map.",
+      "blocking": true,
+      "handoff_to": "23",
+      "sweep": {
+        "cluster": "c06",
+        "ruling": "handoff_t23",
+        "pass": "first"
+      }
     }
   ],
   "000232b0": [
@@ -1867,15 +1883,28 @@
     {
       "what": "The 80-slot dying list has no bound check and the array it is filled from has no cap. What I established: the list is 80 dwords (frame EBP-0x18c..EBP-0x4c) and the append at 0001d730 indexes it with the output counter and tests nothing; data_fdps_map_unit_count is grown one record at a time by realloc in fdps_deploy_unit (src/deploy.c) with no ceiling anywhere, so nothing in the code bounds it below 80. In the ORIGINAL an 81st entry lands on the draw request block, which sits immediately above the list on the same frame; in the rebuild dying_units[] and request[] are two separate automatics, so the same overrun writes somewhere else. Whether this is reachable at all is the open half: it needs more than 80 units at EXACTLY zero hit points in one action, and units are taken off the map as soon as they die.",
       "needs": "The largest data_fdps_map_unit_count any shipped chapter reaches -- a sweep of every MAP%02d placement table plus every wave fdps_deploy_wave brings on, which ticket 23's data emit and chapters/ will have -- and, if that number is above 80, a real battle showing whether one action can leave more than 80 units resting at exactly zero. If the ceiling is at or below 80 the concern closes with nothing to change; the routine's own behaviour is not in question either way.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "The 80-slot dying list cannot overflow on shipped data. Every MAP%02d.DAT header holds at most 80 scripted deployments (byte 2; 80 is reached by MAP02/22/23/25/28 and never exceeded), each deployment record becomes at most one unit (fdps_deploy_wave walks only that table, and each wave is deployed once), so at most 80 enemies exist on any map (MAP28), and the player side is at most 12. The death routine collects only units at exactly 0 HP that are not yet retired, retires all of them, and runs after every action (seven call sites: 00012fe9, 00013dc1, 00015fbe, 0001fb3f, 00026dd8, 0002809d, 00039e5b), with every damage path clamping HP at 0, so one call only ever sees one action's victims: one side-filtered target set, or all enemies (fdps_battle_destroy_remaining_enemies at 00039e10), or one side's poison tick. None exceeds 80, and 80 fills dying_units[0..79] exactly. So the list is never written past its end, and how the rebuild orders dying_units[] and request[] on the frame has no observable effect. Nothing to change.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c06",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "Reached the same concern independently and confirmed it: the 80-slot list is bounded by nothing (the append at 0001d730 writes dying_units[dying_count] and tests only the loop condition), and I found no ceiling on data_fdps_map_unit_count in the knowledge base -- chapters/ currently holds only its _index.md, so the per-chapter unit totals that would settle reachability do not exist yet. What my pass adds is the rebuild half the emitter left open: I disassembled the object this build produced and the compiler placed dying_units[] at EBP-0x190 with request[] at EBP-0x50 directly above it, i.e. the same adjacency and order the original has, so an 81st entry lands on the draw request block here exactly as it does in the shipped image. That is today's layout and not a guarantee -- Watcom is free to reorder two automatics on any rebuild -- so it lowers the stakes without closing the question.",
       "needs": "The largest data_fdps_map_unit_count any shipped chapter reaches, from the MAP%02d placement tables plus every wave fdps_deploy_wave brings on, which ticket 23's data emit and chapters/ will produce. If that ceiling is at or below 80 the concern closes with nothing to change.",
       "same_as": "emit#0",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "sweep": {
+        "cluster": "c06",
+        "ruling": "settled",
+        "pass": "first",
+        "mirror_of": "0001d6c0#0"
+      }
     }
   ],
   "00028610": [
