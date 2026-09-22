@@ -89,8 +89,15 @@
     {
       "what": "Whether any live call path can reach this function with an index outside 0 .. data_fdps_map_unit_count - 1, in which case the unchecked write lands outside the unit array and the rebuild has to place the surrounding allocation the way the original did for the damage to be the same damage. The emitted C reproduces the missing check exactly, so the behaviour matches either way; what is not established is whether it is ever exercised.",
       "needs": "The four callers emitted -- fdps_battle_unit_turn (0x15470), fdps_battle_action_menu (0x15d00), fdps_battle_system_menu (0x14ab0), fdps_battle_item_menu (0x252b0) -- so the index each of the nine call sites passes can be traced to the loop or selection that produced it. All four are on this file's or btlmenu.c's worklist.",
-      "status": "open",
-      "from": "emit"
+      "status": "resolved",
+      "from": "emit",
+      "answer": "No live path passes an index outside 0 .. data_fdps_map_unit_count-1. Eight of the nine call sites forward their own [EBP+0x14], and the chain unit_turn -> action_menu -> item_menu reaches back to 0002bda2 in fdps_battle_player_phase_loop, which passes the answer of fdps_battle_find_unit_at_cursor (0002bd27/0002bd2c), a scan over 0..count-1 that returns -1 otherwise, after testing -1 at 0002bd2f. The ninth, 00014d35 in fdps_battle_system_menu, passes the index of a loop bounded by the live count. Nothing on these paths lowers the count (its only writers are the savegame loader, the chapter array builder, fdps_deploy_unit's increment, the village phase and the field chapter loader), and fdps_battle_mark_unit_done reloads the base on every call, so the write always lands in a live record. The unchecked write in src/btlturn.c matches the original and is never exercised out of range.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "Bits 1..6 of the status byte at record +5. This function only ever raises bit 7 and the phase engine only ever tests flags & 0x81, so nothing seen so far writes or reads the middle six bits, yet the OR preserves them and so does the emitted C. Whether they carry anything is unsettled, and the test staging 0x3f -> 0xbf pins the preservation without claiming the bits mean something.",
@@ -101,8 +108,15 @@
     {
       "what": "Whether any live path reaches fdps_battle_mark_unit_done with an index outside 0 .. data_fdps_map_unit_count - 1. The function has no CMP and no branch, so the record address is formed and the byte written whatever the index holds; the emitted C reproduces that exactly, so behaviour matches either way, but whether the out-of-range write is ever exercised is unestablished. If it is, the rebuild has to place the surrounding allocation the way the original did for the damage to be the same damage.",
       "needs": "The four callers emitted -- fdps_battle_unit_turn (00015470), fdps_battle_action_menu (00015d00), fdps_battle_system_menu (00014ab0), fdps_battle_item_menu (000252b0) -- so the index at each of the nine call sites can be traced back to the loop or selection that produced it. The one site I read, 000156f8, forwards its own [EBP+0x14] argument straight through, so the question moves up to fdps_battle_unit_turn's caller rather than being settled there.",
-      "status": "open",
-      "from": "review"
+      "status": "resolved",
+      "from": "review",
+      "answer": "Same answer as 000119b0#0. The one site the reviewer read, 000156f8, forwards fdps_battle_unit_turn's parameter, and fdps_battle_unit_turn's only caller (0002bda2) passes fdps_battle_find_unit_at_cursor's in-range answer after rejecting -1; the system-menu sweep passes a loop index bounded by data_fdps_map_unit_count; no battle-turn path lowers that count. The out-of-range write is unreachable and the emitted C is right as it is.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "what": "What bits 1..6 of the status byte at record +5 carry. Only bit 0 (fdps_unit_is_retired, AND AL,0x1) and bit 7 (this function, and the AND AL,0x81 in fdps_battle_end_phase_if_all_units_done) have known meanings, yet the OR here preserves the middle six and so does the emitted C.",
@@ -330,8 +344,16 @@
     {
       "what": "Whether the side-byte guard really implies portrait_id >= 0x3c. Both damage-path callers form portrait_id - 0x3c after testing only the unit's side, so the accessor is safe from a negative index exactly to the extent that every unit on the enemy side carries an id of 0x3c or above. That is an invariant of what the map loader and fdps_deploy_unit put into the unit array, not something either caller or this accessor checks, and nothing readable from this function can confirm it holds for scripted or converted units.",
       "needs": "The unit-array writers being emitted -- fdps_deploy_unit at 000232b0 above all, which is the one caller that does compare against 0x3c -- and a check of whether any path can set a side-0 or side-2 unit's portrait_id below 0x3c. If one can, reading in front of the table is original behaviour that must be preserved rather than a bug to guard.",
-      "status": "open",
-      "from": "emit"
+      "status": "handoff",
+      "from": "emit",
+      "answer": "The side-byte guard does NOT imply portrait_id >= 0x3c. Side and character id are independent fields of the MAP%02d.DAT spawn record, and the shipped MAP12.DAT (chapter 13, 地獄三鬥神, chapter index 12) record 20 is side 0, character id 0x0D, level 15, opening wave 0; MAP14.DAT #44, MAP18.DAT #59 and MAP23.DAT #71 are side 0 with id 0x23 in waves 2, 2 and 7. So fdps_combat_compute_hit_outcome (0001a2f5, player attacker vs side-0 defender) and fdps_unit_apply_damage (0002850c, any side-0 target) call fdps_get_enemy_record(0x0D-0x3C) = base - 470 and use byte +9 (the exp multiplier) at base - 461; fdps_unit_resolve_attack_hit and fdps_deploy_unit test the id and never do. Reading in front of the table is original behaviour and the rebuild's combat.c/unitstat.c reproduce it (same guards, same arithmetic). What lies at base - 461 is heap: the ENEMYDAT.DAT buffer's predecessor in malloc order (fdps_load_data_tables loads Item.dat immediately before EnemyDat.dat; if the two buffers are adjacent the byte falls inside ITEM.DAT's all-zero tail records E2-FA and the reward is 0). Static evidence cannot show the rebuild's heap places the same bytes there. Ticket 24 check: play chapter 13 (地獄三鬥神) from the same save in the original FDPS.EXE and in the rebuild. Find the side-0 (enemy-coloured) unit present from the start whose portrait/character id is 0x0D (spawn record 20, level 15). (1) Hit it with a player unit's normal attack without killing it, and (2) hit it with an attack spell; note the EXP each hit awards (the EXP gain shown after combat). Compare against the same attacks on an ordinary enemy as a sanity check. The EXP awarded for hits on the 0x0D unit must be identical between original and rebuild for the same damage; if the original gives 0 for it, the rebuild must also give 0.",
+      "blocking": false,
+      "handoff_to": "24",
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "handoff_t24",
+        "pass": "first"
+      }
     },
     {
       "what": "Whether the 91 records are all real. The count comes from ENEMYDAT.DAT's 910 bytes divided by the 0xa stride (resource_info/data_tables.md), which is arithmetic on the container's directory rather than on the records themselves; ITEM.DAT is the precedent for a table whose tail entries are empty (251 members, 226 with content). The tests use 91 only to choose the indices they exercise and never assert a bound the code does not have, so nothing here depends on it -- but the highest portrait id the game can actually produce is not known.",
@@ -342,8 +364,16 @@
     {
       "what": "Both of the emitter's open_issues stand and I am carrying them forward unchanged in substance: (1) whether the side-byte guard at the two damage-path callers really implies portrait_id >= 0x3c, since neither tests the id itself and a side-0 or side-2 unit carrying an id below 0x3c would read in front of the table; (2) whether all 91 records ENEMYDAT.DAT has storage for are populated, the count being 910/10 from the container directory rather than from the records.",
       "needs": "For (1): the unit-array writers emitted -- fdps_deploy_unit at 000232b0 and whatever the map loader turns out to be -- plus a check of whether any path (scripted spawn, conversion, promotion) can leave a side-0 or side-2 unit with a portrait id below 0x3c. Note that two of the four callers, 0001c520 and 000232b0, do test the id, so the invariant is at least assumed in two places. For (2): the real ENEMYDAT.DAT read through the VFS reader once that is emitted, and the enemy table's own decoding (resource_info/data_tables.md still marks it 尚未解讀).",
-      "status": "open",
-      "from": "review"
+      "status": "handoff",
+      "from": "review",
+      "answer": "(1) As in 00018b10#0: the invariant fails in shipped data -- MAP12.DAT record 20 (chapter 13) is a side-0 unit with character id 0x0D deployed in the opening wave, and MAP14/18/23 have side-0 id 0x23 in later waves -- so the two side-only callers (0001a2f5, 0002850c) read the exp byte in front of the ENEMYDAT.DAT buffer, exactly as the rebuild's C does; whether the rebuild's heap holds the same byte there needs the ticket-24 play check described in 00018b10#0 (compare EXP awarded for hits on that unit, original vs rebuild). (2) Settled: ENEMYDAT.DAT is 910 bytes = 91 records for portrait ids 0x3C-0x96, and none of the 91 records is all-zero, so every in-range index reads a populated record. Note for the same check: MAP46/52/55 contain side-0 ids 0x97-0x9C, past the table's last record, which would read past its end if those maps are ever played as battles.",
+      "blocking": false,
+      "handoff_to": "24",
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "handoff_t24",
+        "pass": "first"
+      }
     }
   ],
   "00018b40": [
@@ -357,13 +387,27 @@
       "from": "emit",
       "what": "Whether item_id can reach this function as anything other than a zero-extended byte, and so whether the negative and far-past-the-end paths are live in play. 5 of the 25 callers have been read. Two call sites in fdps_unit_equip_slot do zero-extend a byte (000260b9 XOR EAX,EAX / 000260bb MOV AL,[EDX+0xb], and 0002611b MOV AL,[EAX+0x1] / 0002611e AND EAX,0xff), but fdps_unit_can_equip_item does not narrow the value at all -- at 00026012 it pushes its own second parameter unmasked -- so the range question moves up to that caller's own callers. 20 callers remain unread. Round 1 stated the universal 'every one of the twenty-five zero-extends' as settled fact in the source comment on the strength of a misread instruction; that claim is withdrawn and the honest gap is here instead.",
       "needs": "Each caller states where its item id comes from as it is emitted -- the equipment, shop and AI item paths. The one concrete pass-through found here is settled by whoever emits fdps_unit_can_equip_item's callers.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "item_id is always a zero-extended byte, 0..255, on every one of the 28 call sites in 25 functions; it is never negative, so the signed IMUL's negative arm is dead. The pass-through at 00026012 resolves: fdps_unit_can_equip_item's four callers pass an inventory byte (00025efe/00025f00 in fdps_unit_equip_window) or a shop-stock entry (fdps_shop_buy_loop [EBP-0x34], directly at 00033c4d/00033cd0 and via fdps_shop_select_buy_target -> fdps_shop_draw_member_entry at 00033382), and shop-stock entries are XOR EAX,EAX / MOV AL,[EDX] bytes with 0xFF filtered out (00031739..00031747), so 0..0xFE. The only past-the-end ids are 0xFB-0xFF, at most 92 bytes past the 5,773-byte table (0xFF is the guide's FF BUG item); src/table.c computes the same base + id*0x17 and adds no bound, which is what the original does. What those bytes hold is heap residue in both builds and is already recorded as original behaviour in rebuild_info/pitfalls.md and assets/items.md.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
       "what": "Whether item_id can arrive as anything other than a zero-extended byte, and so whether the negative and far-past-the-end arms of the arithmetic are live in play. 5 of 25 callers have been read; fdps_unit_can_equip_item pushes its own second parameter unmasked, which moves the range question up to its callers.",
       "needs": "Each caller states where its item id comes from as it is emitted -- the equipment, shop, inventory and AI item paths. The concrete pass-through is settled by whoever emits fdps_unit_can_equip_item's own callers. Carried forward from the emitter's verdict; I agree it is the honest gap and not a name to invent.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "Same answer as 00018b40#1: every caller -- equipment, shop, sell, inventory and AI paths -- ends in a zero-extended byte (fdps_unit_get_item_id at 00025225/00025227, inline XOR/MOV AL of inventory byte +0xb or +0x1, or the shop-stock list built at 00031739), so item_id is 0..255 and never negative; the fdps_unit_can_equip_item pass-through lands on an inventory byte or a shop-stock byte. src/table.c reproduces the unbounded arithmetic, so the rebuild addresses the same record for every id the game can produce.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
@@ -459,7 +503,14 @@
       "from": "emit",
       "what": "Whether an out-of-range spell id ever reaches this accessor in play is unsettled, and with it whether the missing bound is observable. Four of the twelve callers were read here (00028570, 000285c0, 00028f70, 00013920) and all four pass an id that is either a spell number from a unit's 40-bit known-spell bitmap or the literal 0x14, so none of them can exceed 0x27. The remaining eight -- fdps_battle_spell_command, fdps_cast_spell_on_targets, fdps_draw_spell_list_page, fdps_map_actor_cast_chosen_spell, fdps_map_actor_score_best_spell, fdps_map_actor_take_best_action, fdps_spell_damage_unit, fdps_spell_list_select_loop -- were not read, and one of them (fdps_map_actor_cast_chosen_spell) takes its id from data_fdps_map_ai_best_spell_id, an int global whose initial value is 0 and whose range depends on the AI scoring pass.",
       "needs": "Emitting those eight callers, in particular the AI path that fills data_fdps_map_ai_best_spell_id at 0x00063f90, and checking whether that global can hold a value outside 0x00-0x27 when the cast is reached. If it cannot, the absent bound is unobservable and the concern closes; if it can, what the record past the table's end contains is heap residue and differs between the original and the rebuild, which no unit test can pin.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "No out-of-range spell id reaches fdps_get_spell_record. All 13 call sites were traced: every id is either the literal 0x14 (00028fd3), or an entry of the list fdps_unit_collect_known_spells builds from the 40-bit bitmap (00027840: byte_index*8+bit, byte_index<5, so 0..0x27), forwarded through parameters or through data_fdps_map_ai_best_spell_id. That global's only writer is 00013635, storing such a list entry (000135d9 MOV AL,[EAX+EBP-0x5c] / AND 0xff); its shipped initial value is 0 (read_memory 0x63f90 = 00000000), which is also in range. The menu paths cannot pick an uninitialised list byte: the cursor only advances while spell_count-1 > cursor and the spell command is disabled when the count is 0. MAGICDAT.DAT holds 0x00-0x27, so the missing bound is unobservable and src/table.c is right as it is.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     },
     {
       "from": "review",
@@ -471,7 +522,14 @@
       "from": "review",
       "what": "Whether the absent bound is observable in play is still open. I read four of the twelve callers (00028570, 000285c0, 00028f70, 00013920) and none of them can present an id above 0x27 -- they pass either a spell number out of a unit's 40-bit known-spell bitmap or the literal 0x14. The other eight, in particular fdps_map_actor_cast_chosen_spell taking its id from the int global at 0x00063f90, were not read.",
       "needs": "Emitting those eight callers and establishing the range data_fdps_map_ai_best_spell_id can hold when the cast is reached. If it cannot leave 0x00-0x27 the missing bound is unobservable and this closes; if it can, what lies past the table is heap residue that differs between the original and the rebuild and no unit test can pin it.",
-      "status": "open"
+      "status": "resolved",
+      "answer": "Same answer as 00018bd0#1: data_fdps_map_ai_best_spell_id (0x63f90) is written only at 00013635 with a byte from the known-spell list (0..0x27) and starts at 0; the other eight callers (battle_spell_command, cast_spell_on_targets, draw_spell_list_page, map_actor_cast_chosen_spell, map_actor_score_best_spell, map_actor_take_best_action, spell_damage_unit, spell_list_select_loop) all take their id from that global or from the same known-spell list, so no id outside 0x00-0x27 is ever presented and nothing past the table is read.",
+      "blocking": false,
+      "sweep": {
+        "cluster": "c10",
+        "ruling": "settled",
+        "pass": "first"
+      }
     }
   ],
   "00018c30": [
