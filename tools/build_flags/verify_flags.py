@@ -26,11 +26,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(REPO, "workspace", "build_flags", "verify")
 
-# -ot before -od is not redundant: wcc386 reads options left to right, so -ot
-# sets the favour-time preference that picks `lea` for index scaling and -od
-# then switches the optimiser off without clearing that preference.  Swapping
-# them, or dropping either one, changes the generated code.
-CFLAGS = "-bt=dos4g -mf -4s -fpi -s -ot -od -zq"
+# The game units' flag set (rebuild_info/build_flags.md).  -ot before -d2 is
+# not redundant: wcc386 reads options left to right, so -ot sets the
+# favour-time preference that picks `lea` for index scaling and -d2 then
+# switches the optimiser off without clearing that preference.  Putting -ot
+# after -d2 switches the optimiser back on and fails six of the checks below.
+# -oe=25 changes nothing these probes can see; it is here so the default is the
+# whole set and not a subset of it.
+CFLAGS = "-bt=dos4g -mf -4s -fpi -s -ot -oe=25 -d2 -zq"
 SOURCES = ["probe.c", "probesw.c", "shorts.c", "locinit.c", "scale.c"]
 BINDIRS = ["BIN", "BINB", "BINW"]
 MTIME_SLACK = 4.0
