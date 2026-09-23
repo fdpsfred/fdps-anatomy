@@ -7,6 +7,7 @@
  * against its declaration by the compiler.
  */
 #include "gamedata.h"
+#include "indicat.h"
 
 /* Global data owned by this file, in the original image's address order.
  * Initialised definitions come first and their order is the layout
@@ -52,6 +53,209 @@ unsigned char data_fdps_ui_terrain_hud_user_enabled = 0x01;
    open until the first menu, status window or script clears it;
    fdps_title_screen also stores 1 at 0002a2e5 before any battle runs. */
 unsigned char data_fdps_ui_play_active_flag = 0x01;
+
+/* 00064120. Starts all zero (bss in the original); written as an explicit zero
+   initialiser because it heads the contiguous run 0x64120..0x653ef that the
+   unbounded indicator queue cursor overruns, so every later member must sit at
+   the original's offset from it. The static zero dword before it is nothing
+   the game touches: it only forces the char array, and with it the whole run,
+   to start 4-aligned as at 0x64120. */
+static int indicator_queue_run_align_below = 0;
+unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 000641e8. Starts all zero. It is written with an explicit initialiser only
+   so that it lands in _DATA directly after
+   data_fdps_indicator_queue_cell_x_offset, inside the one contiguous
+   initialised run 0x64120..0x653ef: the queue cursor is never bounded, so a
+   batch of more than 50 popups writes cell offsets into this array and unit
+   indices into glyph_ids and on up to the cursor itself, exactly as in the
+   original. */
+unsigned char data_fdps_battle_indicator_queue_unit_idx[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 000642b0. Starts all zero; it is initialised only so it sits in _DATA
+   directly after data_fdps_battle_indicator_queue_unit_idx and directly before
+   data_fdps_indicator_queue_count, because the unbounded queue cursor runs
+   unit indices into this array and this array's cell 200 onto the cursor's low
+   byte, exactly as in the original. */
+unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS] = { 0 };
+
+/* 00064378. Zero in the image (empty queue). It is an initialised zero placed
+   directly after data_fdps_indicator_queue_glyph_ids because
+   glyph_ids[200..203] is this cursor: an unbounded batch of more than 50
+   popups first overwrites its low byte with a glyph id and later resets it
+   through unit_idx[400], exactly as in the original. */
+int data_fdps_indicator_queue_count = 0;
+
+/* 0006437c. Zero in the image and always written by the item or spell teleport
+   target picker before fdps_cast_spell_on_targets reads it. It is explicitly
+   initialised only so it keeps its original place in the contiguous run
+   0x64120..0x653ef that the floating-indicator queue overrun writes through.
+   */
+int data_fdps_battle_teleport_dest_tile_x = 0;
+
+/* 00064380. Starts at zero and is always written by the item or spell teleport
+   picker (cursor pixel y / 24) before the teleport spell reads it. It is
+   initialised, followed by the original's 12 unreferenced zero bytes, so that
+   it and everything after it keep the original offsets from the indicator
+   queue arrays whose unbounded overrun writes into this region. */
+int data_fdps_teleport_destination_tile_y = 0;
+static unsigned char teleport_tile_y_unreferenced_gap[12] = { 0 };
+
+/* 00064390. Starts at zero; the spell list wait loop stores the current tick
+   before it matters, so the value itself only makes the first frame redraw. It
+   is initialised and followed by the original's 12 unreferenced zero bytes so
+   that it and every member after it keep the original offsets from the
+   indicator queue arrays, whose unbounded overrun writes into this region. */
+int data_fdps_spell_list_window_last_tick = 0;
+static unsigned char spell_list_last_tick_unreferenced_gap[12] = { 0 };
+
+/* 000643a0. Starts as NULL; fdps_load_global_resources stores the loaded
+   BASEWAV sound-effect pack buffer here at startup. It is explicitly
+   initialised only so it keeps its original offset inside the contiguous block
+   that the unbounded floating-indicator queue overruns. */
+unsigned char *data_fdps_audio_basewav_sfx_bank_buf_ptr = 0;
+
+/* 000643a4. Zero in the image; the balance is loaded from the save record
+   before anything reads it. Written as an explicit "= 0" so it stays at its
+   original offset inside the contiguous initialised block 0x64120..0x653ef
+   that the indicator-queue overrun writes through. */
+int data_fdps_shared_party_total_gold = 0;
+
+/* 000643a8. Null in the image; fdps_load_global_resources stores the loaded
+   BASEANI archive buffer here and aborts if the load returned null. It is
+   explicitly initialised only so it keeps its original place in the contiguous
+   run 0x64120..0x653ef that the floating-indicator queue overrun writes
+   through. */
+unsigned char *data_fdps_animation_baseani_archive_ptr = 0;
+
+/* 000643ac. Null in the image; fdps_load_global_resources fills it with the
+   loaded command sprite sheet before any reader runs. It is explicitly
+   initialised only so it keeps its original place in the contiguous run
+   0x64120..0x653ef that the floating-indicator queue overrun writes through.
+   */
+unsigned char *data_fdps_command_sprite_sheet_ptr = 0;
+
+/* 000643b0. Starts NULL; fdps_load_global_resources fills it before any reader
+   runs. It must be explicitly initialised and placed right after
+   data_fdps_command_sprite_sheet_ptr because the unchecked indicator-queue
+   cursor overrun writes glyph bytes into it (glyph_ids[256..259]), exactly as
+   in the original. */
+unsigned char *data_fdps_level_up_window_sheet_ptr = 0;
+
+/* 000643b4. Starts as a null pointer; fdps_load_global_resources stores the
+   0x306-byte gauge sheet here at run time. Written as an explicit zero so it
+   stays at its original offset inside the contiguous run that the
+   floating-indicator queue overrun writes over (glyph_ids[260..263] land on
+   it). */
+unsigned char *data_fdps_unit_gauge_sheet_ptr = 0;
+
+/* 000643b8. Starts NULL; fdps_load_global_resources stores the loaded sheet
+   here and fdps_shutdown_free_resources frees it. Explicitly initialised so it
+   sits at its original offset inside the contiguous 0x64120..0x653ef run that
+   an unbounded floating-indicator queue cursor overruns in the original. */
+unsigned char *data_fdps_cursor_highlight_sprite_sheet_ptr = 0;
+
+/* 000643bc. Null in the image; fdps_load_global_resources fills it through its
+   address and aborts on a null load, and fdps_load_savegame frees and reloads
+   it. Written as an explicit '= 0' so it stays at its original offset inside
+   the contiguous run 0x64120..0x653ef that the floating-indicator queue
+   overrun writes through. */
+unsigned char *data_fdps_vga_main_palette_ptr = 0;
+
+/* 000643c0. Null in the image; fdps_load_global_resources loads the
+   selection-bar sheet into it (fatal on null) and shutdown frees it. Written
+   as an explicit "= 0" so it keeps its original offset inside the contiguous
+   initialised block 0x64120..0x653ef that the unbounded indicator-queue
+   overrun writes glyph bytes into. */
+unsigned char *data_fdps_selection_bar_sheet_ptr = 0;
+
+/* 000643c4. Starts NULL in the image; fdps_load_global_resources stores the
+   loaded text block into it at startup. Written as an explicit zero so it
+   stays in the contiguous initialised run 0x64120..0x653ef at its original
+   offset, where an overrun of the floating-indicator queue (glyph and
+   unit-index stores) lands on it exactly as in the original. */
+unsigned char *data_fdps_all_game_text_ptr = 0;
+
+/* 000643c8. Starts NULL in the image; fdps_load_global_resources allocates the
+   0xaf8-byte sheet before any gauge is drawn. It is written '= 0' so it stays
+   at its original offset inside the initialised run that the unbounded
+   indicator-queue overrun reaches. */
+unsigned char *data_fdps_status_gauge_bar_sheet_ptr = 0;
+
+/* 000643cc. Null in the image; fdps_load_global_resources loads the font sheet
+   into it (fatal on null) and shutdown frees it. Written as an explicit "= 0"
+   so it keeps its original offset inside the contiguous initialised block
+   0x64120..0x653ef that the unbounded indicator-queue overrun writes glyph
+   bytes into. */
+unsigned char *data_fdps_font_sheet_ptr = 0;
+
+/* 000643d0. Starts NULL; fdps_load_global_resources fills it at startup and
+   aborts if the load fails. It is explicitly initialised and placed right
+   after data_fdps_font_sheet_ptr because the unchecked indicator-queue cursor
+   overrun writes glyph bytes into it (glyph_ids[288..291]), exactly as in the
+   original. */
+unsigned char *data_fdps_message_window_sheet_ptr = 0;
+
+/* 000643d4. Null in the image; fdps_load_global_resources loads the unit
+   status icon sheet into it and fdps_shutdown_free_resources frees it. Written
+   as an explicit "= 0" so it keeps its original offset inside the contiguous
+   initialised block 0x64120..0x653ef that the unbounded indicator-queue
+   overrun writes glyph bytes into. */
+unsigned char *data_fdps_unit_status_icon_sheet_ptr = 0;
+
+/* 000643d8. Null in the image; fdps_load_global_resources loads the number
+   glyph sheet into it and aborts if the load fails. Written as an explicit "=
+   0" so it keeps its original offset inside the contiguous initialised block
+   0x64120..0x653ef that the unbounded indicator-queue overrun writes glyph
+   bytes into. */
+unsigned char *data_fdps_number_glyph_sheet_ptr = 0;
+
+/* 000643dc. Starts NULL in the image; fdps_load_global_resources fills it at
+   startup. It is written explicitly as = 0 because it sits inside the
+   contiguous run that an overflowing floating-indicator queue overwrites
+   (glyph_ids[300..303]), so it must keep the original's offset right after
+   data_fdps_number_glyph_sheet_ptr. */
+unsigned char *data_fdps_shadow_sprite_sheet_ptr = 0;
+
+/* 000643e0. Starts NULL; fdps_load_global_resources allocates the sheet at
+   startup. Defined with an explicit zero so it sits at its original offset
+   inside the contiguous 0x64120..0x653ef run that the unbounded
+   indicator-queue overrun writes through. */
+unsigned char *data_fdps_ui_terrain_hud_panel_sheet_ptr = 0;
+
+/* 000643e4. Null in the image; fdps_load_global_resources loads the fight
+   palette into it and fdps_shutdown_free_resources frees it. Written as an
+   explicit "= 0" so it keeps its original offset inside the contiguous
+   initialised block 0x64120..0x653ef that the unbounded indicator-queue
+   overrun writes glyph bytes into. */
+unsigned char *data_fdps_vga_fight_palette_ptr = 0;
+
+/* 000643e8. Starts empty; main fills it at startup from the config file's
+   third token (a drive spec such as "E:") before any CD path is built. Defined
+   with an explicit zero so it keeps its original offset inside the contiguous
+   0x64120..0x653ef run that the unbounded indicator-queue overrun writes
+   through. */
+char data_fdps_cdrom_path[3] = { 0 };
+
+/* 000643eb. Starts at zero and main clears it again before the title/game
+   loop, so the load-time value is never observed. It is written explicitly as
+   zero because it must sit exactly after data_fdps_cdrom_path, completing that
+   dword, inside the contiguous block the floating-indicator queue overrun
+   writes through. */
+unsigned char data_fdps_shared_quit_game_requested = 0;
+
+/* 000643ec. Starts NULL in the image and is always overwritten by
+   fdps_baseani_get_entry_or_exit before being read. It is written as an
+   explicit zero initialiser only so it lands at its original offset inside the
+   contiguous run that the indicator-queue overrun writes into. */
+unsigned char *data_fdps_animation_baseani_entry_ptr = 0;
+
+/* 000643f0. All zero in the image; filled at run time by
+   fdps_build_palette_tables or read back from a saved 4096-byte copy. Defined
+   initialised so it stays the last member of the contiguous 0x64120..0x653ef
+   run: an overrun of the floating-indicator queue stores glyph bytes into its
+   first 84 bytes, exactly as in the original. */
+unsigned char data_fdps_inverse_palette_cube[4096] = { 0 };
 
 /* 0006000c. Starts at 0, the first colour row of Number.cel; every panel that
    changes it parks it back at 0, so digits drawn by callers that never set it
@@ -309,116 +513,6 @@ int data_fdps_roster_member_count;
    the chapter resource header (field load or savegame load) before
    fdps_build_map_unit_array reads it. */
 int data_fdps_map_player_slot_count;
-
-/* 0006437c. Zero in the image; it is always written by the item or spell
-   teleport target picker before fdps_cast_spell_on_targets reads it, so the
-   initial value is never observed. */
-int data_fdps_battle_teleport_dest_tile_x;
-
-/* 00064380. Starts at zero in the image; it is always written by the item or
-   spell teleport picker (cursor pixel y / 24) before the teleport spell reads
-   it, so the initial value is never observed. */
-int data_fdps_teleport_destination_tile_y;
-
-/* 000643a0. Starts as NULL in BSS; fdps_load_global_resources stores the
-   loaded BASEWAV sound-effect pack buffer into it at startup, and it is only
-   read after that. */
-unsigned char *data_fdps_audio_basewav_sfx_bank_buf_ptr;
-
-/* 000643a4. Starts at zero in the image; the real balance is written from the
-   save record by fdps_load_savegame and fdps_load_game_screen before any shop,
-   reward or display code reads it. */
-int data_fdps_shared_party_total_gold;
-
-/* 000643a8. Starts null in BSS; fdps_load_global_resources stores the loaded
-   BASEANI archive buffer here and aborts if the load returned null. */
-unsigned char *data_fdps_animation_baseani_archive_ptr;
-
-/* 000643ac. Starts as a null pointer in BSS; fdps_load_global_resources fills
-   it with the loaded command sprite sheet before any reader runs, and
-   fdps_shutdown_free_resources frees it. */
-unsigned char *data_fdps_command_sprite_sheet_ptr;
-
-/* 000643b0. Starts NULL in the image (bss); fdps_load_global_resources fills
-   it from the loader at 0x39bd0 and aborts if the load returned NULL, so no
-   initial value is observed by any reader. */
-unsigned char *data_fdps_level_up_window_sheet_ptr;
-
-/* 000643b4. Starts as a null pointer; fdps_load_global_resources allocates the
-   0x306-byte gauge sheet at run time and stores it here before any reader
-   runs. */
-unsigned char *data_fdps_unit_gauge_sheet_ptr;
-
-/* 000643b8. Starts NULL in BSS; fdps_load_global_resources stores the loaded
-   sprite sheet here at startup and fdps_shutdown_free_resources frees it. */
-unsigned char *data_fdps_cursor_highlight_sprite_sheet_ptr;
-
-/* 000643bc. Starts as a null pointer in BSS; fdps_load_global_resources fills
-   it through its address and aborts if the load returns null, and
-   fdps_load_savegame frees and reloads it. */
-unsigned char *data_fdps_vga_main_palette_ptr;
-
-/* 000643c0. Starts null in the image; fdps_load_global_resources fills it with
-   the loaded selection-bar sprite sheet and aborts if the load returns null,
-   and shutdown frees it. */
-unsigned char *data_fdps_selection_bar_sheet_ptr;
-
-/* 000643c4. Starts NULL in the image (bss); fdps_load_global_resources stores
-   the loaded text block pointer into it at startup and aborts if the load
-   returns NULL. */
-unsigned char *data_fdps_all_game_text_ptr;
-
-/* 000643c8. Starts NULL in the image; fdps_load_global_resources allocates the
-   0xaf8-byte sheet and stores it before any gauge is drawn, and shutdown frees
-   it. */
-unsigned char *data_fdps_status_gauge_bar_sheet_ptr;
-
-/* 000643cc. Starts null in BSS; fdps_load_global_resources stores the loaded
-   font sheet buffer here and aborts if the load returned null. */
-unsigned char *data_fdps_font_sheet_ptr;
-
-/* 000643d0. Starts as a null pointer in the image; fdps_load_global_resources
-   stores the loaded sheet buffer here at startup and aborts if the load
-   returned null. */
-unsigned char *data_fdps_message_window_sheet_ptr;
-
-/* 000643d4. Starts NULL in the image; fdps_load_global_resources stores the
-   loaded sheet buffer at startup and fdps_shutdown_free_resources frees it, so
-   no initial value is observable. */
-unsigned char *data_fdps_unit_status_icon_sheet_ptr;
-
-/* 000643d8. Starts NULL in the image (bss); fdps_load_global_resources fills
-   it with the loaded number glyph sheet and aborts if the load returns NULL.
-   */
-unsigned char *data_fdps_number_glyph_sheet_ptr;
-
-/* 000643dc. Starts NULL in the image (BSS); fdps_load_global_resources fills
-   it with the loaded shadow sprite sheet at startup and
-   fdps_shutdown_free_resources frees it. */
-unsigned char *data_fdps_shadow_sprite_sheet_ptr;
-
-/* 000643e0. Starts NULL in BSS; fdps_load_global_resources allocates the sheet
-   at startup and exits on failure, and shutdown frees it. */
-unsigned char *data_fdps_ui_terrain_hud_panel_sheet_ptr;
-
-/* 000643e4. Starts NULL in the image (bss); fdps_load_global_resources stores
-   the loaded fight palette buffer into it at startup and aborts if the load
-   returns NULL. */
-unsigned char *data_fdps_vga_fight_palette_ptr;
-
-/* 000643e8. Starts empty in the image; main fills it at startup with
-   fscanf(fp, "%s", ...) as the third token of the config file (a drive spec
-   such as "E:" plus its terminator), before any CD path is built from it. */
-char data_fdps_cdrom_path[3];
-
-/* 000643eb. Starts at zero in the image, and main explicitly clears it before
-   entering the title/game loop, so its load-time value is never observed. */
-unsigned char data_fdps_shared_quit_game_requested;
-
-/* 000643f0. Starts zero: it lives in BSS and is only filled at run time, by
-   fdps_build_palette_tables or by reading a saved 4096-byte copy back from a
-   temp file. */
-unsigned char data_fdps_inverse_palette_cube[4096];
 
 /* 000653f0. All 18432 bytes are zero in the image; fdps_build_palette_tables
    fills the 18 rows of 256 entries at startup and several scenes save/restore

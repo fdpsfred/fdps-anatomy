@@ -21,7 +21,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "initialised: image byte at 00060008 is 01; all 15 xrefs are direct byte accesses to 0x60008, none via a neighbour address, so no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "984752b2909dab02"
     },
     {
       "symbol": "data_fdps_number_glyph_color_row",
@@ -32,7 +33,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0006000c are 00 00 00 00 -> zero; every access is a full dword at the exact address, no neighbour crossing -> no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "25c7a11fb40d82bf"
     },
     {
       "symbol": "data_fdps_ui_battle_animation_enabled",
@@ -43,7 +45,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image byte at 00060010 is 0x01 -> initialized; all 8 xrefs are direct byte accesses at 00060010, none reaching a neighbour -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "aa713a29fe35c691"
     },
     {
       "symbol": "data_fdps_ui_palette_cycle_phase",
@@ -84,7 +87,8 @@
         "00019f80#0",
         "0002dcf0#0",
         "0002dcf0#3"
-      ]
+      ],
+      "definition_sha": "fcc9a9e74657ac6a"
     },
     {
       "symbol": "data_fdps_battle_tile_attr_def_modifier_table",
@@ -101,7 +105,8 @@
         "0001c520#0",
         "00019f80#0",
         "0002dcf0#0"
-      ]
+      ],
+      "definition_sha": "fa19364d951b768a"
     },
     {
       "symbol": "data_fdps_village_mode_flag",
@@ -120,7 +125,8 @@
         "0001c520#1",
         "00019f80#0",
         "0002dcf0#0"
-      ]
+      ],
+      "definition_sha": "eb39f71c752865e0"
     },
     {
       "symbol": "data_fdps_chapter_init_handler_table",
@@ -144,7 +150,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00060120..00060123 are 00 00 00 00 (zero, tentative definition); all 20 xrefs are whole-dword direct accesses to 00060120, none via a neighbour, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a9ca6047a1714498"
     },
     {
       "symbol": "data_fdps_current_chapter_text_ptr",
@@ -155,7 +162,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00060124..00060127 are all zero; every access is a direct dword load/store/compare of [0x00060124], no neighbour-crossing access, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "1f254aae941bb2d4"
     },
     {
       "symbol": "data_fdps_village_skip_save_prompt_flag",
@@ -166,7 +174,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image byte at 00060131 is 00; all 3 xrefs are direct byte accesses to 0x60131, nothing reaches it through a neighbour, so no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ce01ef14d88b9d84"
     },
     {
       "symbol": "data_fdps_cel_sprite_cache_ptr",
@@ -177,7 +186,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00060138..0006013b are all zero -> tentative definition; every one of the 52 xrefs is a direct dword [0x00060138] access, none takes its address or indexes from a neighbour, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "547dd3fd4478ee37"
     },
     {
       "symbol": "data_fdps_tile_event_data_table_ptr",
@@ -188,7 +198,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 0006013c..0006013f are all zero; every one of the 27 xrefs is an exact dword access at 0x6013c, none crosses into 00060138 or 00060140.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9721d1dd2dc8494b"
     },
     {
       "symbol": "data_fdps_map_spawn_pos_table_ptr",
@@ -210,7 +221,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes at 00060144 are 00 00 00 00 -> zero; all 58 xrefs are whole-dword loads/stores of this address only, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "94158057a305857e"
     },
     {
       "symbol": "data_fdps_map_cell_event_code_layer_ptr",
@@ -221,7 +233,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00060148..0006014b are all zero; every xref is a direct dword load/store/compare of the pointer itself, none crosses into a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a51fa9e565ebd00d"
     },
     {
       "symbol": "data_fdps_map_unit_shadow_pass_flag",
@@ -243,7 +256,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00060150..00060153 are all zero -> tentative definition; signed int from JL loop bounds and IDIV; every access is a direct absolute address, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "0b6acac85479d034"
     },
     {
       "symbol": "data_fdps_scene_marked_tile_tint_color",
@@ -265,7 +279,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image byte at 00060158 is 0x01 -> initialized; every access is a byte-wide flag access at the exact address, no neighbour crossing -> no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "e35f3b98e28c42a5"
     },
     {
       "symbol": "data_fdps_ui_play_active_flag",
@@ -276,7 +291,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00060159 = 01 (neighbours 00060158=01, 0006015a=9d, 0006015b=80) -> initialized 0x01; all 32 xrefs and the 0x0006015* operand sweep are byte-width absolute accesses to 00060159 only, so no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "68d12b9221890e4d"
     },
     {
       "symbol": "data_fdps_marked_tile_blend_phase",
@@ -287,7 +303,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0006015c are 00 00 00 00 -> zero/tentative; all six xrefs are direct dword accesses at exactly 0006015c with signed arithmetic (IDIV, SAR-based signed /4), so int matches; no reader crosses into 00060158/00060160.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2a96eb61b5a1163e"
     },
     {
       "symbol": "data_fdps_scene_tile_anim_phase",
@@ -520,7 +537,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes 00063f68..00063f87 all zero (bss); no layout: all 16 xrefs are plain dword accesses to exactly 0x63f74, and a sweep of 0x63f6x/0x63f7x operands finds only exact accesses to the separate neighbours 0x63f78/0x63f7c",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "f5767bc56d065ca5"
     },
     {
       "symbol": "data_fdps_battle_ai_best_physical_score",
@@ -531,7 +549,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 63f70..63f83 all zero, BSS; signed int per JL/JG/JGE/JLE compares; no cross-boundary access among the 13 xrefs.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9fb53d63e832dac0"
     },
     {
       "symbol": "data_fdps_map_ai_best_item_bag_slot",
@@ -542,7 +561,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00063f70..00063f8f all zero in bss -> tentative definition; all three xrefs are plain dword accesses by absolute address, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "003062349ae2cb09"
     },
     {
       "symbol": "data_fdps_battle_ai_best_physical_target_x",
@@ -553,7 +573,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063f80..83 are all zero (bss); two xrefs are plain dword store/push with no compare, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "d0c68f426c3c7030"
     },
     {
       "symbol": "data_fdps_battle_ai_best_attack_tile_y",
@@ -564,7 +585,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00063f84..87 are zero (BSS); only two absolute dword accesses, no indexed or spanning access, so zero kind with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a2e2fba854aafca7"
     },
     {
       "symbol": "data_fdps_battle_ai_best_spell_score",
@@ -575,7 +597,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00063f88 = 00 00 00 00 (bss); all 15 xrefs are dword accesses with signed branches at the symbol's own address, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "e8109f01217870f4"
     },
     {
       "symbol": "data_fdps_battle_ai_best_item_score",
@@ -586,7 +609,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063f8c..8f are zero (BSS); all 13 xrefs are absolute dword accesses with signed branches, none indexed or spanning a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "63c57afa7a76993a"
     },
     {
       "symbol": "data_fdps_map_ai_best_spell_id",
@@ -597,7 +621,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "All 4 image bytes zero (bss) -> zero/tentative; every xref is a direct dword access to 0x63f90 alone, so no layout constraint; signed JGE compare confirms int.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "329039ed84a83581"
     },
     {
       "symbol": "data_fdps_battle_ai_best_item_target_y",
@@ -608,7 +633,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00063f94 = 00 00 00 00 in bss -> zero tentative definition; all 11 xrefs are direct dword accesses at the absolute address with signed compares, no neighbour-crossing access -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "8afd9b7905ab9324"
     },
     {
       "symbol": "data_fdps_map_ai_best_item_target_x",
@@ -619,7 +645,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063f98..9b are zero (bss); all 11 xrefs are direct dword accesses with signed JL/JGE compares and IDIV, so int and no layout dependency.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "933b49ee6c377629"
     },
     {
       "symbol": "data_fdps_battle_ai_best_spell_target_x",
@@ -630,7 +657,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes 00063f9c..9f are 00 in bss; no layout: all three xrefs are absolute dword accesses to this address only; type: no compare reads it, uint header kept",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ad38f489af6e8ae6"
     },
     {
       "symbol": "data_fdps_battle_ai_best_spell_target_y",
@@ -641,7 +669,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063f90..00063faf all zero, bss; all three xrefs are plain dword accesses to the symbol itself with no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "0c39b7953068238d"
     },
     {
       "symbol": "data_fdps_village_status_window_unit_idx",
@@ -663,7 +692,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00063fb4..b7 are all zero (bss); all 10 xrefs are full-dword loads/stores of the pointer itself, none crosses into 00063fb0 or 00063fb8.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "bbd8965c9947518d"
     },
     {
       "symbol": "data_fdps_ui_play_active_flag_saved",
@@ -729,7 +759,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063fd0..d3 are zero in BSS; every xref treats it as a standalone dword pointer, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ae8f130dc76a739b"
     },
     {
       "symbol": "data_fdps_battle_enemy_data_table_ptr",
@@ -740,7 +771,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00063fd4 are all zero (bss); all four xrefs touch only this dword, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9b42f0cc7ccde6b9"
     },
     {
       "symbol": "data_fdps_battle_character_base_table_ptr",
@@ -751,7 +783,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00063fd8..00063fdb are all zero (bss); every access is a whole-dword pointer load/store/address-of, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "867db3000577ed5e"
     },
     {
       "symbol": "data_fdps_promotion_table_ptr",
@@ -762,7 +795,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063fdc..00063fdf are zero (tentative definition); all 4 xrefs address 00063fdc directly as a whole dword, none through a neighbour, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ca8a8efd9dc951c3"
     },
     {
       "symbol": "data_fdps_item_effect_table_ptr",
@@ -773,7 +807,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063fe0..e3 are zero (bss) -> tentative definition; all 4 xrefs address it alone as a 4-byte pointer slot, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "5f2614eec26c1d63"
     },
     {
       "symbol": "data_fdps_class_equip_table_ptr",
@@ -784,7 +819,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "4 zero bytes in bss; all 4 xrefs touch only this dword as a pointer, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "59f0ebf4d51dd40b"
     },
     {
       "symbol": "data_fdps_spell_learning_table_ptr",
@@ -795,7 +831,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00063fe8..00063feb are zero (bss); all four xrefs use it as a standalone dword pointer, so zero kind with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "e61f9e2b01fa40cf"
     },
     {
       "symbol": "data_fdps_battle_character_growth_table_ptr",
@@ -806,7 +843,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00063fec..00063fef all zero (bss); every access is a whole-dword pointer load/store or its address passed to the loader, none crossing a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "b81ad23810256e61"
     },
     {
       "symbol": "data_fdps_battle_spell_effect_table_ptr",
@@ -817,7 +855,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00063ff0..3 are all zero (bss); every access is a whole-dword load/store of the pointer itself, no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "376dbe1a67a63222"
     },
     {
       "symbol": "data_fdps_gauge_fill_sheet_ptr",
@@ -828,7 +867,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00064000..00064003 are zero (bss); all seven xrefs are whole-dword accesses to this exact address with no neighbour-relative indexing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "6eca44afbf94029e"
     },
     {
       "symbol": "data_fdps_combat_gauge_sprite_sheet_ptr",
@@ -839,7 +879,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00064004..07 are zero (bss); all 8 xrefs are direct dword loads/stores of the pointer, none index across neighbours, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "cab6202467a26f3a"
     },
     {
       "symbol": "data_fdps_battle_last_hit_or_miss_flag",
@@ -872,7 +913,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00064020..0006403f all zero -> zero; all 9 xrefs are direct full-dword accesses at 00064030, no neighbour crossing -> no layout",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "53543f9d05630b4e"
     },
     {
       "symbol": "data_fdps_dialog_subst_text_id_2",
@@ -883,7 +925,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00064034..37 are zero (bss); all five xrefs are whole-dword accesses by absolute address with no indexing or neighbour-spanning access, so zero kind and no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "97e0cb0239178c07"
     },
     {
       "symbol": "data_fdps_dialog_last_action_value_param",
@@ -894,7 +937,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: 4 bytes at 00064038 are 00 (BSS); int confirmed by dword access and signed compares; no layout: all 33 xrefs are direct absolute accesses to this address only.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9532d0790af08005"
     },
     {
       "symbol": "data_fdps_font_glyph_width",
@@ -905,7 +949,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0006403c are 0 (bss); all three xrefs are byte-width direct accesses with no neighbour-crossing reads, so zero kind with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "53521a373940c15c"
     },
     {
       "symbol": "data_fdps_glyph_cell_height",
@@ -916,7 +961,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image byte at 0006403d is 0 (0x64030-0x6404f all zero, bss); all 3 xrefs are byte-wide accesses to this address only, none crosses into 0006403c or 0006403e.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "caa5d0e12f6c3def"
     },
     {
       "symbol": "data_fdps_font_shadow_offset_x",
@@ -927,7 +973,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "All 4 image bytes at 0006403e are zero (BSS); only two xrefs, both direct absolute dword accesses, no code crosses into neighbours.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "091bd31f3bb67157"
     },
     {
       "symbol": "data_fdps_glyph_shadow_row_offset",
@@ -938,7 +985,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "4 image bytes at 00064042 are all zero (bss) -> tentative definition; only two xrefs, both direct absolute dword accesses, no neighbour crossing -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "512596c4432d009d"
     },
     {
       "symbol": "data_fdps_font_glyph_stride_bytes",
@@ -949,7 +997,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00064046..49 all zero -> tentative definition; only two absolute-address xrefs, no neighbour-crossing access",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "22ccb1abd40e00c0"
     },
     {
       "symbol": "data_fdps_font_outline_enabled_flag",
@@ -960,7 +1009,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image byte at 0006404a is 0 (bss); both xrefs are byte-wide absolute accesses with no neighbour crossing, so tentative zero definition with no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "bc51a57028d14f6c"
     },
     {
       "symbol": "data_fdps_glyph_advance_x",
@@ -971,7 +1021,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0006404b..0006404e are zero (bss); only two xrefs, both whole-dword direct accesses to this address, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2addd9cdee83e77d"
     },
     {
       "symbol": "data_fdps_font_line_height",
@@ -982,7 +1033,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0006404f..00064052 are all zero (bss); only two xrefs, both direct full-dword accesses, no neighbour-crossing access, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "7ed530b21057cf24"
     },
     {
       "symbol": "data_fdps_cel_sprite_cache_group_ids",
@@ -1004,7 +1056,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 000640c8..00064107 all zero -> zero; every xref is a byte access or a 0x20-byte memset/memcpy on the base, nothing crosses into neighbours",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2938ff0b1c143b1a"
     },
     {
       "symbol": "data_fdps_ui_save_slot_occupied_flags",
@@ -1015,7 +1068,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "12 zero bytes in BSS; dword accesses indexed 0..2 only; no neighbour-crossing access, so tentative zero definition with no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "669e4f5b5553ea56"
     },
     {
       "symbol": "data_fdps_ui_saveload_is_load_mode",
@@ -1037,7 +1091,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes at 00064108 are 00 00 00 00 (bss); all 19 xrefs are direct dword loads/stores/pushes of 0x64108 used as a heap base, none reached via a neighbour, so no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "4dfd1c0302fe285d"
     },
     {
       "symbol": "data_fdps_map_char_spawn_count",
@@ -1048,7 +1103,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 0006410c..0006410f are zero (bss); all three xrefs are absolute full-dword accesses with no neighbour-crossing addressing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "e0c58c23ff8da24e"
     },
     {
       "symbol": "data_fdps_bonus_lottery_drawn_flag",
@@ -1059,7 +1115,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes 00064110..13 are all zero (bss); int: every access is a full dword with only ==0 test; no layout: all five xrefs address 0x64110 directly, no neighbour-crossing access",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "cf864625df2c57c8"
     },
     {
       "symbol": "data_fdps_roster_member_count",
@@ -1070,7 +1127,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: 4 image bytes at 00064114 are 00 in bss; type int from signed JL/JGE/JLE compares, IDIV and dword INC; no layout: all 32 xrefs and all neighbour operands (0x64110, 0x64118, 0x6411c) are direct scalar dword accesses.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "3ce14762659848b8"
     },
     {
       "symbol": "data_fdps_map_player_slot_count",
@@ -1081,7 +1139,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00064118..0006411b all zero (bss); six xrefs all plain dword accesses at the exact address, signed JL compare confirms int; no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "50d901187a73449f"
     },
     {
       "symbol": "data_fdps_cel_sprite_cache_buffer_used",
@@ -1098,338 +1157,421 @@
       "symbol": "data_fdps_indicator_queue_cell_x_offset",
       "addr": "00064120",
       "size": 200,
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "kind": "initialized",
-      "layout": {},
+      "layout": {
+        "zero_guard_before": true
+      },
       "confidence": "high",
-      "basis": "200 zero bytes at 00064120 (bss); initialised as '= { 0 }' because the ticket-22 handoff and the unbounded producer stores make it the head of a contiguous block; no reader crosses into it from below.",
+      "basis": "200 zero bytes at 00064120 -> zero contents, initialised as '= { 0 }' because it heads the 29-member overrun run 0x64120..0x653ef; zero_guard_before for 4-alignment of the run; rerouted to gamedata.c with the rest of the run.",
       "handoff": [
         "0001f510#0",
         "0001f510#1"
-      ]
+      ],
+      "definition_sha": "c06b8e1de5ace45e"
     },
     {
       "symbol": "data_fdps_battle_indicator_queue_unit_idx",
       "addr": "000641e8",
       "size": 200,
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "kind": "initialized",
       "layout": {
         "follows": "data_fdps_indicator_queue_cell_x_offset"
       },
       "confidence": "high",
-      "basis": "read_memory 000641e8..+200 all zero; initialised only for the contiguous-queue layout that the unbounded cursor overrun needs (handoff 0001f510).",
+      "basis": "read_memory 000641e8..+200 all zero; initialised with follows = cell_x_offset because the unbounded queue cursor overruns across it, and rerouted to gamedata.c so the whole overrun region 0x64120..0x653ef is one contiguous run (handoff 0001f510, overrun finding verified against 0001f510).",
       "handoff": [
         "0001f510#0",
         "0001f510#1"
-      ]
+      ],
+      "definition_sha": "d4faff819a788bc9"
     },
     {
       "symbol": "data_fdps_indicator_queue_glyph_ids",
       "addr": "000642b0",
       "size": 200,
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "kind": "initialized",
       "layout": {
         "follows": "data_fdps_battle_indicator_queue_unit_idx"
       },
       "confidence": "high",
-      "basis": "200 zero bytes at 0x642b0-0x64377 in the image; initialised for layout because unit_idx's unbounded-cursor overrun writes into it (handoff 0001f510#0/#1).",
+      "basis": "200 zero bytes in the image; initialised and follows unit_idx because the unbounded queue cursor overruns unit_idx into it and it into the cursor; rerouted to gamedata.c so the whole overrun region 0x64120..0x653ef is one run.",
       "handoff": [
         "0001f510#0",
         "0001f510#1"
-      ]
+      ],
+      "definition_sha": "03b74dffcb92cae5"
     },
     {
       "symbol": "data_fdps_indicator_queue_count",
       "addr": "00064378",
       "size": 4,
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "kind": "initialized",
       "layout": {
         "follows": "data_fdps_indicator_queue_glyph_ids"
       },
       "confidence": "high",
-      "basis": "4 zero bytes in image; layout from producer stores [count+i+0x642b0] with no bound, so glyph_ids overflow writes this cursor in the original",
+      "basis": "4 zero bytes in image; initialised zero because glyph_ids[200] and unit_idx[400] alias this cursor in the original (unbounded per-store cursor reads in the four producers); rerouted to gamedata.c to join the contiguous 0x64120..0x653ef block",
       "handoff": [
         "0001f510#0",
         "0001f510#1"
-      ]
+      ],
+      "definition_sha": "6548333c9a5ae681"
     },
     {
       "symbol": "data_fdps_battle_teleport_dest_tile_x",
       "addr": "0006437c",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_indicator_queue_count"
+      },
       "confidence": "high",
-      "basis": "bss, 4 zero bytes in image; all 4 xrefs are direct absolute accesses to 0x6437c only, no neighbour crossing",
-      "handoff": []
+      "basis": "4 zero bytes in image, int per dword/IDIV accesses; initialised '= 0' and follows data_fdps_indicator_queue_count because it lies inside the region the unchecked indicator-queue cursor overruns (0001f510 family)",
+      "handoff": [],
+      "definition_sha": "3ed8bca340496c15"
     },
     {
       "symbol": "data_fdps_teleport_destination_tile_y",
       "addr": "00064380",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_battle_teleport_dest_tile_x",
+        "zero_pad_after": 12
+      },
       "confidence": "high",
-      "basis": "zero: 4 image bytes at 00064380 are 00; int confirmed by IDIV-by-24 writes and dword IMUL read; all 4 xrefs address it directly, no neighbour crossing",
-      "handoff": []
+      "basis": "initialized zero (image bytes 00) with follows data_fdps_battle_teleport_dest_tile_x and a 12-byte zero tail, because the unbounded indicator-queue overrun writes through 0x64120..0x644b2 and needs every member of the run at its original offset",
+      "handoff": [],
+      "definition_sha": "3143d26cf2a1e7a8"
     },
     {
       "symbol": "data_fdps_spell_list_window_last_tick",
       "addr": "00064390",
       "size": 4,
-      "target": "spellmnu.c",
-      "kind": "zero",
-      "layout": {},
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_teleport_destination_tile_y",
+        "zero_pad_after": 12
+      },
       "confidence": "high",
-      "basis": "zero: image bytes 00064390..93 are 0 in bss; type int from signed /8 (SAR/SHL/SBB) and IDIV readers; all six xrefs are direct 4-byte accesses, no neighbour crossing",
-      "handoff": []
+      "basis": "initialized zero (image bytes 00) with follows data_fdps_teleport_destination_tile_y and a 12-byte zero tail, rerouted to gamedata.c, because the unbounded indicator-queue overrun writes through 0x64120..0x644b2 and needs every member of the run at its original offset",
+      "handoff": [],
+      "definition_sha": "02f33c1f7e882175"
     },
     {
       "symbol": "data_fdps_audio_basewav_sfx_bank_buf_ptr",
       "addr": "000643a0",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_spell_list_window_last_tick"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643a0..a3 are zero (bss); all 9 xrefs access exactly this dword as a pointer; no neighbour crossing.",
-      "handoff": []
+      "basis": "Image bytes 000643a0..a3 are zero; initialised (= 0) and follows data_fdps_spell_list_window_last_tick (+12-byte pad) because the whole 0x64120..0x653ef run overrun by the unbounded indicator-queue cursor must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "2c5a4874111f7266"
     },
     {
       "symbol": "data_fdps_shared_party_total_gold",
       "addr": "000643a4",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_audio_basewav_sfx_bank_buf_ptr"
+      },
       "confidence": "high",
-      "basis": "image bytes at 000643a4..a7 all zero -> zero/tentative; all 19 xrefs are plain dword accesses of this address only, signed compares (JG/JGE) confirm int; no neighbour-crossing access.",
-      "handoff": []
+      "basis": "image bytes 000643a4..a7 zero, int by signed compares; kind initialized (= 0) following data_fdps_audio_basewav_sfx_bank_buf_ptr because it lies inside the contiguous region 0x64120..0x653ef that the unbounded indicator-queue cursor writes through.",
+      "handoff": [],
+      "definition_sha": "521e1b7b83f471d8"
     },
     {
       "symbol": "data_fdps_animation_baseani_archive_ptr",
       "addr": "000643a8",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_shared_party_total_gold"
+      },
       "confidence": "high",
-      "basis": "BSS, image bytes 000643a0..000643af all zero; every access is a whole-dword pointer load/store of this one address, no neighbour crossing.",
-      "handoff": []
+      "basis": "4 zero bytes in image, pointer per whole-dword accesses; initialised '= 0' and follows data_fdps_shared_party_total_gold because it lies inside the region the unchecked indicator-queue cursor overruns (0001f510 family)",
+      "handoff": [],
+      "definition_sha": "faf2bea35fb89619"
     },
     {
       "symbol": "data_fdps_command_sprite_sheet_ptr",
       "addr": "000643ac",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_animation_baseani_archive_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes at 000643ac..000643af are all zero (bss); every xref is a plain dword load/store of this one pointer, no neighbour crossing.",
-      "handoff": []
+      "basis": "4 zero bytes in image, byte* per dword loads; initialised '= 0' and follows data_fdps_animation_baseani_archive_ptr because it lies inside the region the unchecked indicator-queue cursor overruns (0001f510 family)",
+      "handoff": [],
+      "definition_sha": "c07f26d5f21e7b3a"
     },
     {
       "symbol": "data_fdps_level_up_window_sheet_ptr",
       "addr": "000643b0",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_command_sprite_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643b0..b3 are zero in bss -> tentative definition; every access is a whole-dword read/write of this address only, so no layout constraint.",
-      "handoff": []
+      "basis": "4 zero bytes in image (bss), byte* dword accesses; initialised '= 0' and follows data_fdps_command_sprite_sheet_ptr because glyph stores of the unchecked indicator-queue cursor overrun (0001f510 family) land on it",
+      "handoff": [],
+      "definition_sha": "2e5cad47d6491980"
     },
     {
       "symbol": "data_fdps_unit_gauge_sheet_ptr",
       "addr": "000643b4",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_level_up_window_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643b4..b7 are zero (bss); all 8 xrefs access it directly as a 4-byte pointer, none via a neighbour's address.",
-      "handoff": []
+      "basis": "Image bytes zero; initialised '= 0' and follows data_fdps_level_up_window_sheet_ptr because the unbounded indicator-queue glyph stores (0001f653/0001f669 with cursor up to 400) reach 0x643b4.",
+      "handoff": [],
+      "definition_sha": "3a8ba41a6ada45c5"
     },
     {
       "symbol": "data_fdps_cursor_highlight_sprite_sheet_ptr",
       "addr": "000643b8",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_unit_gauge_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes at 000643b8..bb are all zero (bss); all accesses are whole-dword pointer loads/stores of this address only, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "basis": "Image bytes all zero, but the finding's queue overrun reaches this address via glyph_ids stores, so initialised '= 0' in the contiguous gamedata.c run following data_fdps_unit_gauge_sheet_ptr.",
+      "handoff": [],
+      "definition_sha": "84160d9b7ce54ce0"
     },
     {
       "symbol": "data_fdps_vga_main_palette_ptr",
       "addr": "000643bc",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_cursor_highlight_sprite_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes at 000643bc are all zero (bss); every xref is a whole-dword access of this one address, none crosses into 000643b8 or 000643c0.",
-      "handoff": []
+      "basis": "Image bytes zero -> '= 0'; initialised with follows = data_fdps_cursor_highlight_sprite_sheet_ptr because the unbounded indicator-queue overrun (0001f60a..0001f678) writes glyph/unit_idx bytes through 0x643bc, so it must keep its original offset in the contiguous run 0x64120..0x653ef.",
+      "handoff": [],
+      "definition_sha": "03b363b02ab3ac8d"
     },
     {
       "symbol": "data_fdps_selection_bar_sheet_ptr",
       "addr": "000643c0",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_vga_main_palette_ptr"
+      },
       "confidence": "high",
-      "basis": "zero: 4 bss bytes at 000643c0 are all zero; every access is a whole-dword read/write of this symbol alone, no neighbour crossing",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes 000643c0..c3 zero; follows data_fdps_vga_main_palette_ptr because glyph stores of the unbounded indicator-queue overrun land directly on this pointer, so the 0x64120..0x653ef run must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "da70c23da501d203"
     },
     {
       "symbol": "data_fdps_all_game_text_ptr",
       "addr": "000643c4",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_selection_bar_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "zero: 4 bytes at 000643c4 are 00 in the bss image; no layout: every xref reads/writes the dword at exactly 0x643c4, no neighbour-relative access",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes are zero, but the symbol lies inside the indicator-queue overrun region 0x64120..0x653ef, so it must sit in the contiguous initialised run in gamedata.c right after data_fdps_selection_bar_sheet_ptr",
+      "handoff": [],
+      "definition_sha": "94f406429f6c8ca1"
     },
     {
       "symbol": "data_fdps_status_gauge_bar_sheet_ptr",
       "addr": "000643c8",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_all_game_text_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes at 000643c8 are all zero (bss); all six xrefs access it as a whole dword pointer; no code reaches it through a neighbour.",
-      "handoff": []
+      "basis": "Image bytes zero, but initialised '= 0' and follows data_fdps_all_game_text_ptr because the unbounded indicator-queue cursor overrun (0001f60a..0001f678) writes glyph/unit bytes across 0x643c8, so it must keep its original offset in the gamedata.c run.",
+      "handoff": [],
+      "definition_sha": "c9c29770ed848af5"
     },
     {
       "symbol": "data_fdps_font_sheet_ptr",
       "addr": "000643cc",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_status_gauge_bar_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "BSS, image bytes 000643c0..000643df all zero; every access is a whole-dword pointer load/store of this one address, no neighbour crossing.",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes 000643cc..cf zero; follows data_fdps_status_gauge_bar_sheet_ptr because glyph stores of the unbounded indicator-queue overrun land directly on this pointer, so the 0x64120..0x653ef run must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "86f6e903478255fe"
     },
     {
       "symbol": "data_fdps_message_window_sheet_ptr",
       "addr": "000643d0",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_font_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643d0..d3 are zero (bss); every access is a whole-dword read/push or a store through its own address, none crossing into 000643cc or 000643d4.",
-      "handoff": []
+      "basis": "4 zero bytes in image (bss), byte* dword accesses; initialised '= 0' and follows data_fdps_font_sheet_ptr because glyph stores of the unchecked indicator-queue cursor overrun (0001f510 family) land on it",
+      "handoff": [],
+      "definition_sha": "a785fb783bfb5e90"
     },
     {
       "symbol": "data_fdps_unit_status_icon_sheet_ptr",
       "addr": "000643d4",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_message_window_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "read_memory 000643c8..000643df all zero -> zero; every xref accesses exactly this dword as a whole pointer, none crosses into neighbours 000643d0/000643d8",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes 000643d4..d7 zero; follows data_fdps_message_window_sheet_ptr because glyph stores of the unbounded indicator-queue overrun land directly on this pointer, so the 0x64120..0x653ef run must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "b87b8540c7526ce2"
     },
     {
       "symbol": "data_fdps_number_glyph_sheet_ptr",
       "addr": "000643d8",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_unit_status_icon_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643d8..db are zero in bss; every xref accesses only this dword, no neighbour crossing.",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes 000643d8..db zero; follows data_fdps_unit_status_icon_sheet_ptr because glyph stores of the unbounded indicator-queue overrun land directly on this pointer, so the 0x64120..0x653ef run must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "a4a72fe3e38fd71a"
     },
     {
       "symbol": "data_fdps_shadow_sprite_sheet_ptr",
       "addr": "000643dc",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_number_glyph_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "All 4 image bytes at 000643dc are zero (bss); every xref addresses 0x643dc directly as a dword pointer, no neighbour-relative access, so no layout constraint.",
-      "handoff": []
+      "basis": "Image bytes zero, but initialised (= 0) with follows=data_fdps_number_glyph_sheet_ptr because the unbounded indicator-queue glyph stores reach 0x643af..0x64443, covering this pointer.",
+      "handoff": [],
+      "definition_sha": "e29e0a97a6e34106"
     },
     {
       "symbol": "data_fdps_ui_terrain_hud_panel_sheet_ptr",
       "addr": "000643e0",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_shadow_sprite_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes at 000643e0..e3 are zero (bss); all 9 xrefs are whole-dword accesses to this slot only, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "basis": "Image bytes zero; made initialised '= 0' with follows=data_fdps_shadow_sprite_sheet_ptr because the unbounded indicator-queue glyph stores (cursor 255..403 + 0x642b0) overwrite 0x643e0, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
+      "handoff": [],
+      "definition_sha": "89d7c5131b5e2a82"
     },
     {
       "symbol": "data_fdps_vga_fight_palette_ptr",
       "addr": "000643e4",
       "size": 4,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_ui_terrain_hud_panel_sheet_ptr"
+      },
       "confidence": "high",
-      "basis": "zero: 4 bytes at 000643e4 are 00 in the bss image; no layout: every xref accesses exactly the dword at 0x643e4, no neighbour-relative access",
-      "handoff": []
+      "basis": "initialized (= 0): image bytes 000643e4..e7 zero; follows data_fdps_ui_terrain_hud_panel_sheet_ptr because glyph stores of the unbounded indicator-queue overrun land directly on this pointer, so the 0x64120..0x653ef run must keep original offsets.",
+      "handoff": [],
+      "definition_sha": "0618667427a1229d"
     },
     {
       "symbol": "data_fdps_cdrom_path",
       "addr": "000643e8",
       "size": 3,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_vga_fight_palette_ptr"
+      },
       "confidence": "high",
-      "basis": "Image bytes 000643e8..000643ea are all zero -> zero/tentative; every xref is a MOV EAX,0x643e8 passed as a %s argument, no access crosses into neighbours -> no layout constraint.",
-      "handoff": []
+      "basis": "Image bytes zero; made initialised '= { 0 }' with follows=data_fdps_vga_fight_palette_ptr because the unbounded indicator-queue glyph stores (cursor 255..403 + 0x642b0) overwrite 0x643e8..0x643ea, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
+      "handoff": [],
+      "definition_sha": "0ab6590b1ea7a8ce"
     },
     {
       "symbol": "data_fdps_shared_quit_game_requested",
       "addr": "000643eb",
       "size": 1,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_cdrom_path"
+      },
       "confidence": "high",
-      "basis": "zero: image byte at 000643eb is 00; all 10 xrefs are byte-wide MOV 0/1 or CMP byte 0, none crosses into a neighbour",
-      "handoff": []
+      "basis": "initialized (= 0): image byte 00, made initialised and follows data_fdps_cdrom_path because the unbounded indicator-queue cursor overrun writes glyph bytes through 0x643eb",
+      "handoff": [],
+      "definition_sha": "c960f4c985988f99"
     },
     {
       "symbol": "data_fdps_animation_baseani_entry_ptr",
       "addr": "000643ec",
       "size": 4,
-      "target": "anim.c",
-      "kind": "zero",
-      "layout": {},
+      "target": "gamedata.c",
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_shared_quit_game_requested"
+      },
       "confidence": "high",
-      "basis": "All 4 image bytes at 000643ec are zero (bss); only three xrefs, all direct dword accesses in one function, none crossing into neighbours.",
-      "handoff": []
+      "basis": "Image bytes at 000643ec are zero, but the indicator-queue overrun's glyph stores reach 0x643ec..0x643ef, so it is initialised (= 0) and must follow data_fdps_shared_quit_game_requested in gamedata.c's contiguous run.",
+      "handoff": [],
+      "definition_sha": "45c5b6ed811eb213"
     },
     {
       "symbol": "data_fdps_inverse_palette_cube",
       "addr": "000643f0",
       "size": 4096,
       "target": "gamedata.c",
-      "kind": "zero",
-      "layout": {},
+      "kind": "initialized",
+      "layout": {
+        "follows": "data_fdps_animation_baseani_entry_ptr"
+      },
       "confidence": "high",
-      "basis": "BSS segment, image bytes around it zero; every access uses the base 0x643f0 with a 12-bit index or a 0x1000-byte fread/fwrite, so no neighbour crossing.",
-      "handoff": []
+      "basis": "Image bytes 0x643f0..0x653ef all zero, but initialised (= { 0 }) and follows data_fdps_animation_baseani_entry_ptr because the unbounded indicator-queue glyph stores (cursor+0x642b0) reach 0x643f0..0x644b2 in the original.",
+      "handoff": [],
+      "definition_sha": "7b6a4842a5faa881"
     },
     {
       "symbol": "data_fdps_palette_shade_ramp_table",
@@ -1440,7 +1582,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 000653e0..00069c00 all zero with no fixups -> zero/tentative; every access stays within [000653f0, 00069bf0) -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "d92bf721c2495ddb"
     },
     {
       "symbol": "data_fdps_scene_layer_scroll_x_accumulator",
@@ -1451,7 +1594,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 zero bytes in bss -> zero; int[6] signed confirmed by dword ADD then SAR 3; all four xrefs index [layer*4+0x69bf0] with layer bounded by JL against layer count 0x69cdc, no neighbour crossing -> no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "23aaa7730fd2e240"
     },
     {
       "symbol": "data_fdps_scene_layer_scroll_offset_y",
@@ -1462,7 +1606,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "All 24 bytes at 00069c08 are zero in the image (bss); every access is dword [slot*4 + 0x69c08] with slot bounded by data_fdps_scene_layer_count, no cross-boundary access; signed int confirmed by SAR.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "f52430c9a0ffc5e2"
     },
     {
       "symbol": "data_fdps_scene_layer_tile_sheet_ptrs",
@@ -1473,7 +1618,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 image bytes at 00069c20 are all zero (bss) -> tentative definition; every xref indexes it only by a layer slot bounded by data_fdps_scene_layer_count (or slot 0), so no neighbour crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "5079870df7306c7a"
     },
     {
       "symbol": "data_fdps_scene_layer_scroll_step_y",
@@ -1484,7 +1630,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069c18..00069c60 all zero -> tentative definition; both xrefs index [i*4+0x69c38] with i < data_fdps_scene_layer_count, no neighbour crossing -> no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "8bbb6362c5d134aa"
     },
     {
       "symbol": "data_fdps_scene_layer_scroll_x_step",
@@ -1495,7 +1642,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069c38..00069c78 all zero -> zero; only two xrefs, both index [i*4+0x69c50] with i bounded by data_fdps_scene_layer_count, no boundary crossing -> no layout",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "caf839e333241161"
     },
     {
       "symbol": "data_fdps_scene_layer_parallax_factor_y",
@@ -1506,7 +1654,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 zero bytes in bss at 00069c68; three xrefs, all indexed by a layer slot bounded by data_fdps_scene_layer_count, signed IMUL/SAR use matches int; no cross-boundary access.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "df2d121ba92c2eef"
     },
     {
       "symbol": "data_fdps_scene_layer_parallax_factor_x",
@@ -1517,7 +1666,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 image bytes at 00069c80 all zero (bss); int type confirmed by dword IMUL + SAR; all 3 xrefs index [layer*4+0x69c80] with layer < layer count, no boundary crossing.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a1e346a136272ed3"
     },
     {
       "symbol": "data_fdps_scene_layer_tile_attr_ptr",
@@ -1528,7 +1678,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 image bytes at 00069c98 are all zero (bss); every access is a dword slot indexed by layer i*4 or element 0 directly, none crosses into the 0x69c80 or 0x69cb0 neighbour tables.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2effbcb11579be87"
     },
     {
       "symbol": "data_fdps_scene_layer_tile_map_ptrs",
@@ -1539,7 +1690,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "24 image bytes at 00069cb0 are all zero (bss); every access is either a direct slot-0 read or an index bounded by the layer count, so no cross-symbol layout dependency.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "06706b2291154cf7"
     },
     {
       "symbol": "data_fdps_map_unit_walk_anim_counter",
@@ -1550,7 +1702,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: 4 bytes at 00069cc8 are 00 in the bss image; type int confirmed by signed IDIV/SAR arithmetic; no layout: all 8 xrefs are dword accesses at exactly 0x69cc8",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "6e4cd67e215dba84"
     },
     {
       "symbol": "data_fdps_map_cursor_world_y",
@@ -1561,7 +1714,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069ccc..cf are zero (bss); all 146 instruction references are direct absolute dword accesses to 0x00069ccc with signed compares, none reaching a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "84d45b27a6b9e3ee"
     },
     {
       "symbol": "data_fdps_map_cursor_draw_mode",
@@ -1572,7 +1726,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069cc8..00069cd7 all zero (bss); every xref is a direct absolute dword access, no indexed or block access crosses 00069cd0.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a67a2b33ef9edea4"
     },
     {
       "symbol": "data_fdps_map_cursor_world_x",
@@ -1583,7 +1738,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069cd4 = 00 00 00 00 (bss); all ~140 xrefs are direct absolute dword accesses, no indexed or block access crosses into it; signed compares confirm int.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "6bd99d7a01a6ae02"
     },
     {
       "symbol": "data_fdps_map_unit_array_ptr",
@@ -1594,7 +1750,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: 4 bytes at 00069cd8 are 00 in the bss image; no layout: all 51 xrefs access the dword at exactly 0x69cd8, no neighbour-relative or address-taken access",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "424dc6deaf56ed89"
     },
     {
       "symbol": "data_fdps_scene_layer_count",
@@ -1605,7 +1762,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes 00069cdc..df are 00 in bss; int: every access is a full dword with signed JL/JG compares; layout none: all 13 xrefs and the operand sweep over 00069cd0..00069cef are direct scalar dword accesses, no indexed or spanning access",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "58099353fa0755a4"
     },
     {
       "symbol": "data_fdps_battle_view_window_origin_y",
@@ -1616,7 +1774,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00069ce0..e3 all zero -> tentative definition; every one of the 84 xrefs is a direct absolute dword access to 0x69ce0, none through a neighbour's address",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "63b69911061398ff"
     },
     {
       "symbol": "data_fdps_battle_view_window_origin_x",
@@ -1627,7 +1786,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00069ce4..e7 are zero (bss, neighbours zero too); signed int from JL/JG/JGE compares and IDIV/SAR; every one of 82 xrefs is a direct absolute dword access, no neighbour-relative reach",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ecf2581783c2c510"
     },
     {
       "symbol": "data_fdps_battle_turn_counter",
@@ -1638,7 +1798,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069ce0..00069cef all zero -> zero/tentative; all 56 xrefs and a search_instructions sweep for 69ce show only direct absolute accesses to 0x69ce8, none indexed or crossing into 0x69ce4/0x69cec -> no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ef8cb507f391a4b8"
     },
     {
       "symbol": "data_fdps_battle_pending_xp_credit",
@@ -1649,7 +1810,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069cec = 00 00 00 00 -> zero; all 31 xrefs are direct dword accesses to [0x00069cec], signed (IDIV, JLE), no indexed or spanning access to neighbours",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "c11cc8ef8ad7fe01"
     },
     {
       "symbol": "data_fdps_cel_sprite_cache_count",
@@ -1660,7 +1822,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069cf0 are zero (BSS); all 19 xrefs are absolute dword accesses to 0x69cf0 only, signed JL compare confirms int; no neighbour-crossing access.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "61dfe8f0d3389223"
     },
     {
       "symbol": "data_fdps_chapter_current_chapter_id",
@@ -1671,7 +1834,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069ce8..00069d07 all zero in bss -> tentative definition; int confirmed by dword accesses, signed JLE compares and SAR/IDIV; no instruction crosses into neighbours.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "4d467d250599a4f1"
     },
     {
       "symbol": "data_fdps_scene_layer_tile_attr_mode",
@@ -1682,7 +1846,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069cf8..00069cfd are all zero (BSS); byte-wide indexed accesses by layer index bounded by data_fdps_scene_layer_count, zero-extended on read; no code crosses into 00069cfe or below 00069cf8.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "102d5d613c1f2682"
     },
     {
       "symbol": "data_fdps_scene_layer_draw_depth",
@@ -1693,7 +1858,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "read_memory 00069cf0..00069d17 all zero -> zero; all five xrefs are byte accesses indexed by layer slot (<= scene layer count), no boundary crossing -> no layout; unsigned by JBE/AND 0xff.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "d1fe9f42bb4aa297"
     },
     {
       "symbol": "data_fdps_map_tile_info_tile_id",
@@ -1704,7 +1870,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069d04..05 are 00 00 in BSS -> zero tentative definition; only three direct word accesses, no neighbour-crossing access -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "111cd2a0f22ec108"
     },
     {
       "symbol": "data_fdps_map_current_cell_event_code",
@@ -1715,7 +1882,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: 2 image bytes at 00069d06 are 00 00 in BSS; type short from word-width MOVSX reads and 16-bit store; no layout: every access is a direct absolute word access to 0x69d06, none via a neighbour's base",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "30c35e2c8231b9fe"
     },
     {
       "symbol": "data_fdps_map_current_tile_attr_flags",
@@ -1726,7 +1894,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069d00..00069d17 all zero (bss); 5 xrefs all byte-wide absolute accesses, no neighbour-crossing access, so zero tentative definition with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "a887aaa8bda3a625"
     },
     {
       "symbol": "data_fdps_map_tile_terrain_type",
@@ -1740,7 +1909,8 @@
       "handoff": [
         "0001c520#0",
         "00019f80#0"
-      ]
+      ],
+      "definition_sha": "5f6ec743c739aa8f"
     },
     {
       "symbol": "data_fdps_map_current_tile_attr_reserved",
@@ -1762,7 +1932,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes at 00069d0b are 00 in bss; type unsigned char from byte-wide unsigned access (CMP/JBE, XOR EAX+MOV AL); no layout: all 10 xrefs are absolute byte accesses to this address only",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "6439cbda927ba41a"
     },
     {
       "symbol": "data_fdps_map_current_move_grid_marker",
@@ -1773,7 +1944,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00069d00-00069d1f all zero (bss); all three xrefs are single-byte accesses at the exact address; no neighbour access crosses into it",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "464e922efce4f417"
     },
     {
       "symbol": "data_fdps_view_frame_last_tick",
@@ -1876,7 +2048,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069d54..57 are zero (BSS); all 12 xrefs are plain dword accesses of this address only, so zero tentative int with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "0c4b6c80b51101e8"
     },
     {
       "symbol": "data_fdps_audio_sample_playback_rate",
@@ -1913,7 +2086,8 @@
         "00015be0#1",
         "00015be0#3",
         "000567a0#2"
-      ]
+      ],
+      "definition_sha": "ca2b8bf435b9b108"
     },
     {
       "symbol": "data_fdps_audio_sfx_dig_driver_handle",
@@ -1946,7 +2120,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069d68..00069d77 all zero (bss) -> zero; every access is a byte-width read/write/compare against 0 or XOR 1 -> unsigned char matches; no access crosses 00069d70's boundaries -> no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ef4c1f19769110f4"
     },
     {
       "symbol": "data_fdps_audio_sfx_driver_available_flag",
@@ -1990,7 +2165,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069d80..83 are zero (bss); all three xrefs are plain dword accesses of the pointer itself, none crossing into 00069d7c or 00069d84.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "f5db9324e5a13a3c"
     },
     {
       "symbol": "data_fdps_village_window_sheet_ptr",
@@ -2001,7 +2177,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069d84..87 are zero (bss); every access is a direct dword at 0x69d84, none crosses into 0x69d80 or 0x69d88.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "f85ee2b22217e392"
     },
     {
       "symbol": "data_fdps_chapter_pending_event_idx",
@@ -2012,7 +2189,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069d90 are all zero (bss); all 16 xrefs are direct dword accesses at the exact address, no neighbour crossing, so no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "7ebf6a42d85711d3"
     },
     {
       "symbol": "data_fdps_chapter_event_or_battle_end_code",
@@ -2023,7 +2201,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069da0..a3 are zero in bss; every one of the 58 xrefs is a direct dword access at exactly 0x69da0, none crossing into neighbours.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "ec4c320f753b7894"
     },
     {
       "symbol": "data_fdps_cd_ioctl_buffer",
@@ -2034,7 +2213,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 00069da4..a7 are zero in bss; all 19 xrefs are absolute dword accesses to 0x69da4 itself, no indexed or neighbour-spanning access.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9f376eb36015ba19"
     },
     {
       "symbol": "data_fdps_cd_ioctl_buffer_real_mode_ptr",
@@ -2045,7 +2225,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069da8..ab are all zero (bss); all 12 xrefs are plain dword MOVs of the symbol itself, no neighbour-relative access -> zero, no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "97f3f2d4a2232e2c"
     },
     {
       "symbol": "data_fdps_cdrom_int_out_regs",
@@ -2093,7 +2274,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00069de8..00069deb are zero (bss); all 26 xrefs are absolute dword accesses to this address only, so no layout constraint",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "4a7dc8cc6fa0768f"
     },
     {
       "symbol": "data_fdps_cd_play_range_start_sector",
@@ -2150,7 +2332,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00069dff..00069e00 are zero (bss); all three xrefs address it by its own absolute address with word width, no neighbour-relative access, so no layout constraint despite the odd address.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "459864b2795512c5"
     },
     {
       "symbol": "data_fdps_cd_track_start_sector",
@@ -2161,7 +2344,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "bss, image bytes 00069df8..00069e0f all zero -> zero; all five xrefs are direct 32-bit absolute accesses of exactly this address, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "02277280f3d527de"
     },
     {
       "symbol": "data_fdps_cd_track_info_control_flags",
@@ -2194,7 +2378,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes at 00069e07 are zero (bss); all four xrefs are byte-wide absolute accesses of this address only, unsigned compares, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "b05e973d20a9c57b"
     },
     {
       "symbol": "data_fdps_cd_leadout_msf_minute",
@@ -2238,7 +2423,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes 69e0b..69e0e are zero in bss -> tentative definition; all six accesses are direct absolute dword accesses, none reaches a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "593cb5bde6336122"
     },
     {
       "symbol": "data_fdps_cd_media_catalog_number",
@@ -2282,7 +2468,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00069e20..21 are zero (bss); all 10 xrefs are direct 16-bit accesses of this address only, no neighbour crosses the boundary",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "9658a613f5eef7c1"
     },
     {
       "symbol": "data_fdps_cd_real_mode_call",
@@ -2405,7 +2592,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: bytes 00070022..23 are 00 00; type unsigned short from word-width access and JA compares; no layout: all 16 xrefs touch exactly word [0x70022], no neighbour-relative access",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2ef61dd40aa65c8b"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_src_width",
@@ -2416,7 +2604,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes 00 00 at 00070024 -> zero; all 22 xrefs and every operand 0x0007002x are exact 16-bit accesses at their own addresses, no spanning -> no layout",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "415abedb8794a42a"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_vscale_accumulator",
@@ -2427,7 +2616,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00070026 are 00 00 -> zero; all 7 xrefs are 16-bit word accesses at exactly 00070026 with unsigned JA compares, none spanning neighbours -> no layout.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "f69f3c26d51dac7a"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_dest_width",
@@ -2438,7 +2628,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "image bytes at 00070028 are 00 00 -> zero; all 13 xrefs plus an operand sweep of 0x0007002x are direct 16-bit accesses at this exact address, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "29e5b1e91a2a3625"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_dest_height",
@@ -2449,7 +2640,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0007002a..0007002b are 00 00; all six xrefs are fixed-address word accesses, none crosses into a neighbour.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "79d31b49a9d88679"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_dest_rows_remaining",
@@ -2460,7 +2652,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "zero: image bytes at 0007002c are 00 00; type: only 16-bit MOV/DEC+JNZ accesses (no signed compare); layout: all 4 xrefs address 0007002c exactly with word width, no neighbour crossing",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "2c114ca7926b59c5"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_dst_pitch",
@@ -2471,7 +2664,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 0007002e..0007002f are 00 00 -> zero/tentative; every access is an exact 16-bit word at 0007002e, zero-extended, no code crosses into 0007002c or 00070030 -> no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "b21fc901391d28da"
     },
     {
       "symbol": "data_fdps_graphics_rle_blit_dst_row_advance",
@@ -2482,7 +2676,8 @@
       "layout": {},
       "confidence": "high",
       "basis": "Image bytes at 00070030..33 are all zero; all 10 xrefs are direct dword accesses to 0x70030 only, none spanning a neighbour, so tentative definition with no layout constraint.",
-      "handoff": []
+      "handoff": [],
+      "definition_sha": "df2ddb9bfbe30e02"
     },
     {
       "symbol": "data_fdps_graphics_rle_rotate_dst_x_step_per_src_x",
