@@ -5216,7 +5216,7 @@
     },
     "00064120": {
       "symbol": "data_fdps_indicator_queue_cell_x_offset",
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "type": "/uchar[200]",
       "size": 200,
       "segment": "bss",
@@ -5225,7 +5225,7 @@
       "reader_files": [
         "indicat.c"
       ],
-      "reason": "read only from indicat.c",
+      "reason": "Layout neighbour: 4-aligned head of gamedata.c's contiguous initialised run 0x64120..0x653ef (29 globals, 25 already there), which the unbounded indicator-queue cursor overruns.",
       "status": "pending"
     },
     "000641e8": {

@@ -1,8 +1,10 @@
 /* indicat.c -- the battle indicator popups and the queue they are played back
  * from.
  *
- * See indicat.h for what a caller has to know.  The file owns three of the four
- * queue globals; the cursor is gamedata.c's because the item code reads it too.
+ * See indicat.h for what a caller has to know.  The file owns two of the four
+ * queue globals, the glyph ids and the cursor; the cell x offsets and the unit
+ * indices are gamedata.c's, in the contiguous run the queue's overrun writes
+ * through.
  *
  * sprintf comes from <stdio.h> and strlen from <string.h>, and both are real
  * calls in the original -- CALL 0x00042d41 and CALL 0x00042dd2 at 0001f5df and
@@ -32,12 +34,6 @@
 /* Global data owned by this file, in the original image's address order.
  * Initialised definitions come first and their order is the layout
  * (rebuild_info/data_emit.md); zero-filled ones follow. */
-
-/* 00064120. Starts all zero (bss in the original). It is written as an
-   explicit zero initialiser so it lands in _DATA as the head of the contiguous
-   indicator queue block: an unbounded queue cursor overruns this array into
-   data_fdps_battle_indicator_queue_unit_idx, which must follow it directly. */
-unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS] = { 0 };
 
 /* 000642b0. Starts all zero; it is initialised only so it lands in _DATA
    directly after data_fdps_battle_indicator_queue_unit_idx, because the

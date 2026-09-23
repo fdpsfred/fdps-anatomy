@@ -34,10 +34,10 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 | 情況 | 落點 |
 | --- | --- |
-| 只被一個目標檔的程式碼讀 | 該檔。共 95 個 |
+| 只被一個目標檔的程式碼讀 | 該檔。共 94 個 |
 | 被兩個以上的目標檔讀 | `gamedata.c`。共 135 個 |
 | 章節四張 dispatch 表 | `chapter.c`，見下面的例外 |
-| 佈局上必須與別檔的全域相鄰 | 相鄰者的檔，理由記在 `tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES`。目前 `data_fdps_animation_baseani_entry_ptr`、`data_fdps_battle_indicator_queue_unit_idx` 兩個因此進 `gamedata.c`，`gamedata.c` 合計 137 個 |
+| 佈局上必須與別檔的全域相鄰 | 相鄰者的檔，理由記在 `tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES`。目前 `data_fdps_animation_baseani_entry_ptr`、`data_fdps_battle_indicator_queue_unit_idx`、`data_fdps_indicator_queue_cell_x_offset` 三個因此進 `gamedata.c`，`gamedata.c` 合計 138 個 |
 
 `gamedata.c` 不是雜項桶，入場條件是「跨檔共用」這個事實本身。把它集中還有第二個好處：未初始化全域的擺放順序與相鄰關係在 Watcom 下不保證（[`pitfalls.md`](pitfalls.md) 的 B 類），全部落在同一個 translation unit 至少讓那個順序是一份可讀的清單，而不是散在七十幾個檔裡的湊巧。
 
@@ -64,7 +64,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | --- | --- | --- |
 | `X.h`（每個 `X.c` 一個） | `X.c` 的公開 function 原型，含各自的 `#pragma aux` calling convention 宣告；以及 `X.c` 定義的全域的 `extern` | 呼叫 `X.c` 的檔 |
 | `fdpstype.h` | 23 個遊戲 struct 的定義（票 17 的產物），不含任何 function 宣告。**產生物**：`tools/code_emit/gen_types.py` 從 `ghidra_snapshot/data_types.txt` 產生，連同逐欄檢查偏移的 `tests/fdpstype.c`。改佈局要改 Ghidra 再重跑，不手改 | 需要那些型別的檔 |
-| `gamedata.h` | `gamedata.c` 定義的 137 個全域的 `extern` | 讀那些全域的檔 |
+| `gamedata.h` | `gamedata.c` 定義的 138 個全域的 `extern` | 讀那些全域的檔 |
 
 **`extern` 的擁有者就是定義它的那個 `.c` 的 `.h`，只有一個。** 任何檔都不得自己寫一份 `extern`——那樣的宣告不會跟著定義一起改，型別一旦調整就是兩份不一致的真相，而連結器不會抱怨。
 

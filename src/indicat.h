@@ -22,16 +22,9 @@
    to its own declaration, below. */
 #define INDICATOR_QUEUE_CELLS 200
 
-/* 00064120.  Cell x: where this cell's glyph sits, in pixels, relative to the
-   left edge of its popup.  fdps_show_number_indicator lays its four digits out
-   at 2, 8, 14 and 20; the fixed-word popup at 0001f690 lays its four glyphs out
-   at 1, 8, 13 and 19 -- i * 6 + 1, with cell 1 alone nudged a pixel right by its
-   own branch at 0001f758 -- so the producers are NOT one helper working from
-   different glyph tables, and folding them together moves the digits. */
-extern unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS];
-
-/* The middle array, data_fdps_battle_indicator_queue_unit_idx (000641e8), is
-   owned by src/gamedata.c and declared in gamedata.h. */
+/* The first array, data_fdps_indicator_queue_cell_x_offset (00064120), and the
+   middle one, data_fdps_battle_indicator_queue_unit_idx (000641e8), are owned by
+   src/gamedata.c and declared in gamedata.h. */
 
 /* 000642b0.  The glyph id the cell draws out of the Number.cel sheet, or 0xff
    for a blank cell, which the player skips entirely -- that is how a short

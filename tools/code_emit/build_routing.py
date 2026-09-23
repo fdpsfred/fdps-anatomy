@@ -571,6 +571,10 @@ DATA_OVERRIDES = {
         "and precede data_fdps_indicator_queue_glyph_ids inside gamedata.c's "
         "contiguous initialised run 0x64120..0x653ef, which the unbounded "
         "indicator-queue cursor overruns."),
+    "data_fdps_indicator_queue_cell_x_offset": ("gamedata.c",
+        "Layout neighbour: 4-aligned head of gamedata.c's contiguous "
+        "initialised run 0x64120..0x653ef (29 globals, 25 already there), "
+        "which the unbounded indicator-queue cursor overruns."),
 }
 
 

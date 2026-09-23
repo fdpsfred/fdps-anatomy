@@ -1468,6 +1468,18 @@ extern int data_fdps_dialog_subst_text_id_2;
    follows it in memory is never reached through it. */
 extern int data_fdps_ui_save_slot_occupied_flags[3];
 
+/* 00064120.  Cell x: where this cell's glyph sits, in pixels, relative to the
+   left edge of its popup.  fdps_show_number_indicator lays its four digits out
+   at 2, 8, 14 and 20; the fixed-word popup at 0001f690 lays its four glyphs out
+   at 1, 8, 13 and 19 -- i * 6 + 1, with cell 1 alone nudged a pixel right by its
+   own branch at 0001f758 -- so the producers are NOT one helper working from
+   different glyph tables, and folding them together moves the digits.
+
+   One of the battle indicator queue's three parallel arrays (indicat.h); its
+   200 cells are INDICATOR_QUEUE_CELLS there, spelled here as the literal every
+   other array in this header uses. */
+extern unsigned char data_fdps_indicator_queue_cell_x_offset[200];
+
 /* 000641e8.  Which unit this cell floats over, as a byte: the popup follows the
    unit's tile position at playback time rather than a position latched when it
    was queued.
