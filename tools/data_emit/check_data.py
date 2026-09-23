@@ -299,7 +299,9 @@ def check_layout(entry, manifest_by_sym, reb, reb_map):
             out.append((False, "follows %s, which is not landed" % prev))
         else:
             pseg, poff, _ = reb_map[prev]
-            want = poff + int(manifest_by_sym[prev]["size"])
+            # A predecessor that owns a zero tail ends where its tail ends.
+            ptail = int((manifest_by_sym[prev].get("layout") or {}).get("zero_pad_after") or 0)
+            want = poff + int(manifest_by_sym[prev]["size"]) + ptail
             ok = pseg == seg and off == want
             out.append((ok, "follows %s: at %04x:%08x, expected %04x:%08x"
                         % (prev, seg, off, pseg, want)))
@@ -435,6 +437,12 @@ def selftest():
     res = check_layout({"symbol": "flag", "size": 1, "layout": {"zero_pad_after": 4}},
                        fman, orig, fmap)
     rows.append(("pad reaching a public symbol fails", res and not res[0][0], str(res)))
+    # The init table at 0x60074 follows the one-byte flag at 0x60070 only once
+    # the flag's three-byte tail is counted.
+    tman = {"flag": {"symbol": "flag", "size": 1, "layout": {"zero_pad_after": 3}},
+            "t": {"symbol": "t", "size": 120}}
+    res = check_layout({"symbol": "t", "layout": {"follows": "flag"}}, tman, orig, fmap)
+    rows.append(("follows counts the predecessor's tail", res and res[0][0], str(res)))
     ok_all = True
     for name, passed, detail in rows:
         print("[selftest] %-40s %s (%s)" % (name, "ok" if passed else "FAIL", detail))
