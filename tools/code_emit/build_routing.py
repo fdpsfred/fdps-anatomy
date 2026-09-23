@@ -566,6 +566,11 @@ DATA_OVERRIDES = {
         "data_fdps_shared_quit_game_requested in gamedata.c's contiguous "
         "initialised run 0x64120..0x653ef, which the indicator-queue glyph "
         "overrun writes through."),
+    "data_fdps_battle_indicator_queue_unit_idx": ("gamedata.c",
+        "Layout neighbour: must follow data_fdps_indicator_queue_cell_x_offset "
+        "and precede data_fdps_indicator_queue_glyph_ids inside gamedata.c's "
+        "contiguous initialised run 0x64120..0x653ef, which the unbounded "
+        "indicator-queue cursor overruns."),
 }
 
 

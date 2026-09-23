@@ -30,10 +30,8 @@
    different glyph tables, and folding them together moves the digits. */
 extern unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS];
 
-/* 000641e8.  Which unit this cell floats over, as a byte: the popup follows the
-   unit's tile position at playback time rather than a position latched when it
-   was queued. */
-extern unsigned char data_fdps_battle_indicator_queue_unit_idx[INDICATOR_QUEUE_CELLS];
+/* The middle array, data_fdps_battle_indicator_queue_unit_idx (000641e8), is
+   owned by src/gamedata.c and declared in gamedata.h. */
 
 /* 000642b0.  The glyph id the cell draws out of the Number.cel sheet, or 0xff
    for a blank cell, which the player skips entirely -- that is how a short
@@ -42,7 +40,7 @@ extern unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS];
 
 /* 00064378.  How many cells of the battle indicator queue are filled, and
    equally the index the next cell is appended at: the cursor into the three
-   parallel arrays src/indicat.h declares.  Signed, and it is a count and not a
+   parallel queue arrays.  Signed, and it is a count and not a
    ring -- nothing wraps it and nothing checks it against the arrays' 200 cells.
 
    Every producer appends its popup's cells at the cursor and adds that many to

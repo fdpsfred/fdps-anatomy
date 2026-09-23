@@ -39,14 +39,6 @@
    data_fdps_battle_indicator_queue_unit_idx, which must follow it directly. */
 unsigned char data_fdps_indicator_queue_cell_x_offset[INDICATOR_QUEUE_CELLS] = { 0 };
 
-/* 000641e8. Starts all zero. It is written with an explicit initialiser only
-   so that it lands in _DATA directly after
-   data_fdps_indicator_queue_cell_x_offset and before
-   data_fdps_indicator_queue_glyph_ids: the queue cursor is never bounded, so a
-   batch of more than 50 popups overruns each array into the next one exactly
-   as in the original. */
-unsigned char data_fdps_battle_indicator_queue_unit_idx[INDICATOR_QUEUE_CELLS] = { 0 };
-
 /* 000642b0. Starts all zero; it is initialised only so it lands in _DATA
    directly after data_fdps_battle_indicator_queue_unit_idx, because the
    unbounded queue cursor lets a batch of more than 50 popups write unit

@@ -1468,4 +1468,13 @@ extern int data_fdps_dialog_subst_text_id_2;
    follows it in memory is never reached through it. */
 extern int data_fdps_ui_save_slot_occupied_flags[3];
 
+/* 000641e8.  Which unit this cell floats over, as a byte: the popup follows the
+   unit's tile position at playback time rather than a position latched when it
+   was queued.
+
+   One of the battle indicator queue's three parallel arrays (indicat.h); its
+   200 cells are INDICATOR_QUEUE_CELLS there, spelled here as the literal every
+   other array in this header uses. */
+extern unsigned char data_fdps_battle_indicator_queue_unit_idx[200];
+
 #endif
