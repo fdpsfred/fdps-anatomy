@@ -776,10 +776,11 @@ tcr_stretch_loop:
 tcr_stretch_done:
         or      bx, bx
         jne     tcr_next_op
-        ; Goes to tcr_end_row, exactly 127 bytes past this 2-byte JMP. WASM
-        ; 10.0a silently widens "jmp short tcr_end_row" to a 5-byte JMP at that
-        ; distance (a forward-label displacement of 127 fails its short-range
-        ; test); the $-relative form is resolved at once and stays 2 bytes.
+        ; Goes to tcr_end_row, exactly 127 bytes past this 2-byte JMP. With the
+        ; long forward JB at the top of the op dispatch jumping to a label in
+        ; between, WASM 10.0a silently assembles "jmp short tcr_end_row" as a
+        ; 5-byte JMP at this distance; the $-relative form stays 2 bytes
+        ; (rebuild_info/build_flags.md).
         jmp     short $+129
         nop
         nop

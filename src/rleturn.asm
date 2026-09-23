@@ -91,7 +91,7 @@ fdps_rle_blit_rotated proc near
         mov     dword ptr data_fdps_graphics_rle_blit_rot_row_dest_step_x, 0FFFFFFFFh
         neg     ebp
         mov     dword ptr data_fdps_graphics_rle_rotate_dst_y_step_per_src_y, ebp
-        jmp     rot_store_magnitudes    ; long form in the original, kept by WASM
+        jmp     near ptr rot_store_magnitudes ; long in the original (D=126): forced, because WASM's own pick at this distance depends on the code around it
 rot_dx_neg_dy_pos:
         ; dx <= 0, dy > 0
         neg     dx

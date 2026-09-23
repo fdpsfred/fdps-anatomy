@@ -81,11 +81,37 @@ def git_dirty(rel):
     return bool(out.stdout.strip())
 
 
+IF_RX = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
+
+
+def strip_if0(text):
+    """The text with every `#if 0` region blanked, line count kept.
+
+    The same reading tools/code_emit/build_emit.py applies when it registers
+    runners, repeated here because tools are self-contained (tools/_index.md):
+    only a literal `#if 0` is off, and its `#else` is on again.
+    """
+    out, stack = [], []
+    for line in text.splitlines():
+        m = IF_RX.match(line)
+        off_before = any(stack)
+        if m:
+            kind, rest = m.group(1), m.group(2).split("/*", 1)[0].strip()
+            if kind in ("if", "ifdef", "ifndef"):
+                stack.append(kind == "if" and rest == "0")
+            elif kind in ("else", "elif") and stack:
+                stack[-1] = False
+            elif kind == "endif" and stack:
+                stack.pop()
+            out.append("")
+            continue
+        out.append("" if off_before else line)
+    return "\n".join(out)
+
+
 def runner_cases(text, stem):
     """RUN_TEST names inside run_<stem>_tests, outside any #if 0."""
-    sys.path.insert(0, str(ROOT / "tools" / "code_emit"))
-    import build_emit
-    live = build_emit.strip_if0(text)
+    live = strip_if0(text)
     m = re.search(r"void\s+run_%s_tests\s*\(\s*void\s*\)\s*\{(.*?)^\}" % stem, live,
                   re.S | re.M)
     return RUN_TEST_RX.findall(m.group(1)) if m else []

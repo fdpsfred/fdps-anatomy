@@ -379,8 +379,13 @@ extern void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
    sheet, map tile, font glyph and window frame the game draws reaches the
    pixels through here.  It publishes the blit rectangle into the three globals
    the whole kernel family reads, works out the end-of-row advance, and hands
-   the stream to one of the thirteen kernels in rle.c, rlecolor.c, rlerot.c and
-   rleblend.c.
+   the stream to one of the thirteen kernels in rlebase.asm, rlepal.asm,
+   rleturn.asm and rlemix.asm.  The dispatcher itself is rledisp.asm; it and
+   the fourteen routines under it (the thirteen kernels and the row skipper two
+   of them share) are the original's hand-written assembly, and the kernels
+   have no C interface -- this declaration is the only way in.  Their C translations,
+   kept for reading, are in blit.c, rle.c, rlecolor.c, rlerot.c and rleblend.c
+   under #if 0 (rebuild_info/code_layout.md).
 
    `rle_stream` is the command stream and `dest_pixel` the first pixel of the
    top destination row.  Both reach the chosen kernel unchanged.

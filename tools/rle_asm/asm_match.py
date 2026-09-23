@@ -63,6 +63,7 @@ import re
 import shutil
 import struct
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 import capstone
@@ -84,7 +85,9 @@ RESULT = WORK / "check.json"
 # `file` is the assembly file under src/ that holds the routine and `prefix` the
 # label prefix its local labels carry: WASM labels are module-wide, so two
 # routines in one file cannot both have a label called `next_row`.
-ROSTER = [
+Routine = namedtuple("Routine", "address name file prefix")
+
+ROSTER = [Routine(*row) for row in [
     ("000568db", "fdps_blit_dispatch", "rledisp", "disp"),
     ("00056a0d", "fdps_rle_blit_passthrough", "rlebase", "pass"),
     ("00056a8d", "fdps_rle_blit_remap_sprite_and_backdrop", "rlepal", "rmsb"),
@@ -100,7 +103,7 @@ ROSTER = [
     ("00057793", "fdps_rle_blit_tint_sprite_and_backdrop", "rlemix", "tsb"),
     ("00057916", "fdps_rle_blit_tint", "rlemix", "tint"),
     ("00057a74", "fdps_rle_blit_translucent_color_range", "rlemix", "tcr"),
-]
+]]
 ASM_FILES = ["rledisp", "rlebase", "rlepal", "rleturn", "rlemix"]
 
 # LE fixup source type -> bytes patched at the site (LE/LX specification).
@@ -781,7 +784,7 @@ def check_routine(img, names, obj, addr, name):
 
 def roster_entry(key):
     for row in ROSTER:
-        if key.lower() in (row[0], row[0].lstrip("0"), row[1].lower()):
+        if key.lower() in (row.address, row.address.lstrip("0"), row.name.lower()):
             return row
     raise MatchError("%s is not one of the fifteen routines" % key)
 
@@ -924,14 +927,14 @@ def cmd_check(objs_dir, fresh, as_json):
         routines = []
         src_problems = scan_source(p.read_text(encoding="latin-1"), ranges)
         if obj is not None:
-            want = [row for row in ROSTER if row[2] == p.stem]
+            want = [row for row in ROSTER if row.file == p.stem]
             for addr_s, name, _f, _p in want:
                 routines.append({"address": addr_s, "name": name,
                                  "problems": check_routine(img, names, obj,
                                                            int(addr_s, 16), name)})
                 seen.add(name)
             for pub in obj.publics:
-                if pub not in {row[1] for row in want}:
+                if pub not in {row.name for row in want}:
                     src_problems.append("public %s does not belong in this file"
                                         % pub)
         results.append({"file": "src/%s.asm" % p.stem,

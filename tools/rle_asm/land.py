@@ -183,8 +183,8 @@ def verdict_ok(addr):
 
 
 def build_file(stem):
-    rows = [r for r in am.ROSTER if r[2] == stem]
-    defined = {r[1] for r in rows}
+    rows = [r for r in am.ROSTER if r.file == stem]
+    defined = {r.name for r in rows}
     externs, bodies = {}, []
     for addr, name, _f, prefix in rows:
         ok, why = verdict_ok(addr)
