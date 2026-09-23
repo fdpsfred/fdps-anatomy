@@ -730,6 +730,359 @@ static void tsb_run_length_tops_out_at_64(void)
     CHECK_EQ(tsb_surface[64], TSB_SENTINEL);
 }
 
+/* --- fdps_rle_blit_tint (00057916), blit mode 11 --------------------------
+ *
+ * The same four-dword descriptor, the same fetch-once constant and the same
+ * row assignment as mode 10: MOV [EBP+0xc],EAX / MOV [EBP+0x10],EDX at
+ * 00057950 with EAX and EDX carrying 0 and 0x2400 for a level of 8 or less
+ * (CMP ECX,0x8 / JBE at 0005793a) and the two exchanged by XCHG EDX,EAX above
+ * that, so the TINT (descriptor[3], read at 0005791f and weighted once by MOV
+ * EAX,[EBP+0x1c] / SHL EAX,0x2 / ADD EAX,[EBP+0xc] / MOV EDX,[EAX] at
+ * 00057968) is weighted through the row the level names and the PIXEL through
+ * the row nine on.  Ops 00, 01 and 10 are mode 10's three; op 11 is ADD
+ * EDI,ECX at 00057a52, a skip that neither reads nor writes the surface and
+ * consumes no stream byte.
+ *
+ * EDX on entry is the dispatcher's dest_pitch - src_width, so a width w and
+ * advance a is a dispatch with src_width w and dest_pitch a + w.
+ *
+ * The fixtures are this block's own and mirror mode 10's: the ramp is the
+ * full 18 x 256 and every unmarked entry is zero, the cube is filled with
+ * TINT_CUBE_GUARD and only expected entries are marked, and the surface is
+ * pre-filled with TINT_SENTINEL.  The cube indices are the ones the assembly's
+ * sequence at 000579a8..000579b8 (SHR 4 / AND 0xf0f0f / AND 0xffff | SHR 0xc)
+ * forms: 0x537 from 0x00305070, 0x5f7 from 0x00f05070 and 0x33 from
+ * 0x00300030.
+ */
+#define TINT_MODE 11
+
+#define TINT_RAMP_ROWS 18
+#define TINT_RAMP_ROW_ENTRIES 256
+#define TINT_RAMP_ENTRIES (TINT_RAMP_ROWS * TINT_RAMP_ROW_ENTRIES)
+#define TINT_CUBE_BYTES 4096
+
+#define TINT_CUBE_GUARD 0xff
+#define TINT_SENTINEL 0x5a
+
+#define TINT_SRC_PIXEL 0x20
+#define TINT_SRC_PIXEL_2 0x21
+
+/* The palette index the whole rectangle is tinted toward.  Distinct from both
+   source pixels and from the sentinel, so a kernel that indexed the ramp with
+   the wrong one of them lands on an unmarked entry. */
+#define TINT_TINT_COLOR 0x30
+
+#define TINT_WEIGHT_SRC_A 0x00300000
+#define TINT_WEIGHT_SRC_B 0x00f00000
+#define TINT_WEIGHT_DST_A 0x00005070
+#define TINT_WEIGHT_DST_B 0x00000030
+#define TINT_INDEX_A_A 0x537 /* (0x00300000 + 0x00005070) */
+#define TINT_INDEX_B_A 0x5f7 /* (0x00f00000 + 0x00005070) */
+#define TINT_INDEX_A_B 0x33  /* (0x00300000 + 0x00000030) */
+
+#define TINT_PAINT_A_A 0x2a
+#define TINT_PAINT_B_A 0x2c
+#define TINT_PAINT_A_B 0x2b
+
+#define TINT_DEST_BYTES 80
+
+static unsigned int tint_ramp[TINT_RAMP_ENTRIES];
+static unsigned char tint_cube[TINT_CUBE_BYTES];
+static unsigned char tint_surface[TINT_DEST_BYTES];
+static int tint_descriptor[4];
+
+static void tint_set_ramp(int weight_row, int entry, unsigned int weighted_color)
+{
+    tint_ramp[weight_row * TINT_RAMP_ROW_ENTRIES + entry] = weighted_color;
+}
+
+/* Clears the tables and the surface and fills the descriptor.  The rectangle
+   is not set here: fdps_blit_dispatch publishes it from its own arguments. */
+static void tint_setup(unsigned int level)
+{
+    int entry_index;
+
+    for (entry_index = 0; entry_index < TINT_RAMP_ENTRIES; entry_index++) {
+        tint_ramp[entry_index] = 0;
+    }
+    for (entry_index = 0; entry_index < TINT_CUBE_BYTES; entry_index++) {
+        tint_cube[entry_index] = TINT_CUBE_GUARD;
+    }
+    for (entry_index = 0; entry_index < TINT_DEST_BYTES; entry_index++) {
+        tint_surface[entry_index] = TINT_SENTINEL;
+    }
+
+    tint_descriptor[0] = (int) tint_ramp;
+    tint_descriptor[1] = (int) level;
+    tint_descriptor[2] = (int) tint_cube;
+    tint_descriptor[3] = TINT_TINT_COLOR;
+}
+
+static void tint_blit(unsigned char *stream, int src_width, int src_rows,
+                      int row_advance)
+{
+    fdps_blit_dispatch(stream, tint_surface, src_width, src_rows,
+                       row_advance + src_width,
+                       (unsigned int) tint_descriptor, TINT_MODE);
+}
+
+/* Level 0 weights the tint through row 0 and the pixel through row 9, and the
+   two decoys sit at the rows a kernel that swapped them would read: that
+   pairing makes 0x00f00030, whose index 0xf3 is never marked. */
+static void tint_level_zero_rows(void)
+{
+    tint_set_ramp(9, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_A);
+    tint_set_ramp(0, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_set_ramp(0, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(9, TINT_TINT_COLOR, TINT_WEIGHT_DST_B);
+    tint_cube[TINT_INDEX_A_A] = TINT_PAINT_A_A;
+}
+
+/* Op 00, length (0x01 & 0x3f) + 1 = 2: one stream byte weighted once, added to
+   the constant tint once, and the resulting palette index written to two
+   consecutive bytes by REP STOSB at 000579bd.  The DEC WORD at 00057a66 leaves
+   the row count 0. */
+static void tint_fill_run_paints_len_bytes(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[1], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[2], TINT_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The blend is computed before the REP, so the fill never reads the surface
+   and two different destination bytes under one run come out identical.  The
+   weight parked at one of those bytes is what a kernel that read [EDI] would
+   pick up instead. */
+static void tint_fill_ignores_the_destination_byte(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_set_ramp(9, 0x11, TINT_WEIGHT_SRC_B);
+    tint_cube[TINT_INDEX_B_A] = TINT_PAINT_B_A;
+    tint_surface[0] = 0x11;
+    tint_surface[1] = 0x22;
+    tint_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[1], TINT_PAINT_A_A);
+}
+
+/* The op that separates this kernel from mode 10 next to it.  Op 11 (0xc1,
+   length 2) is ADD EDI,ECX at 00057a52 with no read and no write, so the two
+   bytes it covers keep the surface's own content and the op 00 that follows
+   lands two bytes on -- and its command byte is read from stream[1], because
+   the skip consumes no pixel byte either.  The ramp entry for the sentinel is
+   weighted here so that a body which tinted the backdrop instead would paint
+   TINT_PAINT_B_A over those two bytes. */
+static void tint_skip_run_leaves_the_destination_alone(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_set_ramp(9, TINT_SENTINEL, TINT_WEIGHT_SRC_B);
+    tint_cube[TINT_INDEX_B_A] = TINT_PAINT_B_A;
+    tint_blit(stream, 4, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[1], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[2], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[3], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[4], TINT_SENTINEL);
+}
+
+/* Op 01 (0x41, length 2): INC EDI then STOSB at 000579f7, twice, so bytes 1
+   and 3 are painted and bytes 0 and 2 keep what they held.  The row is four
+   bytes wide because SUB BX,CX runs twice, at 000579ce and 000579d1. */
+static void tint_stretched_run_paints_the_second_of_each_pair(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_blit(stream, 4, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[1], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[2], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[3], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[4], TINT_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* Op 10 (0x81, length 2): the LODSB is inside the loop at 00057a1b, so the two
+   bytes after the command byte are weighted one per destination byte, in
+   order. */
+static void tint_literal_run_paints_each_stream_byte(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0x81;
+    stream[1] = TINT_SRC_PIXEL;
+    stream[2] = TINT_SRC_PIXEL_2;
+    tint_setup(0);
+    tint_set_ramp(9, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_A);
+    tint_set_ramp(9, TINT_SRC_PIXEL_2, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(0, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_cube[TINT_INDEX_A_A] = TINT_PAINT_A_A;
+    tint_cube[TINT_INDEX_B_A] = TINT_PAINT_B_A;
+    tint_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[1], TINT_PAINT_B_A);
+    CHECK_EQ(tint_surface[2], TINT_SENTINEL);
+}
+
+/* At a level of 8 or less the tint is read from row level and the pixel from
+   row level + 9.  Level 3 marks rows 3 and 12 and puts the decoys where the
+   swap would look; level 8 is the last level on the JBE arm and reaches row
+   17, the last row of the table. */
+static void tint_level_below_nine_reads_the_tint_in_row_level(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(3);
+    tint_set_ramp(12, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_A);
+    tint_set_ramp(3, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_set_ramp(3, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(12, TINT_TINT_COLOR, TINT_WEIGHT_DST_B);
+    tint_cube[TINT_INDEX_A_A] = TINT_PAINT_A_A;
+    tint_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[1], TINT_SENTINEL);
+
+    tint_setup(8);
+    tint_set_ramp(17, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(8, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_cube[TINT_INDEX_B_A] = TINT_PAINT_B_A;
+    tint_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_B_A);
+}
+
+/* Above 8 the row folds to 16 - level (SUB ECX,0x10 / NEG ECX at 00057943)
+   and XCHG EDX,EAX moves the nine-row offset to the tint side: level 12 reads
+   the pixel from row 4 and the tint from row 13, level 9 from rows 7 and 16,
+   and level 16 from rows 0 and 9.  The level 12 case puts its decoys at rows
+   13 and 4, where a kernel that left the offset on the pixel side would
+   look. */
+static void tint_level_above_eight_folds_to_sixteen_minus_it(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TINT_SRC_PIXEL;
+
+    tint_setup(12);
+    tint_set_ramp(4, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_A);
+    tint_set_ramp(13, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_set_ramp(13, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(4, TINT_TINT_COLOR, TINT_WEIGHT_DST_B);
+    tint_cube[TINT_INDEX_A_A] = TINT_PAINT_A_A;
+    tint_blit(stream, 1, 1, 0);
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+
+    tint_setup(9);
+    tint_set_ramp(7, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_B);
+    tint_set_ramp(16, TINT_TINT_COLOR, TINT_WEIGHT_DST_A);
+    tint_cube[TINT_INDEX_B_A] = TINT_PAINT_B_A;
+    tint_blit(stream, 1, 1, 0);
+    CHECK_EQ(tint_surface[0], TINT_PAINT_B_A);
+
+    tint_setup(16);
+    tint_set_ramp(0, TINT_SRC_PIXEL, TINT_WEIGHT_SRC_A);
+    tint_set_ramp(9, TINT_TINT_COLOR, TINT_WEIGHT_DST_B);
+    tint_cube[TINT_INDEX_A_B] = TINT_PAINT_A_B;
+    tint_blit(stream, 1, 1, 0);
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_B);
+}
+
+/* The cube index is green-major: 0x00305070 folds to 0x00030507 and the
+   assembly's (v >> 12) | (v & 0xffff) at 000579ae..000579b6 puts that at
+   0x537, not the 0x357 an (r << 8) | (g << 4) | b spelling would read, which
+   is marked with a different byte. */
+static void tint_cube_index_is_green_major(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_cube[0x357] = 0x3c;
+    tint_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+}
+
+/* The dispatcher's pitch - width (5 - 2 = 3) is published into the global on
+   entry (MOV [dst_row_advance],EDX at 00057916) and read back at every row end
+   (ADD EDI,[dst_row_advance] at 00057a60), so the second row starts three
+   bytes past where the first one stopped, the row count is consumed to zero
+   and the width is re-read (MOV BX,[src_width] at 00057978) for the second
+   row. */
+static void tint_row_advance_is_published_and_applied(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = TINT_SRC_PIXEL;
+    stream[2] = 0x01;
+    stream[3] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_blit(stream, 2, 2, 3);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[1], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[2], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[4], TINT_SENTINEL);
+    CHECK_EQ(tint_surface[5], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[6], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[7], TINT_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL at 00057992 over a command byte whose low six bits are all
+   set: 64 pixels is the longest run the format encodes and zero cannot be
+   encoded at all. */
+static void tint_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = TINT_SRC_PIXEL;
+    tint_setup(0);
+    tint_level_zero_rows();
+    tint_blit(stream, 64, 1, 0);
+
+    CHECK_EQ(tint_surface[0], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[63], TINT_PAINT_A_A);
+    CHECK_EQ(tint_surface[64], TINT_SENTINEL);
+}
+
 void run_rlemix_tests(void)
 {
     RUN_TEST(tran_fill_run_blends_len_bytes);
@@ -753,4 +1106,14 @@ void run_rlemix_tests(void)
     RUN_TEST(tsb_cube_index_is_green_major);
     RUN_TEST(tsb_row_advance_is_published_and_applied);
     RUN_TEST(tsb_run_length_tops_out_at_64);
+    RUN_TEST(tint_fill_run_paints_len_bytes);
+    RUN_TEST(tint_fill_ignores_the_destination_byte);
+    RUN_TEST(tint_skip_run_leaves_the_destination_alone);
+    RUN_TEST(tint_stretched_run_paints_the_second_of_each_pair);
+    RUN_TEST(tint_literal_run_paints_each_stream_byte);
+    RUN_TEST(tint_level_below_nine_reads_the_tint_in_row_level);
+    RUN_TEST(tint_level_above_eight_folds_to_sixteen_minus_it);
+    RUN_TEST(tint_cube_index_is_green_major);
+    RUN_TEST(tint_row_advance_is_published_and_applied);
+    RUN_TEST(tint_run_length_tops_out_at_64);
 }
