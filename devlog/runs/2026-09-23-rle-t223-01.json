@@ -1,0 +1,961 @@
+{
+  "workflow": "tools/rle_asm/rle_ticket223.js",
+  "run_id": "wf_e34ec592-97f",
+  "report": {
+    "label": "t223-01",
+    "transcribed": [
+      {
+        "address": "000568db",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056a0d",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056a8d",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056b25",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056bb7",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056c5e",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056dc9",
+        "open_concerns": 0
+      },
+      {
+        "address": "00056e2a",
+        "open_concerns": 0
+      },
+      {
+        "address": "00057114",
+        "open_concerns": 0
+      },
+      {
+        "address": "00057551",
+        "open_concerns": 0
+      },
+      {
+        "address": "000575ed",
+        "open_concerns": 0
+      },
+      {
+        "address": "0005761b",
+        "open_concerns": 0
+      },
+      {
+        "address": "00057793",
+        "open_concerns": 0
+      },
+      {
+        "address": "00057916",
+        "open_concerns": 0
+      },
+      {
+        "address": "00057a74",
+        "open_concerns": 1
+      }
+    ],
+    "swept": [
+      {
+        "address": "00057a74",
+        "still_open": 1,
+        "note": "The one open concern stays open, and the resolution text is added to workspace\\rle_asm\\verdicts\\00057a74.json. The transcription side is settled. workspace\\rle_asm\\frag\\tcr.asm is unchanged and its hash still matches frag_sha256. The instruction check passed: #138 is written 'jmp short $+129', assembles to EB 7F + 3 NOPs and lands on #196. The displacement is relative to the jump's own position, so joining the fragments into src\\rlemix.asm cannot change it. The earlier stamp still holds: verify-frag returned ok with 1 open concern. No other fragment runs into this. The only other forward branches at D=127 are in 00057793 and 00057916. Both are original long JB jumps written 'jb near ptr', and rebuild_info\\build_flags.md already covers that case. Two things are still missing, and neither can be settled by reading evidence. First, rebuild_info\\build_flags.md (the WASM writing rules) and pitfalls.md do not yet record that WASM 10.0a widens a forward 'jmp short label' at D=127 to a 5-byte E9 jump without a warning. The orchestrator has to accept the $-relative form and write that fact down. Second, how a short conditional jump behaves at D=127 was never measured. It matters only for the documentation, because this routine has no short conditional jump at that distance."
+      }
+    ],
+    "landed": true,
+    "tests": [
+      {
+        "address": "00056a0d",
+        "ported": 9,
+        "uncovered": 0,
+        "note": "All 9 fdps_rle_blit_passthrough cases in tests/rle.c are now covered by pass_* cases in tests/rlebase.c. Each one calls fdps_blit_dispatch with mode 0 and pitch set to advance + width. The negative-advance case uses pitch -2, which gives an advance of -4. The fixtures are PASS_MODE, PASS_SENTINEL, pass_surface[80] and pass_clear(), placed at the top of the file. Expected values were checked against the listing at 00056a0d and come from it, not from running the code. build_emit --only rlebase: 42 checks, 0 failed, [result] PASS. verify-tests printed ok: true. The verdict file is workspace/rle_asm/tests/00056a0d.json. No findings: the assembly matched every claim in the C cases."
+      },
+      {
+        "address": "00056a8d",
+        "ported": 9,
+        "uncovered": 0,
+        "note": "I ported all 9 remap_ cases in tests/rlecolor.c to mode-1 fdps_blit_dispatch cases. They are prefixed rmsb_ in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlepal.c. Each case passes width, rows and pitch = advance + width, with rmsb_table as the operand. All expected values were checked against the 00056a8d listing. build_emit all --only rlepal: [result] PASS, 40 checks, 0 failed. verify-tests: ok true. No findings and nothing uncovered. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056a8d.json."
+      },
+      {
+        "address": "00056b25",
+        "ported": 8,
+        "uncovered": 0,
+        "note": "In tests/rlepal.c, all 8 old palremap_* cases for fdps_rle_blit_with_palette_remap now go through fdps_blit_dispatch as rmpal_* cases (mode 2). The address-by-address comments were checked against the 00056b25 listing and they match. Each old case with advance a became a dispatch with pitch a + width. The --only rlepal build ran all 77 checks with 0 failed and ended [result] PASS. Nothing was left uncovered and there are no findings. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056b25.json, and verify-tests printed ok: true."
+      },
+      {
+        "address": "00056bb7",
+        "ported": 11,
+        "uncovered": 0,
+        "note": "All 11 recolor_* cases in tests/rlecolor.c now go through fdps_blit_dispatch in mode 3. The new cases are rcol_* in tests/rlepal.c, with the helpers rcol_setup, rcol_dispatch and RCOL_OPERANDS, and each is registered in run_rlepal_tests. The dispatch arguments are the C case's width and rows, pitch = advance + width, and the three packed operand bytes (tint +0x1c, base +0x1d, mask +0x1e). Every expectation was checked against the 00056bb7 listing: MOV DH/DL/AH from [EBP+1Ch/1Dh/1Eh], the 8-bit ADD/AND/ADD triple on all three writing paths, op 11 as a skip that reads no stream byte, and ADD EDI,EBP as the row advance. None differed from what the C cases asserted, so there are no findings. build_emit.py all --only rlepal: [result] PASS, 123 checks, 0 failed (77 existing + 46 new). The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056bb7.json. verify-tests 00056bb7 printed ok: true."
+      },
+      {
+        "address": "00056c5e",
+        "ported": 9,
+        "uncovered": 0,
+        "note": "All 9 fdps_rle_blit_scaled cases from tests/rle.c are now tests in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. Each one calls fdps_blit_dispatch with mode 4, gives the source width, source height and pitch as the dispatch's width, rows and pitch arguments, and packs the destination width and height into the mode operand (width in the low word, height in the high word). All 9 are registered in run_rlebase_tests, and each old case maps to one new case, prefixed scal_.\n\nEvery expected value was traced by hand through the 00056c5e listing and fdps_rle_skip_row; the assembly agrees with every assertion the C translation made, so there are no findings. I added two extra checks that also come from the assembly: the source row count the dispatcher publishes is still 1 after the one-to-one case, because the kernel only reads it, and bytes 4 and 5 are left untouched in the vertical-downscale case.\n\nThe build with --only rlebase ended [result] PASS: 96 checks, 0 failed. The results file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056c5e.json, verify-tests printed \"ok\": true, and no case was left uncovered."
+      },
+      {
+        "address": "00056dc9",
+        "ported": 12,
+        "uncovered": 0,
+        "note": "I ported the 10 direct fdps_rle_skip_row cases in tests/rle.c to 10 new skrow_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. They are registered in run_rlebase_tests. The rle.c cases scaled_vertical_downscale_drops_a_source_row and scaled_partial_row_resyncs_through_skip_row also reach skip_row indirectly; the verdict maps them to the scal_* cases that were already ported, with no new cases for them. Every skrow_* case runs through mode 4 with 2 source rows drawn to 2 destination rows. That makes the scaled kernel call skip_row exactly once after each drawn row, so the second row is decoded from wherever skip_row left the cursor. Row 0 is the stream the C case used and row 1 is a full-width fill of 0xee drawn at the same width. The checks look for that run of 0xee at byte SKROW_PITCH (72) of the destination, followed by the sentinel byte. Both wrap cases carry a complete second row because skip_row also walks the last row. The zero-width case uses a 2050-byte stream with a 1-wide destination; a 0-wide destination would make the draw's own DEC BX wrap. The globals case cannot seed remaining_rows=0x1234, because the dispatcher overwrites it and a source height of 0x1234 would make the kernel walk 0x1234 rows. It asserts instead that src_width 3 and the published height 2 are unchanged after both skip_row calls; this is recorded under findings. The assembly matched every expectation from the C cases. build_emit --only rlebase ended [result] PASS with 128 checks and 0 failed, and verify-tests printed ok:true. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056dc9.json."
+      },
+      {
+        "address": "00056e2a",
+        "ported": 16,
+        "uncovered": 0,
+        "note": "I ported all 16 mode-5 cases (rotate_*) from tests/rlerot.c to tests/rleturn.c as rotated_* cases. Each case now calls fdps_blit_dispatch with mode 5, its width and row count, and pitch 16. The sixth argument packs dx in the low word and dy in the high word (the ROTATED_OPERAND macro). I also added #include \"rlerot.h\" to rleturn.c, because the rotation step globals are declared there. I re-derived every expected value from the listing at 00056e2a: the four quadrant arms, the single SUB of 0x1000 per carry, the extra store at 00056f79 that fills the diagonal gap, the row accumulators carrying from row to row and being cleared on entry, and the lengths of op 00, 01, 10 and 11. The dispatcher zeroes ECX, which the loop needs. It never touches the row accumulators, so the case that clears them on entry still works by setting them before the dispatch. Nothing is uncovered and there are no findings. One comment reference is corrected: the NEG EBP in the quarter-turn arm is at 00056e91, not 00056efa. The rleturn run gave PASS, 73 checks, 0 failed, and verify-tests printed ok: true. The only committed file is tests/rleturn.c; the verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056e2a.json."
+      },
+      {
+        "address": "00057114",
+        "ported": 18,
+        "uncovered": 0,
+        "note": "I ported all 18 of the old rotscale_* cases in tests/rlerot.c to tests/rleturn.c, one new case each. They are named rotated_scaled_* and are listed in run_rleturn_tests. Each one goes through fdps_blit_dispatch with mode 6. The old cases set the source width and row count by hand; the new ones pass them to the dispatcher with pitch 16 and no row advance. The sixth argument is a pointer to a new 4-int record in the test file (destination width, destination height, dx, dy); the kernel reads it through MOV EBP,[EBP+1Ch]. I rechecked every expected value by tracing the listing at 00057114: the horizontal and vertical counters, the skip_row resync, the gap-filling store at 000572dc, and the four sign arms. No old assertion turned out to be something the dispatcher cannot produce, so nothing is uncovered. The assembly does what the old cases said, so there are no findings. The build and run of the rleturn tests ended [result] PASS with 155 checks, 0 failed and 0 compiler warnings in RLETURN.C, and verify-tests printed \"ok\": true. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057114.json"
+      },
+      {
+        "address": "00057551",
+        "ported": 7,
+        "uncovered": 0,
+        "note": "All 7 mirror_* cases from tests/rle.c are now mirh_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. Each calls fdps_blit_dispatch with mode 7 and operand 0. Mode 7 gets no row advance, so each C case's width, rows and pitch are passed as src_width, src_rows and dest_pitch unchanged. Each destination is 8 bytes into an 80-byte surface pre-filled with a sentinel value. I worked out every expected value from the 00057551 listing: the first column is ADD EDI,EBX / DEC EDI, the fill walks left with STD / REP STOSB, the stretched op is DEC / store / DEC, a skip is SUB EDI,ECX, and the end of row is POP EDI / ADD EDI,EDX with the full pitch zero-extended. All of them matched what the C cases claimed, so there are no findings and nothing is uncovered. Build with --only rlebase: [result] PASS, 171 checks, 0 failed; the count includes the 42 new checks. verify-tests returned ok: true. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057551.json."
+      },
+      {
+        "address": "000575ed",
+        "ported": 4,
+        "uncovered": 0,
+        "note": "All four tests for fdps_rle_blit_mirrored_vertical in tests/rle.c were ported: vmirror_reflects_the_rows, vmirror_single_row_starts_at_the_pointer, vmirror_advance_pays_back_the_width and vmirror_keeps_column_order_within_a_row. Each now calls fdps_blit_dispatch with mode 8, operand 0, and the same width, rows and pitch as before; mode 8 gets no row advance, so nothing had to be converted. The new tests are mirv_* in tests/rlebase.c, with their own mirv_surface and MIRV_BASE, and are registered in run_rlebase_tests. Expected values were worked out from the assembly: the start is pitch*(rows-1) because DEC DX runs before MUL EDX; the row advance is -(pitch+width) from ADD DX then NEG EDX; then it tail-jumps into the pass-through kernel. None of the assertions depended on anything the dispatcher cannot produce, so nothing is uncovered, and the assembly matched what the C translation claimed, so there are no findings. The build and run (build_emit.py all --only rlebase) ended [result] PASS, 210 checks, 0 failed. wf_state verify-tests reported ok: true. The record is at C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\000575ed.json."
+      },
+      {
+        "address": "0005761b",
+        "ported": 10,
+        "uncovered": 0,
+        "note": "I ported all 10 C cases for fdps_rle_blit_translucent from tests/rleblend.c into tests/rlemix.c. Each became one tran_* case that calls fdps_blit_dispatch with mode 9 and dest_pitch = advance + width. The descriptor {ramp, level, cube} is the mode operand. The fixtures carry a TRAN_ prefix and sit at the top of the file. Expected values were re-derived from the 0005761b listing: the level fold with its 0x2400 nine-row offset, the green-major cube index, the length subtracted twice for op 01, and the row advance published on entry and read back at 0005777f. The build with --only rlemix gave [result] PASS: 39 checks, 0 failed, and RLEMIX.C compiled with 0 warnings. Nothing is uncovered and there are no findings. The verdict is at C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\0005761b.json, and verify-tests printed ok: true."
+      },
+      {
+        "address": "00057793",
+        "ported": 11,
+        "uncovered": 0,
+        "note": "I ported all 11 tint_* cases in tests/rleblend.c that call fdps_rle_blit_tint_sprite_and_backdrop. Each one became a tsb_* case in tests/rlemix.c that calls fdps_blit_dispatch with mode 10, using its own fixtures (tsb_ramp, tsb_cube, tsb_surface and a four-dword tsb_descriptor with the tint at +0xc). The C cases' row advance becomes pitch = advance + width. I checked the expected values against the listing at 00057793: the tint goes through the row the level names and the pixel through the row nine on, 0x2400 is swapped by XCHG above level 8, op 11 reads [EDI], the fill is REP STOSB, the stretched run does SUB BX,CX twice, and the advance is published at entry and added at 00057902. The build and test run (build_emit.py all --only rlemix) passed with 80 checks and 0 failed; 41 of those checks are the new cases. Nothing is uncovered and there are no findings. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057793.json, and verify-tests printed ok: true."
+      },
+      {
+        "address": "00057916",
+        "ported": 10,
+        "uncovered": 0,
+        "note": "Mapped all 10 sprite_tint_* C cases in tests/rleblend.c to tint_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlemix.c, one each. They dispatch mode 11 with a four-dword descriptor (ramp, level, cube, tint colour) and pitch = advance + width. The block has its own TINT_* fixtures. Expected values come from the 00057916 listing: tint row = level for levels up to 8, pixel row = level + 9, the rows swap above 8 after the 16 - level fold, and op 11 is a skip (ADD EDI,ECX, no stream byte read). The build with --only rlemix ended [result] PASS: 119 checks, 0 failed. verify-tests printed ok: true. There were no findings and nothing is uncovered. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057916.json."
+      },
+      {
+        "address": "00057a74",
+        "ported": 14,
+        "uncovered": 0,
+        "note": "All 14 C cases for fdps_rle_blit_translucent_color_range (range_* in tests/rleblend.c) are now tcr_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlemix.c. Each one calls fdps_blit_dispatch with mode 12 and a five-dword descriptor, and all are registered in run_rlemix_tests. The fixtures belong to this block only (tcr_ramp, tcr_cube, tcr_surface, tcr_descriptor). I also added #include \"rleblend.h\" to the file, because the range-min/max globals are declared there. Expected values were checked against the 00057a74 listing: signed JL/JLE/JG compares, 16-bit bound reads at +0xc/+0x10, raw REP STOSB / INC EDI+STOSB / STOSB when a pixel is out of range, and the mode-9 row assignment. They match what the C cases claimed, so there are no findings. Build: build_emit.py all --only rlemix gave [result] PASS, 174 checks, 0 failed, and RLEMIX.C compiled with 0 warnings. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057a74.json. verify-tests printed \"ok\": true."
+      }
+    ],
+    "final": {
+      "coverage": "{\n  \"ok\": true,\n  \"unclaimed\": {}\n}",
+      "coverage_ok": true,
+      "gate": "PASS. The build gate for the unit-test image (emittest) passed at commit a5c5446. The result was written 2026-09-23T23:26:26 and the command exited with code 0.\n\nNo suite or check failed.\n- The build, errors, undefined and warnings checks all passed. There were 0 errors, 0 new warnings and no undefined symbols. The first link resolved everything, so no stubs were needed.\n- EMITTEST.EXE is 2,788,105 bytes. It was not compared against an image baseline because this target has none by design.\n- These suites passed: build_gate.selftest, fdps_build.selftest, code_emit.selftest, code_emit.stubs, code_emit.types, code_emit.run, data_emit.selftest, data_emit.check, rle_asm.selftest, rle_asm.switch_selftest and rle_asm.check.\n- code_emit.run ran 23,948 checks with 0 failures in 901s.\n- ail_link.selftest, fdps_build.run and ail_link.run were skipped because their targets (ailsmoke, smoke) were not selected.\n\nFiles:\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\build_gate\\result.json\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\gate_final.log\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\code_emit\\out\\EMITTEST.EXE"
+    },
+    "stopped": null,
+    "landCommit": "150ef7f1b14c47ce0686ff273bb5660328fdaed1",
+    "unfinished": [],
+    "complete": true
+  },
+  "agents": [
+    {
+      "index": 1,
+      "phase": "Preflight",
+      "label": "selftest",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "[selftest] identical routine passes ok\n[selftest] the other reg,reg encoding passes ok\n[selftest] cmp ax,0 in its imm8 form passes ok\n[selftest] a different instruction fails ok\n[selftest] a dropped NOP fails ok\n[selftest] a long form where the original is short fails ok\n[selftest] a branch one byte out fails ok\n[selftest] a backward branch one byte out fails ok\n[selftest] a missing relocation fails ok\n[selftest] a relocation to another symbol fails ok\n[selftest] a relocation to another offset fails ok\n[selftest] an extra relocation or instruction fails ok\n[selftest] a relocation the original does not have fails ok\n[selftest] a call to another routine fails ok\n[selftest] a trailing extra instruction fails ok\n[selftest] a missing final instruction fails ok\n[selftest] an image address in the source fails ok\n[selftest] constants outside the image pass ok\n[selftest] a DB in the code fails ok\n[selftest] a labelled DD fails ok\n[selftest] OMF reader: code, publics, both fixup kinds ok\n[selftest] OMF side: relative call and absolute relocation are told apart ok\n[selftest] OMF reader refuses a fixup before any data ok\n[selftest] OMF reader refuses a module that defines data ok\n[result] PASS",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 2,
+      "phase": "Preflight",
+      "label": "status",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "toolchain_unreachable": false,
+        "output": "{\"ok\": true, \"routines\": [{\"address\":\"000568db\",\"name\":\"fdps_blit_dispatch\",\"file\":\"rledisp\",\"prefix\":\"disp\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"n/a\"},{\"address\":\"00056a0d\",\"name\":\"fdps_rle_blit_passthrough\",\"file\":\"rlebase\",\"prefix\":\"pass\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056a8d\",\"name\":\"fdps_rle_blit_remap_sprite_and_backdrop\",\"file\":\"rlepal\",\"prefix\":\"rmsb\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056b25\",\"name\":\"fdps_rle_blit_with_palette_remap\",\"file\":\"rlepal\",\"prefix\":\"rmpal\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056bb7\",\"name\":\"fdps_rle_blit_recolor\",\"file\":\"rlepal\",\"prefix\":\"rcol\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056c5e\",\"name\":\"fdps_rle_blit_scaled\",\"file\":\"rlebase\",\"prefix\":\"scal\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056dc9\",\"name\":\"fdps_rle_skip_row\",\"file\":\"rlebase\",\"prefix\":\"skip\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00056e2a\",\"name\":\"fdps_rle_blit_rotated\",\"file\":\"rleturn\",\"prefix\":\"rot\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00057114\",\"name\":\"fdps_rle_blit_rotated_scaled\",\"file\":\"rleturn\",\"prefix\":\"rots\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00057551\",\"name\":\"fdps_rle_blit_mirrored_horizontal\",\"file\":\"rlebase\",\"prefix\":\"mirh\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"000575ed\",\"name\":\"fdps_rle_blit_mirrored_vertical\",\"file\":\"rlebase\",\"prefix\":\"mirv\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"0005761b\",\"name\":\"fdps_rle_blit_translucent\",\"file\":\"rlemix\",\"prefix\":\"tran\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00057793\",\"name\":\"fdps_rle_blit_tint_sprite_and_backdrop\",\"file\":\"rlemix\",\"prefix\":\"tsb\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00057916\",\"name\":\"fdps_rle_blit_tint\",\"file\":\"rlemix\",\"prefix\":\"tint\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"},{\"address\":\"00057a74\",\"name\":\"fdps_rle_blit_translucent_color_range\",\"file\":\"rlemix\",\"prefix\":\"tcr\",\"frag\":\"none\",\"open_concerns\":0,\"tests\":\"none\"}], \"landed\": false}"
+      }
+    },
+    {
+      "index": 3,
+      "phase": "Transcribe",
+      "label": "transcribe disp",
+      "result": {
+        "address": "000568db",
+        "status": "done",
+        "instructions": 147,
+        "open_concerns": 0,
+        "note": "fdps_blit_dispatch transcribed to workspace/rle_asm/frag/disp.asm; 147 instructions, 13 labels, stamp ok with no problems."
+      }
+    },
+    {
+      "index": 4,
+      "phase": "Transcribe",
+      "label": "transcribe pass",
+      "result": {
+        "address": "00056a0d",
+        "status": "done",
+        "instructions": 66,
+        "open_concerns": 0,
+        "note": "pass.asm transcribed, 66 instructions incl. 18 NOPs, 7 pass_ labels; stamp ok, check pass. Verdict: workspace/rle_asm/verdicts/00056a0d.json"
+      }
+    },
+    {
+      "index": 5,
+      "phase": "Transcribe",
+      "label": "transcribe rmsb",
+      "result": {
+        "address": "00056a8d",
+        "status": "done",
+        "instructions": 75,
+        "open_concerns": 0,
+        "note": "workspace\\rle_asm\\frag\\rmsb.asm stamped ok on the first try: 75 instructions, 9 labels. [EAX+EBP*1] is written with an explicit *1 so EBP stays the index register."
+      }
+    },
+    {
+      "index": 6,
+      "phase": "Transcribe",
+      "label": "transcribe rmpal",
+      "result": {
+        "address": "00056b25",
+        "status": "done",
+        "instructions": 72,
+        "open_concerns": 0,
+        "note": "workspace\\rle_asm\\frag\\rmpal.asm stamped ok: all 72 instructions and 8 labels match, no db, table read written as [eax+ebp] to keep the 3-byte form; no concerns"
+      }
+    },
+    {
+      "index": 7,
+      "phase": "Transcribe",
+      "label": "transcribe rcol",
+      "result": {
+        "address": "00056bb7",
+        "status": "done",
+        "instructions": 82,
+        "open_concerns": 0,
+        "note": "Wrote workspace\\rle_asm\\frag\\rcol.asm (8 labels, 82 instructions, NOPs included); the stamp printed ok, and the verdict is in workspace\\rle_asm\\verdicts\\00056bb7.json."
+      }
+    },
+    {
+      "index": 8,
+      "phase": "Transcribe",
+      "label": "transcribe scal",
+      "result": {
+        "address": "00056c5e",
+        "status": "done",
+        "instructions": 139,
+        "open_concerns": 0,
+        "note": "scal.asm transcribed: 139 instructions, 17 scal_ labels, stamp ok. Confirmed from its listing that fdps_rle_skip_row preserves DX and BP."
+      }
+    },
+    {
+      "index": 9,
+      "phase": "Transcribe",
+      "label": "transcribe skip",
+      "result": {
+        "address": "00056dc9",
+        "status": "done",
+        "instructions": 49,
+        "open_concerns": 0,
+        "note": "skip.asm transcribed with 4 labels and 12 NOPs of padding. The stamp returned ok and the check passed for all 49 instructions. The only entry requirement noted is that ECX bits 8..31 are zero."
+      }
+    },
+    {
+      "index": 10,
+      "phase": "Transcribe",
+      "label": "transcribe rot",
+      "result": {
+        "address": "00056e2a",
+        "status": "done",
+        "instructions": 231,
+        "open_concerns": 0,
+        "note": "rot.asm stamped ok: all 231 instructions match, 26 labels. Plain JMP at #25 stays long in WASM. Notes cover the dead vscale_accumulator load, EBP being destroyed and ECX needing zero high bits."
+      }
+    },
+    {
+      "index": 11,
+      "phase": "Transcribe",
+      "label": "transcribe rots",
+      "result": {
+        "address": "00057114",
+        "status": "done",
+        "instructions": 305,
+        "open_concerns": 0,
+        "note": "rots.asm: all 305 instructions match on the first stamp, no failures and no concerns. It reads [EBP+1Ch] as a record pointer and never restores EBP."
+      }
+    },
+    {
+      "index": 12,
+      "phase": "Transcribe",
+      "label": "transcribe mirh",
+      "result": {
+        "address": "00057551",
+        "status": "done",
+        "instructions": 79,
+        "open_concerns": 0,
+        "note": "mirh.asm: all 79 instructions match (8 labels, NOPs kept, stamp ok). Only difference: reg,reg direction bits, same length."
+      }
+    },
+    {
+      "index": 13,
+      "phase": "Transcribe",
+      "label": "transcribe mirv",
+      "result": {
+        "address": "000575ed",
+        "status": "done",
+        "instructions": 12,
+        "open_concerns": 0,
+        "note": "mirv.asm: 12 instructions, no labels, ends in a long tail JMP to fdps_rle_blit_passthrough (extrn near). Stamp printed ok and the check passed."
+      }
+    },
+    {
+      "index": 14,
+      "phase": "Transcribe",
+      "label": "transcribe tran",
+      "result": {
+        "address": "0005761b",
+        "status": "done",
+        "instructions": 148,
+        "open_concerns": 0,
+        "note": "tran.asm transcribed (148 insns, 10 labels, no db); stamp ok, checker PASS; frame slots 08h..1Ch used as scratch, documented in header."
+      }
+    },
+    {
+      "index": 15,
+      "phase": "Transcribe",
+      "label": "transcribe tsb",
+      "result": {
+        "address": "00057793",
+        "status": "done",
+        "instructions": 150,
+        "open_concerns": 0,
+        "note": "tsb.asm stamped ok, all 150 instructions match. Op 11 tints the backdrop instead of skipping; the JB into op 10/11 is written near ptr (displacement exactly 127). No concerns."
+      }
+    },
+    {
+      "index": 16,
+      "phase": "Transcribe",
+      "label": "transcribe tint",
+      "result": {
+        "address": "00057916",
+        "status": "done",
+        "instructions": 135,
+        "open_concerns": 0,
+        "note": "tint.asm stamped ok (135 instr, 9 labels); forward JB (disp 127) written jb near ptr; [ebp+1Ch] reused for tint colour then weighted tint."
+      }
+    },
+    {
+      "index": 17,
+      "phase": "Transcribe",
+      "label": "transcribe tcr",
+      "result": {
+        "address": "00057a74",
+        "status": "done",
+        "instructions": 200,
+        "open_concerns": 1,
+        "note": "tcr.asm stamp ok. The #138 JMP (D=127) needed 'jmp short $+129': WASM widened the label form to 5 bytes without warning. Concern open: new WASM fact to add to build_flags/pitfalls."
+      }
+    },
+    {
+      "index": 18,
+      "phase": "Transcribe",
+      "label": "verify rmsb",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 19,
+      "phase": "Transcribe",
+      "label": "verify rmpal",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 20,
+      "phase": "Transcribe",
+      "label": "verify pass",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 21,
+      "phase": "Transcribe",
+      "label": "verify disp",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 22,
+      "phase": "Transcribe",
+      "label": "verify rcol",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 23,
+      "phase": "Transcribe",
+      "label": "verify scal",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 24,
+      "phase": "Transcribe",
+      "label": "verify mirh",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 25,
+      "phase": "Transcribe",
+      "label": "verify skip",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 26,
+      "phase": "Transcribe",
+      "label": "verify mirv",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 27,
+      "phase": "Transcribe",
+      "label": "verify rot",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 28,
+      "phase": "Transcribe",
+      "label": "verify tran",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 29,
+      "phase": "Transcribe",
+      "label": "verify rots",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 30,
+      "phase": "Transcribe",
+      "label": "verify tint",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 31,
+      "phase": "Transcribe",
+      "label": "verify tsb",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 32,
+      "phase": "Transcribe",
+      "label": "verify tcr",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 1\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 33,
+      "phase": "Sweep",
+      "label": "sweep tcr",
+      "result": {
+        "address": "00057a74",
+        "resolved": 0,
+        "still_open": 1,
+        "fragment_changed": false,
+        "note": "The one open concern stays open, and the resolution text is added to workspace\\rle_asm\\verdicts\\00057a74.json. The transcription side is settled. workspace\\rle_asm\\frag\\tcr.asm is unchanged and its hash still matches frag_sha256. The instruction check passed: #138 is written 'jmp short $+129', assembles to EB 7F + 3 NOPs and lands on #196. The displacement is relative to the jump's own position, so joining the fragments into src\\rlemix.asm cannot change it. The earlier stamp still holds: verify-frag returned ok with 1 open concern. No other fragment runs into this. The only other forward branches at D=127 are in 00057793 and 00057916. Both are original long JB jumps written 'jb near ptr', and rebuild_info\\build_flags.md already covers that case. Two things are still missing, and neither can be settled by reading evidence. First, rebuild_info\\build_flags.md (the WASM writing rules) and pitfalls.md do not yet record that WASM 10.0a widens a forward 'jmp short label' at D=127 to a 5-byte E9 jump without a warning. The orchestrator has to accept the $-relative form and write that fact down. Second, how a short conditional jump behaves at D=127 was never measured. It matters only for the documentation, because this routine has no short conditional jump at that distance."
+      }
+    },
+    {
+      "index": 34,
+      "phase": "Transcribe",
+      "label": "verify tcr",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"open_concerns\": 1\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 35,
+      "phase": "Land",
+      "label": "land",
+      "result": {
+        "status": "gate_failed",
+        "commit": "",
+        "failures": [
+          "== src/rleturn.asm",
+          "  00057114 fdps_rle_blit_rotated_scaled: FAIL",
+          "    #30 +0x76: length 5 vs 2 (jmp #61 | jmp #61)",
+          "[result] FAIL"
+        ],
+        "note": "Step 1: the tree was clean apart from the allowed landing set. Step 2: land.py printed PASS and wrote the five files: src/rledisp.asm, src/rlebase.asm, src/rlepal.asm, src/rleturn.asm and src/rlemix.asm. Step 3: switch_impl status printed 'asm'. Step 4 failed: asm_match check --fresh on the joined files passed 14 of 15 routines. fdps_rle_blit_rotated_scaled (0x00057114) in src/rleturn.asm fails at instruction #30 (+0x76). The 'jmp #61' there assembles to a 5-byte near jmp, but the original uses a 2-byte short jmp. This is probably the joined-file effect the task warned about: that fragment's check likely treated the jump as a fixup. After joining, the assembler sizes it as a near jump, so the source may need an explicit 'short'. I did not verify this, and I did not edit any source. Steps 5-7 did not run (no build gate, no commit, no verify-land). The five landed src/*.asm files stay uncommitted in the working tree, as instructed."
+      }
+    },
+    {
+      "index": 36,
+      "phase": "Land",
+      "label": "land fix",
+      "result": "FIXED\n\n**Cause:** In the original, instruction #30 of fdps_rle_blit_rotated_scaled (0x5718a, `jmp rots_store_magnitudes`) is a 5-byte long jump. The fragment gave no size, so WASM chose one. On its own the fragment assembles long and passes. Once it sits after fdps_rle_blit_rotated in src\\rleturn.asm, WASM shortens the jump to 2 bytes. I reproduced this with `asm_match.py frag` on both files. The tools, tests and C sources are not at fault. The rule in rebuild_info\\build_flags.md (\"a JMP needs no handling, WASM keeps it long\", which names 0x5718a) holds only for a fragment assembled alone. The rule and the verdict note repeating it should be corrected by a person. I did not edit them.\n\n**Change:** In workspace\\rle_asm\\frag\\rots.asm, that line is now `jmp near ptr rots_store_magnitudes`, with a comment. I re-stamped 00057114 (`\"ok\": true`) and deleted the five untracked src\\rle*.asm files.\n\n**Checks:** The changed fragment passes alone. A scratch copy of rleturn.asm with the same one-line change passes for both routines, and `land.py --check` reports PASS. The other four files already passed after the failed landing. A second landing should pass."
+    },
+    {
+      "index": 37,
+      "phase": "Land",
+      "label": "land (2)",
+      "result": {
+        "commit": "150ef7f1b14c47ce0686ff273bb5660328fdaed1",
+        "status": "committed",
+        "failures": [],
+        "note": "Committed all 25 files in the landing set. Before starting, the tree only had changes inside the allowed set. land.py joined the fragments into the five src/*.asm files and printed PASS. switch_impl status printed asm. asm_match check --fresh passed all 15 routines against FDPS.LE. The full emittest gate passed: result.json verdict is PASS, rle_asm.check and code_emit.run both pass, and code_emit.run finished 23286 checks with 0 failures in 929s. ail_link.selftest, fdps_build.run and ail_link.run were skipped because their targets were not selected. wf_state verify-land returned \"ok\": true. My first commit try failed because of a PowerShell here-string/stdin mistake, and nothing was committed. I then committed with the exact message from a UTF-8 file in the scratchpad with -F, without --no-verify. The tree is clean after the commit. No source was edited."
+      }
+    },
+    {
+      "index": 38,
+      "phase": "Land",
+      "label": "verify land",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": []\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 39,
+      "phase": "Tests",
+      "label": "tests pass",
+      "result": {
+        "address": "00056a0d",
+        "status": "committed",
+        "ported": 9,
+        "uncovered": 0,
+        "commit": "9bb230e67a87f249af96d36486d571915c71bdbc",
+        "note": "All 9 fdps_rle_blit_passthrough cases in tests/rle.c are now covered by pass_* cases in tests/rlebase.c. Each one calls fdps_blit_dispatch with mode 0 and pitch set to advance + width. The negative-advance case uses pitch -2, which gives an advance of -4. The fixtures are PASS_MODE, PASS_SENTINEL, pass_surface[80] and pass_clear(), placed at the top of the file. Expected values were checked against the listing at 00056a0d and come from it, not from running the code. build_emit --only rlebase: 42 checks, 0 failed, [result] PASS. verify-tests printed ok: true. The verdict file is workspace/rle_asm/tests/00056a0d.json. No findings: the assembly matched every claim in the C cases."
+      }
+    },
+    {
+      "index": 40,
+      "phase": "Tests",
+      "label": "verify tests pass",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 41,
+      "phase": "Tests",
+      "label": "tests rmsb",
+      "result": {
+        "address": "00056a8d",
+        "status": "committed",
+        "ported": 9,
+        "uncovered": 0,
+        "commit": "05ff693",
+        "note": "I ported all 9 remap_ cases in tests/rlecolor.c to mode-1 fdps_blit_dispatch cases. They are prefixed rmsb_ in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlepal.c. Each case passes width, rows and pitch = advance + width, with rmsb_table as the operand. All expected values were checked against the 00056a8d listing. build_emit all --only rlepal: [result] PASS, 40 checks, 0 failed. verify-tests: ok true. No findings and nothing uncovered. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056a8d.json."
+      }
+    },
+    {
+      "index": 42,
+      "phase": "Tests",
+      "label": "verify tests rmsb",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 43,
+      "phase": "Tests",
+      "label": "tests rmpal",
+      "result": {
+        "address": "00056b25",
+        "status": "committed",
+        "ported": 8,
+        "uncovered": 0,
+        "commit": "b146e4f",
+        "note": "In tests/rlepal.c, all 8 old palremap_* cases for fdps_rle_blit_with_palette_remap now go through fdps_blit_dispatch as rmpal_* cases (mode 2). The address-by-address comments were checked against the 00056b25 listing and they match. Each old case with advance a became a dispatch with pitch a + width. The --only rlepal build ran all 77 checks with 0 failed and ended [result] PASS. Nothing was left uncovered and there are no findings. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056b25.json, and verify-tests printed ok: true."
+      }
+    },
+    {
+      "index": 44,
+      "phase": "Tests",
+      "label": "verify tests rmpal",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 45,
+      "phase": "Tests",
+      "label": "tests rcol",
+      "result": {
+        "address": "00056bb7",
+        "status": "committed",
+        "ported": 11,
+        "uncovered": 0,
+        "commit": "4d5df53",
+        "note": "All 11 recolor_* cases in tests/rlecolor.c now go through fdps_blit_dispatch in mode 3. The new cases are rcol_* in tests/rlepal.c, with the helpers rcol_setup, rcol_dispatch and RCOL_OPERANDS, and each is registered in run_rlepal_tests. The dispatch arguments are the C case's width and rows, pitch = advance + width, and the three packed operand bytes (tint +0x1c, base +0x1d, mask +0x1e). Every expectation was checked against the 00056bb7 listing: MOV DH/DL/AH from [EBP+1Ch/1Dh/1Eh], the 8-bit ADD/AND/ADD triple on all three writing paths, op 11 as a skip that reads no stream byte, and ADD EDI,EBP as the row advance. None differed from what the C cases asserted, so there are no findings. build_emit.py all --only rlepal: [result] PASS, 123 checks, 0 failed (77 existing + 46 new). The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056bb7.json. verify-tests 00056bb7 printed ok: true."
+      }
+    },
+    {
+      "index": 46,
+      "phase": "Tests",
+      "label": "verify tests rcol",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 47,
+      "phase": "Tests",
+      "label": "tests scal",
+      "result": {
+        "address": "00056c5e",
+        "status": "committed",
+        "ported": 9,
+        "uncovered": 0,
+        "commit": "9254b9745f4c431fd2006e489fdd88a38957f4ae",
+        "note": "All 9 fdps_rle_blit_scaled cases from tests/rle.c are now tests in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. Each one calls fdps_blit_dispatch with mode 4, gives the source width, source height and pitch as the dispatch's width, rows and pitch arguments, and packs the destination width and height into the mode operand (width in the low word, height in the high word). All 9 are registered in run_rlebase_tests, and each old case maps to one new case, prefixed scal_.\n\nEvery expected value was traced by hand through the 00056c5e listing and fdps_rle_skip_row; the assembly agrees with every assertion the C translation made, so there are no findings. I added two extra checks that also come from the assembly: the source row count the dispatcher publishes is still 1 after the one-to-one case, because the kernel only reads it, and bytes 4 and 5 are left untouched in the vertical-downscale case.\n\nThe build with --only rlebase ended [result] PASS: 96 checks, 0 failed. The results file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056c5e.json, verify-tests printed \"ok\": true, and no case was left uncovered."
+      }
+    },
+    {
+      "index": 48,
+      "phase": "Tests",
+      "label": "verify tests scal",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 49,
+      "phase": "Tests",
+      "label": "tests skip",
+      "result": {
+        "address": "00056dc9",
+        "status": "committed",
+        "ported": 12,
+        "uncovered": 0,
+        "commit": "42f4035",
+        "note": "I ported the 10 direct fdps_rle_skip_row cases in tests/rle.c to 10 new skrow_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. They are registered in run_rlebase_tests. The rle.c cases scaled_vertical_downscale_drops_a_source_row and scaled_partial_row_resyncs_through_skip_row also reach skip_row indirectly; the verdict maps them to the scal_* cases that were already ported, with no new cases for them. Every skrow_* case runs through mode 4 with 2 source rows drawn to 2 destination rows. That makes the scaled kernel call skip_row exactly once after each drawn row, so the second row is decoded from wherever skip_row left the cursor. Row 0 is the stream the C case used and row 1 is a full-width fill of 0xee drawn at the same width. The checks look for that run of 0xee at byte SKROW_PITCH (72) of the destination, followed by the sentinel byte. Both wrap cases carry a complete second row because skip_row also walks the last row. The zero-width case uses a 2050-byte stream with a 1-wide destination; a 0-wide destination would make the draw's own DEC BX wrap. The globals case cannot seed remaining_rows=0x1234, because the dispatcher overwrites it and a source height of 0x1234 would make the kernel walk 0x1234 rows. It asserts instead that src_width 3 and the published height 2 are unchanged after both skip_row calls; this is recorded under findings. The assembly matched every expectation from the C cases. build_emit --only rlebase ended [result] PASS with 128 checks and 0 failed, and verify-tests printed ok:true. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056dc9.json."
+      }
+    },
+    {
+      "index": 50,
+      "phase": "Tests",
+      "label": "verify tests skip",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 51,
+      "phase": "Tests",
+      "label": "tests rot",
+      "result": {
+        "address": "00056e2a",
+        "status": "committed",
+        "ported": 16,
+        "uncovered": 0,
+        "commit": "a0ad8778eb54ed2844f6b95c225d7600d4899a63",
+        "note": "I ported all 16 mode-5 cases (rotate_*) from tests/rlerot.c to tests/rleturn.c as rotated_* cases. Each case now calls fdps_blit_dispatch with mode 5, its width and row count, and pitch 16. The sixth argument packs dx in the low word and dy in the high word (the ROTATED_OPERAND macro). I also added #include \"rlerot.h\" to rleturn.c, because the rotation step globals are declared there. I re-derived every expected value from the listing at 00056e2a: the four quadrant arms, the single SUB of 0x1000 per carry, the extra store at 00056f79 that fills the diagonal gap, the row accumulators carrying from row to row and being cleared on entry, and the lengths of op 00, 01, 10 and 11. The dispatcher zeroes ECX, which the loop needs. It never touches the row accumulators, so the case that clears them on entry still works by setting them before the dispatch. Nothing is uncovered and there are no findings. One comment reference is corrected: the NEG EBP in the quarter-turn arm is at 00056e91, not 00056efa. The rleturn run gave PASS, 73 checks, 0 failed, and verify-tests printed ok: true. The only committed file is tests/rleturn.c; the verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00056e2a.json."
+      }
+    },
+    {
+      "index": 52,
+      "phase": "Tests",
+      "label": "verify tests rot",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 53,
+      "phase": "Tests",
+      "label": "tests rots",
+      "result": {
+        "address": "00057114",
+        "status": "committed",
+        "ported": 18,
+        "uncovered": 0,
+        "commit": "d3f66d8",
+        "note": "I ported all 18 of the old rotscale_* cases in tests/rlerot.c to tests/rleturn.c, one new case each. They are named rotated_scaled_* and are listed in run_rleturn_tests. Each one goes through fdps_blit_dispatch with mode 6. The old cases set the source width and row count by hand; the new ones pass them to the dispatcher with pitch 16 and no row advance. The sixth argument is a pointer to a new 4-int record in the test file (destination width, destination height, dx, dy); the kernel reads it through MOV EBP,[EBP+1Ch]. I rechecked every expected value by tracing the listing at 00057114: the horizontal and vertical counters, the skip_row resync, the gap-filling store at 000572dc, and the four sign arms. No old assertion turned out to be something the dispatcher cannot produce, so nothing is uncovered. The assembly does what the old cases said, so there are no findings. The build and run of the rleturn tests ended [result] PASS with 155 checks, 0 failed and 0 compiler warnings in RLETURN.C, and verify-tests printed \"ok\": true. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057114.json"
+      }
+    },
+    {
+      "index": 54,
+      "phase": "Tests",
+      "label": "verify tests rots",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 55,
+      "phase": "Tests",
+      "label": "tests mirh",
+      "result": {
+        "address": "00057551",
+        "status": "committed",
+        "ported": 7,
+        "uncovered": 0,
+        "commit": "40d1661",
+        "note": "All 7 mirror_* cases from tests/rle.c are now mirh_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlebase.c. Each calls fdps_blit_dispatch with mode 7 and operand 0. Mode 7 gets no row advance, so each C case's width, rows and pitch are passed as src_width, src_rows and dest_pitch unchanged. Each destination is 8 bytes into an 80-byte surface pre-filled with a sentinel value. I worked out every expected value from the 00057551 listing: the first column is ADD EDI,EBX / DEC EDI, the fill walks left with STD / REP STOSB, the stretched op is DEC / store / DEC, a skip is SUB EDI,ECX, and the end of row is POP EDI / ADD EDI,EDX with the full pitch zero-extended. All of them matched what the C cases claimed, so there are no findings and nothing is uncovered. Build with --only rlebase: [result] PASS, 171 checks, 0 failed; the count includes the 42 new checks. verify-tests returned ok: true. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057551.json."
+      }
+    },
+    {
+      "index": 56,
+      "phase": "Tests",
+      "label": "verify tests mirh",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 57,
+      "phase": "Tests",
+      "label": "tests mirv",
+      "result": {
+        "address": "000575ed",
+        "status": "committed",
+        "ported": 4,
+        "uncovered": 0,
+        "commit": "12ba28f",
+        "note": "All four tests for fdps_rle_blit_mirrored_vertical in tests/rle.c were ported: vmirror_reflects_the_rows, vmirror_single_row_starts_at_the_pointer, vmirror_advance_pays_back_the_width and vmirror_keeps_column_order_within_a_row. Each now calls fdps_blit_dispatch with mode 8, operand 0, and the same width, rows and pitch as before; mode 8 gets no row advance, so nothing had to be converted. The new tests are mirv_* in tests/rlebase.c, with their own mirv_surface and MIRV_BASE, and are registered in run_rlebase_tests. Expected values were worked out from the assembly: the start is pitch*(rows-1) because DEC DX runs before MUL EDX; the row advance is -(pitch+width) from ADD DX then NEG EDX; then it tail-jumps into the pass-through kernel. None of the assertions depended on anything the dispatcher cannot produce, so nothing is uncovered, and the assembly matched what the C translation claimed, so there are no findings. The build and run (build_emit.py all --only rlebase) ended [result] PASS, 210 checks, 0 failed. wf_state verify-tests reported ok: true. The record is at C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\000575ed.json."
+      }
+    },
+    {
+      "index": 58,
+      "phase": "Tests",
+      "label": "verify tests mirv",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 59,
+      "phase": "Tests",
+      "label": "tests tran",
+      "result": {
+        "address": "0005761b",
+        "status": "committed",
+        "ported": 10,
+        "uncovered": 0,
+        "commit": "cbfa59705225f672a4c731d28613935533dfb30a",
+        "note": "I ported all 10 C cases for fdps_rle_blit_translucent from tests/rleblend.c into tests/rlemix.c. Each became one tran_* case that calls fdps_blit_dispatch with mode 9 and dest_pitch = advance + width. The descriptor {ramp, level, cube} is the mode operand. The fixtures carry a TRAN_ prefix and sit at the top of the file. Expected values were re-derived from the 0005761b listing: the level fold with its 0x2400 nine-row offset, the green-major cube index, the length subtracted twice for op 01, and the row advance published on entry and read back at 0005777f. The build with --only rlemix gave [result] PASS: 39 checks, 0 failed, and RLEMIX.C compiled with 0 warnings. Nothing is uncovered and there are no findings. The verdict is at C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\0005761b.json, and verify-tests printed ok: true."
+      }
+    },
+    {
+      "index": 60,
+      "phase": "Tests",
+      "label": "verify tests tran",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 61,
+      "phase": "Tests",
+      "label": "tests tsb",
+      "result": {
+        "address": "00057793",
+        "status": "committed",
+        "ported": 11,
+        "uncovered": 0,
+        "commit": "a70fece998ef87db95bbe734596f9e5ed62a540f",
+        "note": "I ported all 11 tint_* cases in tests/rleblend.c that call fdps_rle_blit_tint_sprite_and_backdrop. Each one became a tsb_* case in tests/rlemix.c that calls fdps_blit_dispatch with mode 10, using its own fixtures (tsb_ramp, tsb_cube, tsb_surface and a four-dword tsb_descriptor with the tint at +0xc). The C cases' row advance becomes pitch = advance + width. I checked the expected values against the listing at 00057793: the tint goes through the row the level names and the pixel through the row nine on, 0x2400 is swapped by XCHG above level 8, op 11 reads [EDI], the fill is REP STOSB, the stretched run does SUB BX,CX twice, and the advance is published at entry and added at 00057902. The build and test run (build_emit.py all --only rlemix) passed with 80 checks and 0 failed; 41 of those checks are the new cases. Nothing is uncovered and there are no findings. The verdict file is C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057793.json, and verify-tests printed ok: true."
+      }
+    },
+    {
+      "index": 62,
+      "phase": "Tests",
+      "label": "verify tests tsb",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 63,
+      "phase": "Tests",
+      "label": "tests tint",
+      "result": {
+        "address": "00057916",
+        "status": "committed",
+        "ported": 10,
+        "uncovered": 0,
+        "commit": "1e7de75",
+        "note": "Mapped all 10 sprite_tint_* C cases in tests/rleblend.c to tint_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlemix.c, one each. They dispatch mode 11 with a four-dword descriptor (ramp, level, cube, tint colour) and pitch = advance + width. The block has its own TINT_* fixtures. Expected values come from the 00057916 listing: tint row = level for levels up to 8, pixel row = level + 9, the rows swap above 8 after the 16 - level fold, and op 11 is a skip (ADD EDI,ECX, no stream byte read). The build with --only rlemix ended [result] PASS: 119 checks, 0 failed. verify-tests printed ok: true. There were no findings and nothing is uncovered. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057916.json."
+      }
+    },
+    {
+      "index": 64,
+      "phase": "Tests",
+      "label": "verify tests tint",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 65,
+      "phase": "Tests",
+      "label": "tests tcr",
+      "result": {
+        "address": "00057a74",
+        "status": "committed",
+        "ported": 14,
+        "uncovered": 0,
+        "commit": "a5c5446",
+        "note": "All 14 C cases for fdps_rle_blit_translucent_color_range (range_* in tests/rleblend.c) are now tcr_* cases in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\tests\\rlemix.c. Each one calls fdps_blit_dispatch with mode 12 and a five-dword descriptor, and all are registered in run_rlemix_tests. The fixtures belong to this block only (tcr_ramp, tcr_cube, tcr_surface, tcr_descriptor). I also added #include \"rleblend.h\" to the file, because the range-min/max globals are declared there. Expected values were checked against the 00057a74 listing: signed JL/JLE/JG compares, 16-bit bound reads at +0xc/+0x10, raw REP STOSB / INC EDI+STOSB / STOSB when a pixel is out of range, and the mode-9 row assignment. They match what the C cases claimed, so there are no findings. Build: build_emit.py all --only rlemix gave [result] PASS, 174 checks, 0 failed, and RLEMIX.C compiled with 0 warnings. Verdict file: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\tests\\00057a74.json. verify-tests printed \"ok\": true."
+      }
+    },
+    {
+      "index": 66,
+      "phase": "Tests",
+      "label": "verify tests tcr",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"problems\": [],\n  \"uncovered\": 0\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 67,
+      "phase": "Final",
+      "label": "coverage",
+      "result": {
+        "ok": true,
+        "exit_code": 0,
+        "output": "{\n  \"ok\": true,\n  \"unclaimed\": {}\n}",
+        "toolchain_unreachable": false
+      }
+    },
+    {
+      "index": 68,
+      "phase": "Final",
+      "label": "final gate",
+      "result": "PASS. The build gate for the unit-test image (emittest) passed at commit a5c5446. The result was written 2026-09-23T23:26:26 and the command exited with code 0.\n\nNo suite or check failed.\n- The build, errors, undefined and warnings checks all passed. There were 0 errors, 0 new warnings and no undefined symbols. The first link resolved everything, so no stubs were needed.\n- EMITTEST.EXE is 2,788,105 bytes. It was not compared against an image baseline because this target has none by design.\n- These suites passed: build_gate.selftest, fdps_build.selftest, code_emit.selftest, code_emit.stubs, code_emit.types, code_emit.run, data_emit.selftest, data_emit.check, rle_asm.selftest, rle_asm.switch_selftest and rle_asm.check.\n- code_emit.run ran 23,948 checks with 0 failures in 901s.\n- ail_link.selftest, fdps_build.run and ail_link.run were skipped because their targets (ailsmoke, smoke) were not selected.\n\nFiles:\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\build_gate\\result.json\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\rle_asm\\gate_final.log\n- C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\code_emit\\out\\EMITTEST.EXE"
+    }
+  ]
+}

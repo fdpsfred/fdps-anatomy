@@ -88,7 +88,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 ## RLE 繪製：組語檔與保留的 C 譯本
 
-RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執行檔的是原版組語，理由見 [`program_info/code_pools.md`](../program_info/code_pools.md)，寫法與比對標準見 [`build_flags.md`](build_flags.md)。組語分五個檔，對應原本 C 的分組：
+RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執行檔的是原版組語，理由見 [`program_info/code_pools.md`](../program_info/code_pools.md)，寫法與比對標準見 [`build_flags.md`](build_flags.md)。組語分五個檔，與 C 譯本的檔案分組一一對應：
 
 | 組語檔 | 內容 | C 譯本 | 測試 |
 | --- | --- | --- | --- |
@@ -118,11 +118,11 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 
 ### 改回 C 版的步驟
 
-1. `python tools/rle_asm/switch_impl.py c`——把 13 個標記區的 `#if 0` 翻成 `#if 1`，並把五個 `.asm` 停放到 `workspace/rle_asm/parked/`。建置編的是 `src/` 裡現有的檔，組語檔留著就會與 C 重複定義。狀態不一致（標記少了、半套翻轉、`.asm` 缺一部分）時它拒絕動手。
-2. `python tools/code_emit/build_emit.py all`——建置零錯誤零警告、兩套測試全綠：`tests/rledisp.c`／`rlebase.c`／`rlepal.c`／`rleturn.c`／`rlemix.c` 經分派者的測試（兩種實作都要過），加上重新啟用的 C 版直接呼叫測試。
+1. `python tools/rle_asm/switch_impl.py c`——把 13 個標記區的 `#if 0` 翻成 `#if 1`，並把五個 `.asm` 移出 `src/`、停放在工具自己的暫存處（[`tools/rle_asm/`](../tools/rle_asm/_index.md)）。建置編的是 `src/` 裡現有的檔，組語檔留著就會與 C 重複定義。狀態不一致（標記少了、半套翻轉、`.asm` 缺一部分）時它拒絕動手。
+2. `python tools/code_emit/build_emit.py all`（只看這兩套時加 `--only rledisp,rlebase,rlepal,rleturn,rlemix,rle,rlecolor,rlerot,rleblend`，照樣全部編譯連結、只跑這 9 個測試檔）——建置零錯誤零警告、兩套測試全綠：`tests/rledisp.c`／`rlebase.c`／`rlepal.c`／`rleturn.c`／`rlemix.c` 經分派者的測試（兩種實作都要過），加上重新啟用的 C 版直接呼叫測試。
 3. build gate（`python tools/build_gate/gate.py check --target emittest`）裡的 `rle_asm.check` 在 C 版狀態下必然失敗——它比對的就是組語檔。長期改回 C 版時要一併把它從 `tools/build_gate/gate.py` 的 `TEST_SUITES` 拿掉；只是暫時切過去驗證時，其餘套件全綠即可。
 
-改回組語版是 `python tools/rle_asm/switch_impl.py asm`，再跑一次第 2 步（C 版直接呼叫的測試回到 `#if 0`，只剩經分派者的那一套）與完整的 build gate。這條路實際走過一次：C 版建置與兩套測試全綠，切回組語版後 gate 全綠。
+改回組語版是 `python tools/rle_asm/switch_impl.py asm`，再跑一次第 2 步（C 版直接呼叫的測試回到 `#if 0`，只剩經分派者的那一套）與完整的 build gate。兩個方向都可行：C 版建置零錯誤零警告、兩套測試全綠，切回組語版後 gate 全綠。
 
 ## 檔案表
 

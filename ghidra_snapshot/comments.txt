@@ -20611,29 +20611,30 @@ Blit mode dispatcher: publishes pitch, width and height into the shared graphics
 Pool: fdps  [no Function ID hit in either library set; all callers and all callees are game code]
 Evidence: fid.watcom and fid.ail are both empty, full_hash unique in the image and absent from ailv3.lib, so no library byte match. 46 call sites over 27 distinct callers, all game routines (fdps_cel_blit_sprite, fdps_draw_unit_status_panel, fdps_unit_status_window_wait_input, fdps_load_global_resources, ...) and all thirteen callees are private to this dispatcher; the 16-bit words at 0x00070022/0x00070024/0x0007002e written here are read back by those kernels, making writer and readers one game-owned module. Too large and stateful for binary_artifact; the C runtime has no blit-parameter block, and nothing here touches AIL state.
 Name: fdps_ + snake_case for game code, describing the dispatch this body actually performs; no vendor symbol involved.
-Boundary: 000568db-00056a0c, frame prologue at the entry and every arm converging on POP EBX/ESI/EDI/EBP; RET at 00056a08; empty gap after, and 00056a0d is the separate mode-0 kernel. Thirteen four-byte runs of 0x90, one between each JNZ and the CALL it guards, at 00056916, 00056929, 0005693c, 0005694f, 00056962, 00056975, 00056988, 0005699b, 000569ae, 000569c1, 000569d4, 000569e7 and 000569fa -- 52 bytes in total, all of it padding belonging to this body.
+Boundary: 000568db-00056a0c, frame prologue at the entry and every arm converging on POP EBX/ESI/EDI/EBP; RET at 00056a08; empty gap after, and 00056a0d is the separate mode-0 kernel. Thirteen four-byte runs of 0x90, one between each JNZ and the CALL it guards, at 00056916, 00056929, 0005693c, 0005694f, 00056962, 00056975, 00056988, 0005699b, 000569ae, 000569c1, 000569d4, 000569e7 and 000569fa -- 52 bytes; and seven three-byte runs of 0x90 after the short JMPs to the epilogue, at 00056993, 000569a6, 000569b9, 000569cc, 000569df, 000569f2 and 00056a05 -- 21 bytes that flow never reaches. All of it is the one-pass assembler's padding for forward branches it shortened and belongs to this body: the function is 0x132 bytes, entry to 00056a0d.
 Signature: __cdecl, seven stack arguments (src, dst, width, height, pitch, arg6, mode) with a plain RET and stack_purge 0 -- confirmed by the assembly, not a guess. arg6 at [EBP+0x1c] is unused here but is read out of this frame by ten of the thirteen kernels (all but 00056a0d, 00057551 and 000575ed), in four different shapes: a pointer (fdps_rle_blit_remap_sprite_and_backdrop at 00056a8d, and 00056b25, 00057114), three packed bytes (00056bb7), two packed words (00056c5e, 00056e2a) and a descriptor pointer (0005761b, 00057793, 00057916, 00057a74) -- so the kernels are hand-written assembly that shares this frame. The sharing is not read-only: 0005761b, 00057793, 00057916 and 00057a74 also WRITE this frame's argument slots [EBP+0x8] through [EBP+0x1c] as their own scratch (MOV [EBP+0x8],EBX at 00057627, MOV [EBP+0xc],EAX at 0005764f, MOV [EBP+0x10],EDX at 00057654, MOV [EBP+0x14],EAX at 0005765c, MOV [EBP+0x18],EAX at 00057664, MOV [EBP+0x1c],EDX at 00057696).
+Rebuild: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rledisp.asm (ticket 22.3). The C translation at the end of src/blit.c is reference only, under #if 0 (rebuild_info/code_layout.md).
 
 === 00056993 [EOL]
-3-byte 0x90 NOP alignment filler inside the fdps_blit_dispatch address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000569a6 [EOL]
-3-byte 0x90 NOP alignment padding inside the fdps_blit_dispatch address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000569b9 [EOL]
-Alignment filler: three 0x90 NOPs inside the fdps_blit_dispatch address range.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000569cc [EOL]
-Alignment padding: three 0x90 NOP bytes inside the fdps_blit_dispatch address range.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000569df [EOL]
-3-byte NOP alignment padding inside fdps_blit_dispatch, between an 'eb 29' jmp and the next 'cmp bh,0x0b' dispatch test
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000569f2 [EOL]
-3-byte 90 90 90 NOP filler, no references
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056a05 [EOL]
-Alignment padding: three 0x90 NOPs before fdps_rle_blit_passthrough.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056a0d [PLATE]
 Blit mode 0: decodes an RLE 4-op pixel stream into an 8bpp destination surface, writing every pixel it draws through unchanged.
@@ -20665,16 +20666,17 @@ Returns:
 Pool: fdps  [no fid hit in either library, and it shares the blit width/height globals with fdps_blit_dispatch, which calls it as blit mode 0]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlebase.asm (ticket 22.3). The C translation in src/rle.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 This kernel cannot be written as an ordinary C function: it takes ESI (stream), EDI (destination) and EDX (row advance) in registers, destroys EBX, ESI and EDI, which Watcom's convention says a callee preserves, and it requires the upper 24 bits of ECX to be zero on entry -- fdps_blit_dispatch does XOR ECX,ECX at 0005690d for exactly that. The body only ever writes CL, but then uses the whole of CX in SUB BX,CX and the whole of ECX in REP MOVSB / REP STOSB / LOOP, so a caller that skips the zeroing gets runaway runs that overrun the destination. A second trap is the row terminator: OR BX,BX / JNZ ends a row only on an exact zero, so hardening it to 'width <= 0' changes behaviour on any stream whose last run overshoots the row. A third is op 01: the obvious reading of a 'stretched fill' is that it doubles each pixel across the 2*len span, and writing it that way paints the columns the original leaves alone. The original writes only the second byte of each pair (INC EDI before STOSB) and the gaps really do stay as they were -- measured on the shipped sheets, most of those gaps are one-pixel holes inside painted content, so filling them changes what the game draws.
 
 === 00056a39 [EOL]
-3-byte NOP padding (90 90 90)
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056a53 [EOL]
-3-byte 0x90 NOP alignment gap inside fdps_rle_blit_passthrough's address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056a6f [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056a8d [PLATE]
 RLE sprite blit kernel, mode 1 of fdps_blit_dispatch: draws one RLE 4-op pixel stream through a 256-entry palette remap table and puts the destination pixels showing through the sprite's transparent runs through the same table, so every pixel of the width x height rectangle ends up as remap[...].
@@ -20707,16 +20709,17 @@ Returns:
 Pool: fdps  [no Function ID hit in either library set; the only caller is fdps_blit_dispatch, and 0x00070022/0x00070024 are that dispatcher's blit parameter block, not library state]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlepal.asm (ticket 22.3). The C translation in src/rlecolor.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The row terminates only on the width counter hitting exactly zero (SUB BX,CX then OR BX,BX / JNZ), so a stream whose runs overshoot the row width does not stop -- BX wraps and the decoder keeps painting past the end of the row; writing the obvious while (remaining > 0) in C would end the row early and silently change what a malformed or deliberately over-long stream draws. The stretched-fill op writes its first pixel at dst+1, not dst (INC EDI before STOSB at 00056ad1), so the run occupies the odd columns of its 2*len span; the obvious for (i = 0; i < len; i++) { dst[0] = c; dst += 2; } shifts the whole run one pixel left. And the 0b11 op is not the transparent skip it is in most of the family: copying the mode-0 or mode-2 body and only swapping the table in leaves the backdrop inside the sprite's bounding box unremapped.
 
 === 00056abf [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056adc [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056afd [EOL]
-3-byte 0x90 NOP filler inside the fdps_rle_blit_remap_sprite_and_backdrop address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056b25 [PLATE]
 Blit mode 2 of fdps_blit_dispatch: draws one RLE-coded sprite into the destination surface, passing every pixel it writes through a 256-byte palette translation table. No call site in the shipped program ever asks for mode 2, so this kernel is unreachable in FDPS.LE; see Reachability.
@@ -20746,16 +20749,17 @@ Returns:
 Pool: fdps  [no Function ID candidate in either the Watcom or the ailv3 set; the sole caller is the game's blit dispatcher, and this body reads back the same 0x00070022/0x00070024 blit-geometry words that dispatcher writes, so writer and reader are one module]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlepal.asm (ticket 22.3). The C translation in src/rlecolor.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The stretched-fill run (opcode 01) writes its first pixel at dst+1, not at dst -- the loop is INC EDI then STOSB -- so the obvious rewrite `for (i = 0; i < len; i++) dst[i*2] = c;` shifts every stretched span one pixel to the left. The row is also terminated by a 16-bit counter tested for exactly zero (SUB BX,CX / OR BX,BX / JNZ), and opcode 01 subtracts len twice, so a run that overshoots the remaining row width wraps through 65535 and keeps decoding; rewriting the test as `while (width > 0)` on an int quietly changes that behaviour. Neither mistake can be caught by playing the game: no call site in the program selects mode 2, so this kernel has to be got right by reading rather than by testing.
 
 === 00056b57 [EOL]
-3-byte 90 90 90 alignment filler after an unconditional jmp inside fdps_rle_blit_with_palette_remap
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056b74 [EOL]
-3-byte NOP filler between a JMP at 00056b72 and the branch target at 00056b77
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056b95 [EOL]
-3-byte 0x90 NOP alignment filler between function bodies
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056bb7 [PLATE]
 Blit mode 3 of fdps_blit_dispatch: draws one 4-op RLE sprite stream into an 8bpp destination surface, recolouring every pixel it writes by arithmetic on the palette index rather than through a lookup table.
@@ -20780,16 +20784,17 @@ Returns:
 Pool: fdps  [called only by fdps_blit_dispatch; shares the blitter's state globals at 00070022 and 00070024; no library byte match on either the Watcom or the ail set]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlepal.asm (ticket 22.3). The C translation in src/rlecolor.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 Three things a straight rewrite gets wrong. (1) The 01 stretched-fill run writes the odd destination columns: INC EDI precedes STOSB at 00056c09, so the pixels land at dst[1], dst[3], ... while the run still charges 2*len against the column budget; the obvious `for (i = 0; i < len; i++) dst[2*i] = px;` puts every pixel one column to the left of the original. (2) The three recolour bytes are the low bytes of fdps_blit_dispatch's sixth argument, read straight out of the dispatcher's frame as an immediate value, but that same argument is a 256-byte remap table pointer for modes 1 and 2 and a descriptor pointer for the blend modes, so giving it one C type across all thirteen kernels is wrong. (3) The byte packing is not the predecessor's. FD2 packs this same recolour as color_base = op & 0xff and offset = (op >> 8) & 0xff with the mask hardcoded to 7; FDPS packs the offset in the low byte (+0x1c, added before the mask), color_base in byte 1 (+0x1d, added after it) and the band mask in byte 2 (+0x1e). Carrying FD2's expression or its packed constants across swaps the two operands, and because the observed FDPS constant 0x0000ff00 relies on mask 0 to collapse the output to one index, the swap turns a flat white silhouette into a scrambled sprite rather than into an obvious crash.
 
 === 00056bf4 [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056c14 [EOL]
-3-byte 0x90 NOP alignment filler, no references
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056c38 [EOL]
-3-byte NOP filler, unreachable, interior to fdps_rle_blit_recolor after an unconditional jmp
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056c5e [PLATE]
 Blit mode 4 of fdps_blit_dispatch: draws one 4-op RLE sprite stream into an 8bpp destination surface rescaled to an arbitrary destination width and height.
@@ -20810,13 +20815,14 @@ Returns:
 Pool: fdps  [no Function ID hit in Watcom 10.0x or ailv3.lib; shares the graphics parameter block at 0x00070022-0x00070033 with its caller fdps_blit_dispatch and its callee fdps_rle_skip_row]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlebase.asm (ticket 22.3). The C translation in src/rle.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The kernel reads its two scale words out of fdps_blit_dispatch's own stack frame at [EBP+0x1c]/[EBP+0x1e], then zeroes EBP at 00056c74 and uses it as the Bresenham accumulator for the whole routine without ever restoring it, so it destroys the caller's frame pointer and only survives because fdps_blit_dispatch's epilogue pops EBP off ESP instead of relying on it -- a rewrite that keeps this as inline assembly must not assume EBP is live across the call, and one that turns it into a real C function must have the dispatcher unpack that argument and pass it. Second, the source cursor is pushed at the top of every destination row and popped back at 00056d84, so a row whose decode stopped part-way (the destination row filled before the run was exhausted) still advances to the next source row only through fdps_rle_skip_row: writing the obvious C that carries one source pointer straight on from wherever the decode stopped desynchronises the stream, and re-decoding the same row for vertical upscaling stops working. Third, the destination row advance is computed sixteen bits wide and stored zero-extended -- MOV BP,[0x0007002e] / SUB BP,[0x00070028] / MOV dword ptr [0x00070030],EBP at 00056c8b-00056c99, with EBP's top half still holding the zero from XOR EBP,EBP at 00056c74 -- so a destination wider than the pitch stores 65534 rather than -2, and the global is signed and does hold genuine negative advances when fdps_rle_blit_translucent and its three neighbours write the dispatcher's full 32-bit EDX into it at 0005761b, 00057793, 00057916 and 00057a74. Fourth, the three sixteen-bit exact-zero terminators are unguarded, and that is the routine's degenerate-input behaviour: a destination width of zero makes DEC BX / JNZ at 00056ce4 (and its three copies) run the row for 0x10000 pixels rather than none; a destination height of zero makes DEC word ptr [0x0007002c] / JNZ at 00056dbb ask for 0x10000 rows; and a destination height of zero additionally never leaves the vertical loop at 00056d8c, because the accumulator is seeded from 0x0007002a at 00056c84 and grown by 0x0007002a at 00056d9e, so it stays at zero, CMP BP,[0x00070022] / JA never takes, and fdps_rle_skip_row is called for ever. A rewrite may not add a zero check: the check would be a behaviour change, and fdps_blit_dispatch, the only thing that reaches this kernel, cannot be assumed to screen its arguments.
 
 === 00056d25 [EOL]
-3-byte 0x90 NOP alignment filler inside the fdps_rle_blit_scaled address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056d5b [EOL]
-Three 0x90 NOP bytes: alignment filler, not reachable code.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056dc9 [PLATE]
 Advances a source pointer past one encoded scanline of a 4-op RLE pixel stream without drawing anything, so a scaling blitter can drop the source rows it is not going to show.
@@ -20843,7 +20849,8 @@ Returns:
 Pool: fdps  [no Function ID hit in any library; shares the game's blit parameter globals at 0x00070022/0x00070024 with its two callers, and no runtime or Miles AIL routine takes a program global as an implicit argument]
 
 Rebuild note:
-Register contract rather than a stack one: ESI is both the argument and the result, and BX and CL are destroyed. Emitted as unsigned char *fdps_rle_skip_row(unsigned char *rle_stream), the register that carries information both ways becoming the parameter and the return value; the register destruction is a property of the contract and not of what the routine does, so it does not carry over (ADR-0001). Both callers already treat ESI that way, restoring the row start with POP ESI at 00056d84 and 000574bc and never reloading it between calls.
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlebase.asm (ticket 22.3). The C translation in src/rle.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
+Register contract rather than a stack one: ESI is both the argument and the result, and BX and CL are destroyed. The C translation kept for reference renders it as unsigned char *fdps_rle_skip_row(unsigned char *rle_stream), the register that carries information both ways becoming the parameter and the return value; the rebuild links the assembly, so the register contract, destruction included, is kept exactly. Both callers already treat ESI that way, restoring the row start with POP ESI at 00056d84 and 000574bc and never reloading it between calls.
 
 Second, the loop ends only when the 16-bit counter reaches exactly zero; writing the obvious while (width > 0) changes behaviour on a row whose runs overshoot its width, where the original wraps BX and keeps decoding. resource_info/cel.md records the same wrap on the drawing side, where it walks off the end of the destination instead.
 
@@ -20884,16 +20891,17 @@ Reachability: no code path in FDPS.LE selects mode 5. Every operand that can rea
 Pool: fdps  [no Function ID hit in either the Watcom or the Miles AIL set and the body hash is unique in the image; it shares the game's blit parameter block at 0x00070022-0x0007004e with fdps_blit_dispatch, its only caller, and 737 bytes of sprite decode logic is neither a runtime primitive nor a linker artifact]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rleturn.asm (ticket 22.3). The C translation in src/rlerot.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 Three things a faithful rewrite has to keep. First, each accumulator subtracts a single 0x1000 on carry rather than taking a modulo, so an increment larger than 0x1000 still advances at most one destination pixel per step: the obvious 'pos += dx; dst += pos >> 12; pos &= 0xfff' magnifies where the original clamps, and the mode silently becomes a different transform. Second, the vertical carry stores the pixel a second time at the current EDI before stepping (00056f79, 00056fe1, 00057043); dropping that as a redundant write leaves one-pixel holes along every diagonal run. Third, the two row-to-row accumulators at 0x00070048/0x0007004a are cleared once at entry and deliberately carry across rows, unlike the within-row DX/BP pair which is zeroed at the top of every row -- resetting them per row turns the rotation into a shear. As with its sibling kernels it also cannot be given a real C signature: it takes its inputs in ESI, EDI and the caller's own EBP frame, requires the upper 16 bits of ECX to be clear (fdps_blit_dispatch's XOR ECX,ECX at 0005690d supplies that), destroys EBX, ESI, EDI and EBP, and ends its row loop only when BX reaches exactly zero, so a stream whose ops overrun the width wraps the counter and keeps writing. One more thing the re-read adds: no call site in the image selects mode 5, so a rewrite of this kernel cannot be validated by playing the game -- the three rules above have to be transcribed from the assembly and taken on the assembly's authority, and the dispatcher's mode-5 arm has to keep calling it even though nothing exercises that arm.
 
 === 00056eb5 [EOL]
-3 bytes of 0x90 NOP filler, no references
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00056ee7 [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057058 [EOL]
-3-byte NOP filler inside fdps_rle_blit_rotated, after JMP at 00057056, before code resuming at 0005705b
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057114 [PLATE]
 Blit mode 6: draws one 4-op RLE sprite stream into an 8bpp destination surface both resampled to a caller-chosen destination width and height and rotated, the geometry arriving in a four-int record that fdps_blit_dispatch's sixth argument points at.
@@ -20932,13 +20940,14 @@ Returns:
 Pool: fdps  [no Function ID hit in either the Watcom or the Miles AIL library set and the body hash is unique in the image; it shares the game's blit parameter block at 0x00070022-0x0007004e with fdps_blit_dispatch, its only caller, and 1079 bytes of sprite decode logic is neither a runtime primitive nor a linker artifact]
 
 Rebuild note:
-Four things a faithful rewrite has to keep. First, the two fixed-point accumulators subtract a single 0x1000 on carry rather than taking a modulo, so an increment larger than 0x1000 still advances at most one destination pixel: the obvious 'pos += dx; dst += pos >> 12; pos &= 0xfff' magnifies where the original clamps. Second, the vertical carry stores the pixel a second time at the current EDI before stepping (000572dc, 00057381, 0005741c); dropping that as a redundant write leaves one-pixel holes along every diagonal run. Third, the row-to-row accumulators at 0x00070048/0x0007004a are cleared once at entry and deliberately carry across rows, unlike the within-row pair at 0x00070044/0x00070046 which is zeroed at the top of every row -- resetting them per row turns the rotation into a shear. Fourth, the horizontal loop is bounded only by the destination pixel count BX and the vertical loop only by the row counter at 0x0007002c, and the source row's own ops are never counted out: the decoder deliberately under-consumes the stream and relies on POP ESI plus fdps_rle_skip_row to find the next row, so a rewrite that advances one shared source pointer through the decode loop desynchronises the stream. A destination width or height of zero means 65536 iterations, not none. The register-and-frame contract itself is real -- the inputs arrive in ESI, EDI and the caller's own EBP frame, the upper 16 bits of ECX must be clear, and EBX, EBP, ESI and EDI are destroyed -- but it does not force the routine to stay in the assembly module with its dispatcher: src/rlerot.c re-expresses it as three ordinary stack parameters, rle_stream being the dispatcher's argument 1 (loaded into ESI at 000568e1), dest_pixel its argument 2 (loaded into EDI at 000568e4), and blit_geometry the argument 6 pointer read from [EBP+0x1c]. The ECX precondition and the destruction of EBX, EBP, ESI and EDI are register allocation rather than observable behaviour (ADR-0001).
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rleturn.asm (ticket 22.3). The C translation in src/rlerot.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
+Four things a faithful rewrite has to keep. First, the two fixed-point accumulators subtract a single 0x1000 on carry rather than taking a modulo, so an increment larger than 0x1000 still advances at most one destination pixel: the obvious 'pos += dx; dst += pos >> 12; pos &= 0xfff' magnifies where the original clamps. Second, the vertical carry stores the pixel a second time at the current EDI before stepping (000572dc, 00057381, 0005741c); dropping that as a redundant write leaves one-pixel holes along every diagonal run. Third, the row-to-row accumulators at 0x00070048/0x0007004a are cleared once at entry and deliberately carry across rows, unlike the within-row pair at 0x00070044/0x00070046 which is zeroed at the top of every row -- resetting them per row turns the rotation into a shear. Fourth, the horizontal loop is bounded only by the destination pixel count BX and the vertical loop only by the row counter at 0x0007002c, and the source row's own ops are never counted out: the decoder deliberately under-consumes the stream and relies on POP ESI plus fdps_rle_skip_row to find the next row, so a rewrite that advances one shared source pointer through the decode loop desynchronises the stream. A destination width or height of zero means 65536 iterations, not none. The register-and-frame contract itself is real -- the inputs arrive in ESI, EDI and the caller's own EBP frame, the upper 16 bits of ECX must be clear, and EBX, EBP, ESI and EDI are destroyed -- and the rebuild keeps it, linking the routine as the original's assembly next to its dispatcher. The C translation kept for reference in src/rlerot.c re-expresses it as three ordinary stack parameters, rle_stream being the dispatcher's argument 1 (loaded into ESI at 000568e1), dest_pixel its argument 2 (loaded into EDI at 000568e4), and blit_geometry the argument 6 pointer read from [EBP+0x1c].
 
 === 000571b6 [EOL]
-Alignment filler: 3 x 0x90 NOP.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000571e8 [EOL]
-3-byte 90 90 90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057551 [PLATE]
 Blit mode 7: draws one 4-op RLE sprite stream into an 8bpp destination surface mirrored left to right, so art drawn facing one way can be shown facing the other. The other axis is mode 8, fdps_rle_blit_mirrored_vertical.
@@ -20964,16 +20973,17 @@ Returns:
 Pool: fdps  [shares the game's blit parameter globals at 0x00070022/0x00070024/0x0007002e with fdps_blit_dispatch, which is its only caller; no Function ID hit in either the Watcom or the Miles AIL set, no runtime idiom, no interrupt or driver structure, and 147 bytes of real decode logic rather than a linker artifact]
 
 Rebuild note:
-The mirror is about the sprite's own box, not about EDI. EDI arrives pointing at the top-left corner exactly as it does for the mode-0 kernel, and this routine adds width-1 to it itself, so the mirrored image lands in the same destination rectangle; writing the obvious 'start at dst and walk backwards' draws it one whole width to the left. Two more things a faithful rewrite must keep: it deliberately ignores the EDX = pitch - width that the dispatcher hands every kernel and re-reads the full pitch from 0x0007002e, because it restores EDI to the row origin with PUSH/POP instead of letting it run off the row end, so reusing the siblings' end-of-row advance double-counts the width; and both loops are exit-tested, the row on BX becoming exactly zero and the pass count on a pre-decrement of 0x00070022, so a row whose ops overrun the width wraps BX and keeps writing past the row end, and a height of zero means 65536 rows rather than none. The stretch op is the one place where the reflection is not a simple index flip: mode 0 does INC EDI and then STOSB, painting the odd columns of its 2*count run, while this does DEC EDI and then the store, painting the columns that are the reflections of those, so a rewrite that mirrors mode 0's loop body without moving the decrement ahead of the store paints the complementary set of columns and the sprite comes out one pixel off. The routine's inputs arrive in ESI and EDI plus three globals and it destroys EBX, ECX, EDX, ESI and EDI along with the row-count global, so its register contract is not expressible as a C prototype; the rebuild replaces that contract with two ordinary parameters under ADR-0001, as fdps_rle_blit_passthrough at 00056a0d does.
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlebase.asm (ticket 22.3). The C translation in src/rle.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
+The mirror is about the sprite's own box, not about EDI. EDI arrives pointing at the top-left corner exactly as it does for the mode-0 kernel, and this routine adds width-1 to it itself, so the mirrored image lands in the same destination rectangle; writing the obvious 'start at dst and walk backwards' draws it one whole width to the left. Two more things a faithful rewrite must keep: it deliberately ignores the EDX = pitch - width that the dispatcher hands every kernel and re-reads the full pitch from 0x0007002e, because it restores EDI to the row origin with PUSH/POP instead of letting it run off the row end, so reusing the siblings' end-of-row advance double-counts the width; and both loops are exit-tested, the row on BX becoming exactly zero and the pass count on a pre-decrement of 0x00070022, so a row whose ops overrun the width wraps BX and keeps writing past the row end, and a height of zero means 65536 rows rather than none. The stretch op is the one place where the reflection is not a simple index flip: mode 0 does INC EDI and then STOSB, painting the odd columns of its 2*count run, while this does DEC EDI and then the store, painting the columns that are the reflections of those, so a rewrite that mirrors mode 0's loop body without moving the decrement ahead of the store paints the complementary set of columns and the sprite comes out one pixel off. The routine's inputs arrive in ESI and EDI plus three globals and it destroys EBX, ECX, EDX, ESI and EDI along with the row-count global, so its register contract is not expressible as a C prototype; the rebuild keeps it by linking the original's assembly, and only the C translation kept for reference in src/rle.c turns it into two ordinary parameters.
 
 === 0005758e [EOL]
-Three 0x90 NOP filler bytes after a JMP SHORT, inside the body of fdps_rle_blit_mirrored_horizontal.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000575aa [EOL]
-3-byte 90 90 90 NOP padding gap inside the fdps_rle_blit_mirrored_horizontal span
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000575ca [EOL]
-3-byte 0x90 NOP alignment fill inside fdps_rle_blit_mirrored_horizontal's address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000575ed [PLATE]
 Blit mode 8: draws one 4-op RLE sprite stream vertically mirrored, by aiming the destination pointer at the bottom row of the target rectangle and handing the decoding itself to fdps_rle_blit_passthrough with an upward row step.
@@ -20998,6 +21008,7 @@ Returns:
 Pool: fdps  [shares the game's blit geometry globals at 0x00070022/0x00070024/0x0007002e with fdps_blit_dispatch, its only caller, as one of that dispatcher's thirteen mode kernels; no Function ID hit against the Watcom libraries or against ailv3.lib and the body hash is unique in the image, and it performs real raster arithmetic on program globals rather than merely redirecting control, so not binary_artifact]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlebase.asm (ticket 22.3). The C translation in src/rle.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The upward row step is -(pitch + width), not -pitch. fdps_rle_blit_passthrough adds it only after EDI has already walked one whole width across the row, so a rewrite that does the intuitive thing and steps the destination back by one pitch per row staggers the image one width further left on every row. The starting displacement is likewise pitch * (rows - 1) and not pitch * rows: the mirrored image has to occupy the very same rectangle an unmirrored blit of the same sprite would, and the off-by-one puts it a row too low. Both counts are 16-bit -- DEC DX on the row count means a row count of zero displaces the destination by 65535 pitches and then draws 65536 rows from there, far outside the surface, rather than drawing nothing. Getting any of that wrong will most likely survive playtesting: mode 8 is selected from exactly two call sites, both in fdps_unit_status_window_wait_input's idle animation, which arms itself only when a rand draw comes out a multiple of 200, so the only picture this kernel ever draws is a rarely seen easter egg. It has to be checked deliberately, not waited for.
 
 === 0005761b [PLATE]
@@ -21032,13 +21043,14 @@ Returns:
 Pool: fdps  [no Function ID candidate in either library set; shares the graphics state block at 0x00070022/0x00070024/0x00070030 with fdps_blit_dispatch, its only caller, and blends through the game's own palette tables at 0x000653f0 and 0x000643f0 -- work no C runtime, maths library or audio driver ships]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlemix.asm (ticket 22.3). The C translation in src/rleblend.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The 12-bit index into the inverse colour cube at 0x000643f0 is built as (v >> 12) | (v & 0xffff) from a value carrying red in bits 16-19, green in bits 8-11 and blue in bits 0-3, which lands green in bits 8-11, red in bits 4-7 and blue in bits 0-3: the cube is green-major, then red, then blue, so the obvious cube[(r << 8) | (g << 4) | b] returns a wrong colour for every pixel that is not grey. The level > 8 branch is not a second blend rule either -- it is the same two weights fetched from the other half of the ramp table, because rows 0-8 and 9-17 only carry the coefficients 0..8 and 16..8 -- so writing it as a special case, or picking any two rows whose coefficients do not sum to 16, breaks the masked add: a channel byte then exceeds 255 and carries into the next channel. The level's polarity is the third trap: 0 draws the source opaque and 16 makes it invisible, the opposite of the opacity the callers hold -- fdps_draw_composite_sprite stores 16 - opacity at 0x0001424e -- so passing an opacity straight through inverts every fade. Two family traps also apply here: the stretched op writes its first pixel at dst+1 and steps by 2, so for (i = 0; i < len; i++) dst[2*i] = px shifts the run one column left, and both loop terminators test for exactly zero (OR BX,BX after the subtraction, and a DEC of the word at 0x00070022), so a stream whose runs overrun the row width wraps BX and keeps painting, and a height of zero draws 65536 rows instead of none.
 
 === 0005771a [EOL]
-3-byte NOP filler inside the address span of fdps_rle_blit_translucent
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057769 [EOL]
-3-byte 90 90 90 alignment padding gap inside the 0005761b function range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057793 [PLATE]
 Blit mode 0x0a of fdps_blit_dispatch: draws one RLE 4-op sprite stream with every pixel it writes alpha-blended toward a single constant palette colour, and blends that same colour into the destination pixels showing through the sprite's transparent runs, so the whole width x height rectangle comes out tinted.
@@ -21071,13 +21083,14 @@ Returns:
 Pool: fdps  [no Function ID hit in either library set; the only caller is fdps_blit_dispatch, and DAT_00070022/DAT_00070024/DAT_00070030 are that dispatcher's blit parameter block, not library state]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlemix.asm (ticket 22.3). The C translation in src/rleblend.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The 0b11 op here is not the transparent skip it is in the rest of the family: it reads each destination pixel back and blends the tint into it, so the backdrop inside the sprite's bounding box is tinted as well as the sprite. Writing the family's obvious 'advance past transparent runs' body leaves an untinted hole in the shape of the sprite's transparency. In the same vein the 0b01 stretched fill writes its first pixel at EDI+1 rather than EDI while consuming 2*len columns of row width, so a straightforward for (i = 0; i < len; i++) dst[i*2] = c is off by one pixel. The consequence is visible, not theoretical: this kernel is the battle map's movement-range highlight, so a transparent-skip body would leave the highlight tinting only the opaque pixels of each map tile and not the tile as a whole.
 
 === 00057883 [EOL]
-3-byte 0x90 NOP filler inside the address range of fdps_rle_blit_tint_sprite_and_backdrop
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 000578c7 [EOL]
-3-byte NOP filler (90 90 90) in a gap inside fdps_rle_blit_tint_sprite_and_backdrop's address span; no refs, no code reaches it.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057916 [PLATE]
 Blit mode 11: decodes an RLE 4-op sprite stream into an 8bpp destination surface, alpha-blending every pixel it draws with one constant palette colour and leaving the transparent runs untouched.
@@ -21112,13 +21125,14 @@ Returns:
 Pool: fdps  [no Function ID candidate in either library set; sole caller is fdps_blit_dispatch; shares the blit state globals]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlemix.asm (ticket 22.3). The C translation in src/rleblend.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 This kernel is not an ordinary C function: it runs on fdps_blit_dispatch's frame and uses that function's own argument slots [EBP+0x08] through [EBP+0x1c] as its scratch, and it destroys EBX, ESI and EDI, which Watcom's convention says a callee preserves. Rewriting it as a plain C routine taking (stream, dest, descriptor) and calling it from a rebuilt fdps_blit_dispatch that still reads its own arguments after the call gives the wrong result. alpha is also unchecked -- 16-alpha is formed by SUB ECX,0x10 / NEG ECX with no clamp, so any value above 16 indexes blend_table below its base. And the fourth descriptor field belongs to the tint kernels alone: fdps_draw_map_unit never writes it on its mode 9 calls, so declaring one descriptor struct and dutifully initialising all four fields at every call site is not what the original does.
 
 === 00057a06 [EOL]
-3-byte 0x90 NOP run: alignment filler in a gap inside fdps_rle_blit_tint's address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057a4a [EOL]
-3-byte 0x90 NOP alignment filler inside the fdps_rle_blit_tint address range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057a74 [PLATE]
 Blit mode 0x0c: draws one 4-op RLE sprite stream into an 8bpp destination surface as a translucent sprite, but only for the pixels whose palette index falls inside a caller-configured colour range; every pixel outside that range is written through opaque. Nothing in the shipped executable selects this mode.
@@ -21161,19 +21175,20 @@ Reachability: unreachable in the shipped executable. fdps_blit_dispatch is the o
 Pool: fdps  [no Function ID hit in either library set; it shares fdps_blit_dispatch's stack frame and blit state globals and is reached only from that dispatcher's mode == 0x0c arm]
 
 Rebuild note:
+Rebuild form: kept as the original's hand-written assembly, transcribed instruction for instruction -- NOP padding and instruction lengths included -- into src/rlemix.asm (ticket 22.3). The C translation in src/rleblend.c is reference only, under #if 0 (rebuild_info/code_layout.md); the traps below are what that translation, or any future rewrite, has to keep.
 The 12-bit inverse-palette index is folded green-major: after the & 0x0f0f0f the code ORs (packed >> 12) into (packed & 0xffff), putting green in bits 8-11, red in 4-7 and blue in 0-3, so the lookup is cube[g*256 + r*16 + b]. Writing the obvious cube[r*256 + g*16 + b] gives wrong colours, and it keeps giving them unless the cube generator is changed to match -- fdps_build_palette_tables fills 000643f0 in exactly that green-outer, red-middle, blue-inner order (loops at 0002b11a/0002b134/0002b144, arguments pushed at 0002b16a/0002b175). Second trap: the routine uses fdps_blit_dispatch's own argument slots [EBP+0x08..0x1c] as scratch, overwriting src, dst, width, height and pitch; a rewrite that keeps those as ordinary C locals and reads any of them after the blit gets the original values where the assembly has none. Third: no call site selects mode 0x0c, so this kernel's correctness cannot be established by playing the game whichever way a rebuild treats it -- keeping it earns no play-test coverage, and the only check available is reading it against the original.
 
 === 00057b1b [EOL]
-3-byte NOP filler (90 90 90) inside the address span of fdps_rle_blit_translucent_color_range
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057b8a [EOL]
-Three 0x90 NOPs: unreachable alignment filler inside fdps_rle_blit_translucent_color_range, after a jmp and before live code at 00057b8d.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057bcd [EOL]
-3-byte 0x90 NOP alignment filler
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00057c36 [EOL]
-Three 0x90 NOP filler bytes inside fdps_rle_blit_translucent_color_range, between a short jmp and the next branch target at 00057c39.
+Branch padding, not alignment: the one-pass assembler reserved a 5-byte JMP here, shortened it to the 2-byte JMP just above, and left these 3 NOPs. Flow never reaches them; they belong to this function's body and are transcribed as-is (rebuild_info/build_flags.md).
 
 === 00060004 [PLATE]
 Battle rule flag: non-zero means cancelling the action menu ends the unit's turn; zero means the cancel is a take-back.

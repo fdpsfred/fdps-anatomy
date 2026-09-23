@@ -2531,15 +2531,15 @@
       "from": "emit",
       "what": "Timing (contract D). The original moves each run with REP STOSB / REP MOVSB and steps a skip with a single ADD EDI,ECX; the emitted C compiled at -od writes one byte per iteration through ebp-relative locals, so the same sprite costs several times the instructions. This is blit mode 0, the plain sprite and tile blit -- the most frequently executed drawing loop in the game -- and the whole thirteen-kernel family will have the same shape. Behaviour per pixel is identical (42 assertions cover all four ops, both row directions and the row advance); what is not established is whether the slower blit is visible once the map, the sprites and the battle animations are all drawing through it at the emulator's cycle setting.",
       "needs": "A DOSBox-X playtest of the rebuilt executable against the original at the same cycle setting once enough of the drawing path is emitted to put a battle map on screen -- specifically whether animation paced on the timer tick counter drops frames where the original does not.",
-      "status": "handoff",
-      "answer": "The per-pixel cost gap is real (RLE.OBJ: one byte per iteration through ebp-relative locals where the original does REP STOSB at 00056a30, REP MOVSB at 00056a66 and a single ADD EDI,ECX at 00056a77), but per-pixel output is identical and the game paces frames on vertical retrace plus a change of data_fdps_timer_tick_counter, not on blit duration, so the slowdown changes nothing visible unless one frame's drawing overruns that budget. Not blocking on the evidence available. Ticket 24: run the rebuilt and the original executables in DOSBox-X at the project's cycle setting, same save, and compare (a) a battle map scrolled with the cursor while many units are on screen, (b) the unit walk/attack animations and the fade-in/fade-out of a battle, (c) the village walk animation (fdps_village_animate_walk_to_destination). Look for the rebuild visibly stuttering, lagging behind input, or taking longer wall-clock time for the same animation than the original. Equal pacing closes this.",
+      "status": "resolved",
+      "answer": "The per-pixel cost gap is real (RLE.OBJ: one byte per iteration through ebp-relative locals where the original does REP STOSB at 00056a30, REP MOVSB at 00056a66 and a single ADD EDI,ECX at 00056a77), but per-pixel output is identical and the game paces frames on vertical retrace plus a change of data_fdps_timer_tick_counter, not on blit duration, so the slowdown changes nothing visible unless one frame's drawing overruns that budget. Not blocking on the evidence available. Ticket 24: run the rebuilt and the original executables in DOSBox-X at the project's cycle setting, same save, and compare (a) a battle map scrolled with the cursor while many units are on screen, (b) the unit walk/attack animations and the fade-in/fade-out of a battle, (c) the village walk animation (fdps_village_animate_walk_to_destination). Look for the rebuild visibly stuttering, lagging behind input, or taking longer wall-clock time for the same animation than the original. Equal pacing closes this. Closed by ticket 22.3: the RLE family (fdps_blit_dispatch and the fourteen routines under it) is linked as the original's hand-written assembly, transcribed into src/rledisp.asm, rlebase.asm, rlepal.asm, rleturn.asm and rlemix.asm. tools/rle_asm/asm_match.py -- registered in the build gate as rle_asm.check -- verifies every routine against FDPS.LE instruction for instruction: the same instructions and operands, every NOP, every instruction the same length, every branch landing on the corresponding instruction and every relocation naming the same symbol. The per-pixel cost is therefore the original's (REP STOSB / REP MOVSB / ADD EDI,ECX), and there is no speed question left for the playtest; ticket 24 only confirms the pictures are drawn correctly.",
       "blocking": false,
-      "handoff_to": "24",
       "sweep": {
         "cluster": "c21",
         "ruling": "handoff_t24",
         "pass": "first"
-      }
+      },
+      "closed_by": "22.3"
     },
     {
       "from": "emit",
@@ -2559,14 +2559,15 @@
       "what": "I reached the timing concern independently and confirmed it is measured rather than suspected. WDISASM of workspace/code_emit/out/objs/RLE.OBJ shows every arm running one byte per iteration through ebp-relative locals -- L4 for the fill where the original has REP STOSB at 00056a30, L7 for the stretched arm, L10 for the literal where the original has REP MOVSB at 00056a66 -- and even the skip arm, a single ADD EDI,ECX at 00056a77 in the original, became two dword memory operations at L12. The loop scaffolding itself reloads run_length from -18H[ebp] on every pass. So the per-pixel cost gap in the emitter's entry is real and is visible in the object file today. Nothing to add to what would settle it.",
       "needs": "As emit#0.",
       "same_as": "emit#0",
-      "status": "handoff",
-      "handoff_to": "24",
+      "status": "resolved",
       "sweep": {
         "cluster": "c21",
         "ruling": "handoff_t24",
         "pass": "first",
         "mirror_of": "00056a0d#0"
-      }
+      },
+      "answer": " Closed by ticket 22.3: the RLE family (fdps_blit_dispatch and the fourteen routines under it) is linked as the original's hand-written assembly, transcribed into src/rledisp.asm, rlebase.asm, rlepal.asm, rleturn.asm and rlemix.asm. tools/rle_asm/asm_match.py -- registered in the build gate as rle_asm.check -- verifies every routine against FDPS.LE instruction for instruction: the same instructions and operands, every NOP, every instruction the same length, every branch landing on the corresponding instruction and every relocation naming the same symbol. The per-pixel cost is therefore the original's (REP STOSB / REP MOVSB / ADD EDI,ECX), and there is no speed question left for the playtest; ticket 24 only confirms the pictures are drawn correctly.",
+      "closed_by": "22.3"
     },
     {
       "from": "review",
@@ -2600,15 +2601,15 @@
       "from": "emit",
       "what": "Contract D. This is a per-pixel drawing loop that the original wrote in assembly around STOSB and a register accumulator; the emitted C keeps the same arithmetic and the same global reloads but will be materially slower per destination pixel. Nothing inside the routine reads a timer, a retrace or a sound state, so there is no timing balance observable from within it, and every caller reaches it through fdps_blit_dispatch's mode 4. What cannot be established from the assembly is whether any animation that scales a sprite is paced by how long the blit takes rather than by a timer.",
       "needs": "A playtest in DOSBox-X at the project's cycle setting of a sequence that uses blit mode 4 -- a scaled sprite animation -- against the original executable, watching for a pacing difference.",
-      "status": "handoff",
-      "answer": "fdps_rle_blit_scaled reads no timer, retrace port or sound state, and every caller reaches it through fdps_blit_dispatch mode 4; frames are paced on vertical retrace plus data_fdps_timer_tick_counter, so the slower C kernel changes behaviour only if drawing a frame overruns that budget. Not blocking on current evidence. Ticket 24: in DOSBox-X at the project's cycle setting, play the same sequence in the rebuilt and original executables where a sprite is drawn scaled (blit mode 4 -- the callers of fdps_blit_dispatch that pass mode 4, e.g. zooming unit/portrait sprites in battle effects) and compare how long the scaling animation takes and whether it stutters. Same duration and smoothness closes this.",
+      "status": "resolved",
+      "answer": "fdps_rle_blit_scaled reads no timer, retrace port or sound state, and every caller reaches it through fdps_blit_dispatch mode 4; frames are paced on vertical retrace plus data_fdps_timer_tick_counter, so the slower C kernel changes behaviour only if drawing a frame overruns that budget. Not blocking on current evidence. Ticket 24: in DOSBox-X at the project's cycle setting, play the same sequence in the rebuilt and original executables where a sprite is drawn scaled (blit mode 4 -- the callers of fdps_blit_dispatch that pass mode 4, e.g. zooming unit/portrait sprites in battle effects) and compare how long the scaling animation takes and whether it stutters. Same duration and smoothness closes this. Closed by ticket 22.3: the RLE family (fdps_blit_dispatch and the fourteen routines under it) is linked as the original's hand-written assembly, transcribed into src/rledisp.asm, rlebase.asm, rlepal.asm, rleturn.asm and rlemix.asm. tools/rle_asm/asm_match.py -- registered in the build gate as rle_asm.check -- verifies every routine against FDPS.LE instruction for instruction: the same instructions and operands, every NOP, every instruction the same length, every branch landing on the corresponding instruction and every relocation naming the same symbol. The per-pixel cost is therefore the original's (REP STOSB / REP MOVSB / ADD EDI,ECX), and there is no speed question left for the playtest; ticket 24 only confirms the pictures are drawn correctly.",
       "blocking": false,
-      "handoff_to": "24",
       "sweep": {
         "cluster": "c21",
         "ruling": "handoff_t24",
         "pass": "first"
-      }
+      },
+      "closed_by": "22.3"
     },
     {
       "from": "review",
@@ -2627,15 +2628,16 @@
       "from": "review",
       "what": "Nothing added. I checked the body for any timer, retrace or sound-state read that would make the kernel's own speed observable from inside it and found none, which is what the emitter reported.",
       "needs": "A playtest in DOSBox-X at the project's cycle setting of a sequence that uses blit mode 4, against the original executable, watching for a pacing difference.",
-      "status": "handoff",
+      "status": "resolved",
       "same_as": "emit#1",
-      "handoff_to": "24",
       "sweep": {
         "cluster": "c21",
         "ruling": "handoff_t24",
         "pass": "first",
         "mirror_of": "00056c5e#1"
-      }
+      },
+      "answer": " Closed by ticket 22.3: the RLE family (fdps_blit_dispatch and the fourteen routines under it) is linked as the original's hand-written assembly, transcribed into src/rledisp.asm, rlebase.asm, rlepal.asm, rleturn.asm and rlemix.asm. tools/rle_asm/asm_match.py -- registered in the build gate as rle_asm.check -- verifies every routine against FDPS.LE instruction for instruction: the same instructions and operands, every NOP, every instruction the same length, every branch landing on the corresponding instruction and every relocation naming the same symbol. The per-pixel cost is therefore the original's (REP STOSB / REP MOVSB / ADD EDI,ECX), and there is no speed question left for the playtest; ticket 24 only confirms the pictures are drawn correctly.",
+      "closed_by": "22.3"
     }
   ],
   "00056e2a": [
