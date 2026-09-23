@@ -317,13 +317,48 @@ def load_manifest():
             "symbols": []}
 
 
+def definition_sha(v):
+    """What the landed text is made of, so a later verdict that changes it can
+    be told apart from one that does not."""
+    import hashlib
+    blob = json.dumps([v.get("definition", ""), " ".join((v.get("comment") or "").split()),
+                       v.get("includes") or [], (v.get("header") or {}).get("replace_with")],
+                      ensure_ascii=False)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
 def manifest_entry(v):
     return {"symbol": v["symbol"], "addr": v["addr"], "size": v["size"],
             "target": v["target"], "kind": v["kind"],
             "layout": {k: val for k, val in (v.get("layout") or {}).items()
                        if k in ("follows", "zero_guard_before", "zero_pad_after") and val},
             "confidence": v["confidence"], "basis": " ".join(v["basis"].split()),
-            "handoff": [h.get("id") for h in (v.get("handoff") or []) if h.get("id")]}
+            "handoff": [h.get("id") for h in (v.get("handoff") or []) if h.get("id")],
+            "definition_sha": definition_sha(v)}
+
+
+def needs_relanding(v, stored):
+    """True when a landed symbol's verdict now says something different from
+    what was landed.  An entry landed before definition_sha existed is compared
+    on everything else, so the field's arrival does not re-land every symbol."""
+    now = manifest_entry(v)
+    if "definition_sha" not in stored:
+        now.pop("definition_sha")
+    return now != stored
+
+
+def remove_entry(target, addr, src_dir=SRC):
+    """Take one definition out of a file's data block (ownership moved away)."""
+    path = src_dir / target
+    text = path.read_text(encoding="utf-8")
+    split = split_block(text)
+    if split is None or addr not in split[1]:
+        raise LandError("src/%s has no data entry for %s" % (target, addr))
+    before, entries, after = split
+    kinds = kinds_in_block(entries)
+    del entries[addr]
+    path.write_text(before + render_block(entries, kinds) + after,
+                    encoding="utf-8", newline="\n")
 
 
 def apply_target(target, src_dir=SRC, manifest_path=MANIFEST, verdicts=None,
@@ -458,11 +493,20 @@ def summary():
 def plan():
     routing = load_routing()
     rows = routing_by_symbol(routing)
-    landed = {e["symbol"] for e in load_manifest()["symbols"]}
-    out = {"ready": {}, "invalid": [], "reroute": [], "landed": len(landed)}
+    landed = {e["symbol"]: e for e in load_manifest()["symbols"]}
+    out = {"ready": {}, "invalid": [], "reroute": [], "landed": len(landed),
+           "relanding": []}
     for sym, v in all_verdicts().items():
-        if sym in landed:
+        if v.get("_unreadable"):
+            if sym not in landed:
+                out["invalid"].append({"symbol": sym, "why": ["not valid JSON"]})
             continue
+        if sym in landed and not v.get("reroute"):
+            # Landed already: ready again only if its verdict was re-judged
+            # into something different (a changed definition, layout or owner).
+            if validate(v, rows) or not needs_relanding(v, landed[sym]):
+                continue
+            out["relanding"].append(sym)
         if v.get("_unreadable"):
             out["invalid"].append({"symbol": sym, "why": ["not valid JSON"]})
             continue
@@ -576,6 +620,22 @@ def _selftest():
         t3 = (tmp / "src" / "gd.c").read_text(encoding="utf-8")
         rows.append(("later landing keeps earlier entries",
                      all(s in t3 for s in ("data_ap[6] =", "data_z;", "data_mid = 3")), "yes"))
+        # A re-judged verdict is told apart from an unchanged one.
+        stored = [e for e in m["symbols"] if e["symbol"] == "data_ap"][0]
+        rows.append(("unchanged verdict is not re-landed",
+                     not needs_relanding(vs["data_ap"], stored), "yes"))
+        changed = dict(vs["data_ap"], definition="int data_ap[6] = { 5, 0, -5, -5, -5, 1 };")
+        rows.append(("changed definition is re-landed", needs_relanding(changed, stored), "yes"))
+        legacy = dict(stored)
+        legacy.pop("definition_sha")
+        rows.append(("pre-sha entry compared on the rest",
+                     not needs_relanding(vs["data_ap"], legacy), "yes"))
+        # Moving ownership away takes the entry out and leaves the rest.
+        remove_entry("gd.c", "00060060", src_dir=tmp / "src")
+        t4 = (tmp / "src" / "gd.c").read_text(encoding="utf-8")
+        rows.append(("remove takes one entry out",
+                     "data_mid" not in t4 and "data_ap[6] =" in t4 and "data_z;" in t4, "yes"))
+        (tmp / "src" / "gd.c").write_text(t3, encoding="utf-8")
         # A follows constraint that the address order cannot satisfy is refused
         # before anything is written.
         broken = dict(vs["data_flag"], layout={"follows": "data_ap"})
@@ -598,8 +658,9 @@ def _selftest():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", nargs="?", choices=("validate", "plan", "apply", "rescan-list",
-                                               "ghidra-fixes", "summary"))
+    ap.add_argument("cmd", nargs="?", choices=("validate", "plan", "apply", "remove",
+                                               "rescan-list", "ghidra-fixes", "summary"))
+    ap.add_argument("--addr")
     ap.add_argument("symbols", nargs="*")
     ap.add_argument("--target")
     ap.add_argument("--selftest", action="store_true")
@@ -621,6 +682,16 @@ def main():
         return 1 if bad else 0
     if a.cmd == "plan":
         print(json.dumps(plan(), indent=2, ensure_ascii=False))
+        return 0
+    if a.cmd == "remove":
+        if not (a.target and a.addr):
+            ap.error("remove needs --target and --addr")
+        try:
+            remove_entry(a.target, a.addr)
+        except LandError as e:
+            print("error: %s" % e)
+            return 1
+        print("removed %s from src/%s" % (a.addr, a.target))
         return 0
     if a.cmd == "rescan-list":
         print(json.dumps(rescan_list(), indent=2, ensure_ascii=False))

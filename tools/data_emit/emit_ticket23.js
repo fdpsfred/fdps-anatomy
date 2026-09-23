@@ -102,6 +102,12 @@ const LABEL = A.label || 'data'
 const DATE = A.date || 'undated'
 const LIMIT = A.limit || 0
 const PASSES = A.passes || 3
+// Re-judging: globals already landed that a later finding says were decided on
+// incomplete evidence. Each is judged again, one agent each, with the finding
+// handed to it as evidence (not as a verdict to copy); what changes is landed
+// and gated like anything else.
+const REJUDGE = A.rejudge || []
+const REJUDGE_NOTE = A.rejudgeNote || ''
 const MAX_REPAIRS = 2
 // Every commit message ends with these trailers, and is passed by file:
 // PowerShell hands a multi-line -m argument to git as a pathspec.
@@ -276,9 +282,22 @@ const TOOLCHAIN_FACTS = `# What the toolchain does with a global (measured, tool
 function judgePrompt(row, mode) {
   const handoff = (row.handoff || []).length
     ? row.handoff.join(', ') : 'none'
+  const rejudge = row.verdict === 'rejudge' && REJUDGE_NOTE
   return [ENV, '', TOOLCHAIN_FACTS, '',
     '# Role: Judge one global. ' + (mode === 'retry'
       ? 'A previous attempt left no valid verdict for it; start over.' : ''),
+    rejudge ? [
+      '',
+      '# This is a RE-judgement of a global that is already landed.',
+      'Its current verdict is ' + VERDICTS + '\\' + row.symbol + '.json and its current',
+      'definition is in src/. A later investigation produced the finding below. It is',
+      'EVIDENCE, not a verdict to copy: check the parts that concern THIS symbol against',
+      'the assembly yourself, then rewrite the verdict file from scratch under the rules',
+      'below. If the finding does not hold for this symbol, say so in evidence and keep',
+      'what was right. Record "rejudged": true and "previous_basis": <old basis>.',
+      '',
+      REJUDGE_NOTE,
+    ].join('\n') : '',
     '',
     'Symbol   ' + row.symbol,
     'Address  ' + row.addr + '   routing type ' + (row.type || '?') + '   size ' + row.size
@@ -463,12 +482,13 @@ function recoverPrompt() {
   ].join('\n')
 }
 
-function worklistPrompt(build) {
+function worklistPrompt(build, symbols) {
   return [
     '# Role: Worklist. Run one command, report what it prints, judge nothing.',
     '',
     '  cd ' + REPO + '; python tools/data_emit/worklist.py' + (build ? ' --build' : '')
-      + (LIMIT ? ' --limit ' + LIMIT : '') + ' > ' + WS + '\\worklist.json',
+      + (symbols && symbols.length ? ' --symbols ' + symbols.join(',')
+        : (LIMIT ? ' --limit ' + LIMIT : '')) + ' > ' + WS + '\\worklist.json',
     '  then read ' + WS + '\\worklist.json with Python (UTF-8).',
     build ? 'The --build rebuilds the unit-test image (several minutes, foreground). If it'
       + ' reports build_rc != 0, set build_ok false and copy build_tail into detail; if the'
@@ -490,7 +510,12 @@ function reroutePrompt(sym) {
     'The verdict ' + VERDICTS + '\\' + sym + '.json asks for this global to be owned by',
     'another file because a layout neighbour lives there ("reroute": {to, why}).',
     '',
-    '1. In tools/code_emit/build_routing.py add to DATA_OVERRIDES:',
+    '0. If tools/data_emit/data/manifest.json already lists this symbol, it is landed in',
+    '   its old owner: take its definition out of that file\'s data block first,',
+    '     python tools/data_emit/land.py remove --target <old owner .c> --addr <its addr>',
+    '   (the Land stage writes it into the new owner from the verdict afterwards).',
+    '1. In tools/code_emit/build_routing.py add to DATA_OVERRIDES, or replace the entry',
+    '   if the symbol already has one:',
     '     "' + sym + '": ("<to>", "<the why, one line>"),',
     '   then  python tools/code_emit/build_routing.py  and  python tools/code_emit/build_routing.py --check',
     '   Never hand-edit routing.json or routing.md.',
@@ -502,8 +527,10 @@ function reroutePrompt(sym) {
     '3. If rebuild_info/code_layout.md states counts of globals per owner, fix them.',
     '4. In the verdict set target = <to> and reroute = null (Python, UTF-8). It is in',
     '   workspace/, not committed.',
-    '5. python tools/code_emit/build_emit.py build  must succeed (foreground).',
-    '6. git add tools/code_emit src rebuild_info/code_layout.md; git commit  with subject',
+    '5. python tools/code_emit/build_emit.py build  must succeed (foreground). If step 0',
+    '   removed a definition, the symbol is briefly undefined and the build links it',
+    '   from the stub module -- that is expected until Land writes it into its new owner.',
+    '6. git add tools/code_emit src tools/data_emit/data rebuild_info/code_layout.md; git commit  with subject',
     '     data: ' + sym + ' 改由 <to> 擁有（佈局相鄰）',
     '   a blank line, one Traditional Chinese line on why, a blank line, ' + COAUTHOR,
     '7. git status --porcelain must be empty.',
@@ -753,7 +780,9 @@ try {
   for (let pass = 1; pass <= PASSES; pass++) {
     // --------------------------------------------------------- Worklist
     phase('Worklist')
-    const wl = await serial(worklistPrompt(true), { label: 'worklist:' + pass, phase: 'Worklist', schema: WORKLIST })
+    const rejudgeNow = pass === 1 && REJUDGE.length
+    const wl = await serial(worklistPrompt(true, rejudgeNow ? REJUDGE : null),
+      { label: 'worklist:' + pass, phase: 'Worklist', schema: WORKLIST })
     if (!wl || !wl.ok) throw new Stop('worklist_failed', (wl && wl.detail) || 'no worklist')
     if (wl.build_ok === false) throw new Stop('build_failed', wl.detail || 'the build behind the worklist failed')
     lastUndefined = wl.globals_undefined
@@ -763,7 +792,7 @@ try {
     log('pass ' + pass + ': ' + wl.globals_undefined + ' global(s) undefined, '
       + wl.judge.length + ' to judge, ' + (wl.ready_to_land || 0) + ' ready to land, '
       + (wl.reroute || []).length + ' reroute(s)')
-    if (wl.globals_undefined === 0) break
+    if (wl.globals_undefined === 0 && !rejudgeNow) break
 
     // ------------------------------------------------------------ Judge
     // The caller's limit is on how many globals this run judges, across passes.

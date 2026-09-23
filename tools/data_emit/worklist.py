@@ -79,6 +79,10 @@ def main():
     ap.add_argument("--build", action="store_true")
     ap.add_argument("--limit", type=int, default=0,
                     help="how many symbols still needing a verdict to list; 0 = all")
+    ap.add_argument("--symbols", default="",
+                    help="comma-separated globals to list for re-judging whether or "
+                         "not the linker still reports them (a finding about an "
+                         "already-landed global); the judge rows are these, in order")
     a = ap.parse_args()
 
     report = {}
@@ -99,14 +103,19 @@ def main():
 
     rows = []
     not_global = []
-    for s in undef.get("symbols", []):
+    wanted = [s for s in a.symbols.split(",") if s]
+    source = ([{"symbol": s} for s in wanted] if wanted
+              else undef.get("symbols", []))
+    for s in source:
         sym = s["symbol"]
         row = routing.get(sym)
         if row is None:
             not_global.append({"symbol": sym, "kind": s.get("kind")})
             continue
         v = land.read_verdict(sym)
-        if sym in manifest:
+        if wanted:
+            state, why = "rejudge", []
+        elif sym in manifest:
             state, why = "landed_but_undefined", []
         elif v is None:
             state, why = "none", []
@@ -124,10 +133,12 @@ def main():
                      "verdict": state, "verdict_problems": why,
                      "handoff": hand.get(sym, [])})
     rows.sort(key=lambda r: r["addr"])
-    todo = [r for r in rows if r["verdict"] in ("none", "invalid")]
+    todo = [r for r in rows if r["verdict"] in ("none", "invalid", "rejudge")]
     report.update({
         "undefined_total": undef.get("count"),
-        "globals_undefined": len(rows),
+        # What the linker still reports, whatever rows were asked for.
+        "globals_undefined": sum(1 for s in undef.get("symbols", [])
+                                 if s["symbol"] in routing),
         "not_globals": not_global,
         "needs_verdict": len(todo),
         "ready_to_land": sum(1 for r in rows if r["verdict"] == "valid"),
