@@ -11,7 +11,7 @@
 | `emit_ticket23.js` | Workflow。收拾 → 連結取清單 → 每個全域一個判定 agent（平行）→ 驗證判定檔、失敗重試一次 → 回掃低信心判定 → 擁有權變更 → 整批落地、build gate、修復或逐檔重試 → 再連結直到清單為空 → Ghidra 修正 → 知識庫 → devlog。帶 `rejudge` 時第一輪改判那些已落地的全域。不看自己的預算 |
 | `worklist.py` | 工作清單：（`--build` 時先建置）讀 `workspace/code_emit/undefined.json`，每個未定義全域附上 routing 列、`.h` 裡現有的 `extern`、判定檔狀態、票 22 交接過來且點名它的疑慮編號。`--symbols a,b` 改列指定的全域（重判已落地的） |
 | `land.py` | 轉錄段，不做判斷。`validate` 驗判定檔、`plan` 列出就緒的判定（已落地而判定內容改了的列在 `relanding`）、`apply --target X.c` 把就緒判定寫進該檔的資料區塊並更新 `manifest.json`、`remove --target X.c --addr A` 在擁有權搬家時拿掉舊檔的條目、`rescan-list`／`ghidra-fixes`／`summary` 給 workflow 的其他段用。`--selftest` |
-| `check_data.py` | 閘門：每個已落地全域的連結後 byte 對原版 `FDPS.LE`，指標比指向的符號名，外加佈局約束。已排進 build gate 的 `emittest` 目標（套件 `data_emit.check`）。`--selftest` 以原版自己驗證它會說是也會說不 |
+| `check_data.py` | 閘門：每個已落地全域的連結後 byte 對原版 `FDPS.LE`，指標比指向的符號名，外加佈局約束。預設讀單元測試映像，`--image game` 改讀遊戲本體 `FDE.EXE`（[`tools/game_build/`](../game_build/_index.md)），結果各自落檔。已排進 build gate：`emittest` 目標的 `data_emit.check` 與 `game` 目標的 `data_emit.check_game`。`--selftest` 以原版自己驗證它會說是也會說不 |
 | `layout_probe.py` | 量測：Watcom 10.0a 與 wlink 怎麼擺帶初值與不帶初值的全域。結論在 `rebuild_info/data_emit.md` |
 
 ## 資料
@@ -29,6 +29,7 @@ python tools/data_emit/worklist.py --build        # 還剩哪些未定義
 python tools/data_emit/land.py plan               # 哪些判定就緒
 python tools/data_emit/land.py summary            # 已落地的精簡索引：分類、目標檔、佈局約束、交接疑慮
 python tools/data_emit/check_data.py              # 已落地的與原版比對（先建置）
+python tools/data_emit/check_data.py --image game # 同上，對象換成遊戲本體
 python tools/data_emit/layout_probe.py            # 重量工具鏈的全域擺放規則
 python tools/build_gate/gate.py check --target emittest   # 正式閘門，含上一行
 ```

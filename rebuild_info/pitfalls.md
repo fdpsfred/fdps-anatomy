@@ -151,6 +151,8 @@
 | `ailv3.lib` 的 EXTDEF 用的是**前作**對那七個遊戲側符號的拼法 | 在 `src/` 裡照 `ailv3.lib` 的名字定義 `fd2_dpmi_lock_size` 之類的東西，或反過來把 FDPS 的符號改名遷就庫。兩種都會讓 C 名稱與 Ghidra 名稱對不上，違反 [`naming.md`](naming.md) 的鐵則。接點放在 `.lnk` 的 `alias` 指令 | [`ail_link.md`](ail_link.md) |
 | 前作的庫沒有的那 16 個 `ail` function 裡，**只有 4 個要補、另外 12 個不必** | 看到「16 個沒有對應」就整批去重抽或手寫。要補的是 `00044dc0`（存 EFLAGS 的 4 byte）與三支已改判成遊戲程式碼的 DPMI 常式——少了它們連結解不掉。另外 12 個不必補：主體的 LX 驅動映像載入層（`0003ccf8` 領頭）在 `FDPS.LE` 裡本來就是連結器整包抽進來的死碼，沒有任何可達的呼叫端，`ailv3.lib` 也沒有參照它們 | [`ail_link.md`](ail_link.md) |
 | `00044dc0` 那 4 byte 的 `PUSHFD/POP EAX/CLI/RET` 屬於 AIL，不是 Watcom 的 `_disable` | 照抄前作 FD2 的 `crt.c`——它把這一段記成 `crt_equivalent_get_eflags` 收在 `crt` 裡。Watcom 真正的 `_disable` 是 `FA C3` 兩個 byte，這 4 byte 掃遍 10.0–10.6a 的 1,135 個 `.lib`／`.obj` 一次都沒出現；連同跳進它的 thunk `0003dcb0`，兩支都不能路由到 `crt` | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| DOS/4GW 當機傾印的 `CS:IP` 不能拿連結基底換回 function | 把 `CS:IP` 的偏移減掉 LE header 的物件基底去查 map。DOS/4GW 把映像搬到 1 MB 以上，各物件的搬移量還不同。要用傾印最後一行 `Crash address (unrelocated) = 1:XXXXXXXX`，它就是 map 的物件：偏移座標 | [`playtest.md`](playtest.md) |
+| 遊戲本體與單元測試映像的全域擺放不同 | 資料比對與佈局約束在測試映像上過了，就當作遊戲也成立。兩個映像由不同的目的檔集合連結，連結器擺放的位置跟著變；相鄰與前置守衛這類約束必須在出貨的 `FDE.EXE` 上另外驗 | [`build_pipeline.md`](build_pipeline.md) |
 | 影片播放不在重建範圍 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責 `spawnv` | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | CD 音源在重建範圍內 | 選曲、起播、停止、循環全部由 `FDPS.LE` 自己下 MSCDEX 命令 | [`program_info/cd_audio.md`](../program_info/cd_audio.md) |
 | 140 個章節／事件處理函式沒有任何直接呼叫者 | 只看呼叫圖會把它們當成死碼砍掉。它們全部只透過 `.object2` 的四張函式指標表被間接呼叫 | [`program_info/memory_layout.md`](../program_info/memory_layout.md) |

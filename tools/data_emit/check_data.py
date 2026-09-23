@@ -30,7 +30,7 @@ What it cannot see: a type or signedness choice that stores the same bytes
 (the compiler and the headers answer that), and a layout dependency nobody
 wrote into the manifest.
 
-Usage: python tools/data_emit/check_data.py [--json] [--only SYM,...]
+Usage: python tools/data_emit/check_data.py [--json] [--only SYM,...] [--image game]
        python tools/data_emit/check_data.py --selftest
 Exit : 0 when every checked symbol and constraint passes.
 """
@@ -44,9 +44,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "tools" / "data_emit" / "data" / "manifest.json"
 ORIGINAL = ROOT / "fdps_game_files" / "FDPS.LE"
-OUT = ROOT / "workspace" / "code_emit" / "out"
 SNAPSHOT = ROOT / "ghidra_snapshot"
-RESULT = ROOT / "workspace" / "data_emit" / "check.json"
+
+# Which linked image to read: the unit-test image by default, or the game
+# itself (tools/game_build/).  The two are linked from different object sets,
+# so the linker places the globals differently, and a layout constraint that
+# holds in one says nothing about the other -- the game image is the one that
+# ships.  Each writes its own result file.
+IMAGES = {
+    "emittest": (ROOT / "workspace" / "code_emit" / "out",
+                 "EMITTEST.EXE", "EMITTEST.MAP",
+                 ROOT / "workspace" / "data_emit" / "check.json"),
+    "game": (ROOT / "workspace" / "game_build" / "out",
+             "FDE.EXE", "FDE.MAP",
+             ROOT / "workspace" / "data_emit" / "check_game.json"),
+}
 
 # LE fixup source type -> bytes patched at the site (LE/LX specification).
 SRC_SIZE = {0x00: 1, 0x02: 2, 0x03: 4, 0x05: 2, 0x06: 6, 0x07: 4, 0x08: 4}
@@ -324,17 +336,19 @@ def check_layout(entry, manifest_by_sym, reb, reb_map):
     return out
 
 
-def run(only=None):
+def run(only=None, image="emittest"):
+    out, exe_name, map_name, result_path = IMAGES[image]
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.is_file() else {"symbols": []}
     entries = [e for e in manifest.get("symbols", [])
                if not only or e["symbol"] in only]
     if not entries:
         return {"ok": True, "checked": 0, "failed": [], "layout_failed": [],
                 "symbols": [], "layout": []}
-    exe = next((p for p in OUT.iterdir() if p.name.upper() == "EMITTEST.EXE"), None) if OUT.is_dir() else None
-    mp = next((p for p in OUT.iterdir() if p.name.upper() == "EMITTEST.MAP"), None) if OUT.is_dir() else None
+    exe = next((p for p in out.iterdir() if p.name.upper() == exe_name), None) if out.is_dir() else None
+    mp = next((p for p in out.iterdir() if p.name.upper() == map_name), None) if out.is_dir() else None
     if exe is None or mp is None:
-        return {"ok": False, "error": "no EMITTEST.EXE / EMITTEST.MAP -- build first",
+        return {"ok": False, "error": "no %s / %s in %s -- build first"
+                                      % (exe_name, map_name, out),
                 "symbols": [], "layout": []}
     orig = LeImage(ORIGINAL.read_bytes())
     reb = LeImage(exe.read_bytes())
@@ -353,9 +367,9 @@ def run(only=None):
               "failed": [r for r in rows if not r["ok"]],
               "layout_failed": [r for r in lay if not r["ok"]],
               "symbols": rows, "layout": lay}
-    RESULT.parent.mkdir(parents=True, exist_ok=True)
-    RESULT.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n",
-                      encoding="utf-8")
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+                           encoding="utf-8")
     return result
 
 
@@ -455,13 +469,16 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--only", default="")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--image", choices=sorted(IMAGES), default="emittest",
+                    help="which linked image to check (default: the unit-test "
+                         "image; `game` is tools/game_build's FDE.EXE)")
     a = ap.parse_args()
     if a.selftest:
         ok = selftest()
         print("[result] %s" % ("PASS" if ok else "FAIL"))
         return 0 if ok else 1
     only = set(s for s in a.only.split(",") if s) or None
-    res = run(only)
+    res = run(only, a.image)
     if a.json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:

@@ -24,6 +24,14 @@
 
 這個目標保證的是「編得過、連得起來、測試全綠」，不保證映像沒動——它本來就會動。它擋不到的東西由 [`emit_pipeline.md`](emit_pipeline.md) 的八類隱性契約檢查表在 emit 當下擋。
 
+### 遊戲本體目標
+
+`game` 是出貨的那個執行檔（`FDE.EXE`，[`build_pipeline.md`](build_pipeline.md)），它**有**映像基準值。理由與 `emittest` 相反：遊戲的原始碼不再按設計一支一支長大，它的映像任何變動不是刻意的修正就是回歸——實機驗證修掉一個偏差，就以 `update --reason` 寫明修了哪支 function、哪個現象。
+
+它另外帶兩個只對它跑的套件：全域資料逐 byte 比對與 RLE 組語指令比對，對象換成遊戲映像（為什麼兩個映像都要驗，見 [`build_pipeline.md`](build_pipeline.md)）。
+
+**修正之後要跑的是整個閘門（不帶 `--target`），不是只跑 `game`。** 單元測試套件 `code_emit.run` 綁在 `emittest` 目標上，只選 `game` 會把它報成範圍外而跳過；修正改的是 `src/`，兩個目標都受影響。
+
 ## 五種等價判定
 
 雜湊相同是最強也最便宜的答案，先問它。雜湊不同時才問第二個問題：差異是不是只落在連結器自己會重寫的地方。
@@ -65,12 +73,14 @@ python tools/build_gate/gate.py update --target smoke --reason "為什麼輸出�
 | 只改註解、只改文件、只改 `tools/` | 不該有任何改變。閘門若報 `different` 就是有東西被連帶改到，去找它，不要推進 |
 | 只改名（符號、參數、檔名） | 允許 `identical`／`strict`／`reloc`，不必推進。若報 `different`，那就不是純改名 |
 | 閘門報 `different` 而你不知道為什麼 | 一律當回歸。先解釋清楚再決定，推進基準值是把問題永久蓋掉 |
+| 改了某個目標也會編到的共用原始碼 | 那個目標的基準值也要推進。`ailsmoke` 會編 `src/dpmi.c` 與 `src/ailflags.asm`，改它們卻只跑 `--target emittest`，`ailsmoke` 就會一直紅著沒人發現；所以收尾要跑一次不帶 `--target` 的完整閘門 |
 
 ## 呼叫方式
 
 ```
 python tools/build_gate/gate.py                     # 全部目標，建置 + 比對 + 測試
 python tools/build_gate/gate.py check --target emittest   # emit 的閘門
+python tools/build_gate/gate.py check --target game       # 只建遊戲本體（快速迴圈；修正後仍要跑全部）
 python tools/build_gate/gate.py check --target smoke --skip-tests
 python tools/build_gate/gate.py check --json        # 結構化結果印到 stdout
 python tools/build_gate/gate.py check --with-audio  # 連音效實跑套件一起

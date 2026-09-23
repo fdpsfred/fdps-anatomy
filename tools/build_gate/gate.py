@@ -52,10 +52,12 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "tools" / "fdps_build"))
 sys.path.insert(0, str(ROOT / "tools" / "ail_link"))
 sys.path.insert(0, str(ROOT / "tools" / "code_emit"))
+sys.path.insert(0, str(ROOT / "tools" / "game_build"))
 import lefixup  # noqa: E402
 import build_min as bm  # noqa: E402
 import link_ail as la  # noqa: E402
 import build_emit as ce  # noqa: E402
+import build_game as gb  # noqa: E402
 
 
 # ------------------------------------------------------------------- targets
@@ -100,16 +102,26 @@ def _build_emittest(ctx):
             "diagnostics": ce.diagnostics}
 
 
-# The gate is target-parameterised because the thing being gated changes as the
-# rebuild progresses: today the two smoke programs and the emit test image,
-# later the game itself.  Adding FDPS here plus one `update --reason` is the
-# whole extension.
+def _build_game(ctx):
+    """The game itself: src/ alone, one link, FDE.EXE (tools/game_build/)."""
+    ok = gb.do_build(ctx["dosbox"], ctx["watcom"], ctx["disc"], ctx["timeout"])
+    return {"builder_ok": ok,
+            "exe": bm.find_ci(gb.OUT, gb.EXE),
+            "build_out": bm.find_ci(gb.OUT, "build.out")}
+
+
+# The gate is target-parameterised because the thing being gated changed as the
+# rebuild progressed: the two smoke programs, the emit test image, and now the
+# game itself.
 #
 # `compare` says whether an image baseline is meaningful for the target.  It is
 # for the smoke programs: their sources are frozen, so any byte that moves is
-# news.  It is not for emittest, whose whole purpose is to grow by one function
-# at a time -- a baseline there would fail on every emit and be re-recorded on
-# every emit, which is a gate that has been trained to say yes.  What that
+# news.  It is for the game too: its sources no longer grow by design, so an
+# image that moves is either a deliberate fix -- recorded with `update
+# --reason` naming it -- or a regression.  It is not for emittest, whose whole
+# purpose is to grow by one function at a time -- a baseline there would fail
+# on every emit and be re-recorded on every emit, which is a gate that has been
+# trained to say yes.  What that
 # target is gated on instead is what the emit pipeline actually promises: zero
 # errors, zero unresolved symbols, no new warning, every test green.
 TARGETS = {
@@ -119,6 +131,8 @@ TARGETS = {
                  "desc": "tools/ail_link client linked against ailv3.lib"},
     "emittest": {"build": _build_emittest, "compare": False,
                  "desc": "tools/code_emit unit-test image over src/ + tests/"},
+    "game": {"build": _build_game, "compare": True,
+             "desc": "tools/game_build FDE.EXE, the game over src/ alone"},
 }
 
 
@@ -188,6 +202,26 @@ TEST_SUITES = [
     {"name": "rle_asm.check",
      "argv": ["tools/rle_asm/asm_match.py", "check"],
      "needs": ("gamefiles",), "target": "emittest"},
+    # The game image.  The test image is linked from a different object set,
+    # so the linker places the globals and the blitters differently; the data
+    # layout constraints and the assembly check have to hold in the image that
+    # ships, not only in the one the tests run in.
+    {"name": "game_build.selftest",
+     "argv": ["tools/game_build/build_game.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "game_build.play_selftest",
+     "argv": ["tools/game_build/play.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "game_build.locate_selftest",
+     "argv": ["tools/game_build/locate.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "data_emit.check_game",
+     "argv": ["tools/data_emit/check_data.py", "--image", "game"],
+     "needs": ("gamefiles",), "target": "game"},
+    {"name": "rle_asm.check_game",
+     "argv": ["tools/rle_asm/asm_match.py", "check", "--objs",
+              "workspace/game_build/out/obj"],
+     "needs": ("gamefiles",), "target": "game"},
 ]
 
 
@@ -320,6 +354,8 @@ def _context(watcom, disc, timeout, targets):
         la.preflight_extra(False)
     if "emittest" in targets:
         ce.preflight_extra(watcom, bool(ce.asm_sources(ce.SRC)))
+    if "game" in targets:
+        gb.preflight(watcom, disc)
     # The disc is mounted for the builds too, not because compilation reads it
     # but because the gate has to build the way the normal build does
     # (rebuild_info/build_pipeline.md keeps one mount definition for both

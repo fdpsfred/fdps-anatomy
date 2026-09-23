@@ -81,3 +81,20 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 驗證光碟掛載只能靠**真的讀出磁碟上的位元組**。`IMGMOUNT` 掛載失敗時不會有任何診斷，只看命令有沒有報錯，會得到一個掛載其實沒生效卻一路綠燈的流程。
 
 第二支驗證程式是 `tools/ail_link/ailsmoke/ailsmoke.c`，把同一套機制接到音效庫上：多一個 `wasm` 步驟、多一個 vendor 程式庫、執行階段多掛 Sound Blaster 與驅動程式檔案。它驗證到什麼由 [`ail_link.md`](ail_link.md) 擁有。
+
+## 遊戲本體
+
+取代 `FDPS.EXE` 的執行檔由 [`tools/game_build/build_game.py`](../tools/game_build/_index.md) 建置。與單元測試映像用同一組編譯旗標、同一個 AIL 程式庫、同樣七條 alias，差別只在輸入與連結：
+
+| 項目 | 遊戲本體 | 單元測試映像 |
+| --- | --- | --- |
+| 編譯的原始碼 | 只有 `src/` 的 `.c` 與 `.asm` | `src/` 加 `tests/`，外加產生的 `TESTMAIN.C` |
+| `main` | 保持原名，是遊戲的進入點 | 以 `-dmain=fdps_game_main` 改名讓給測試進入點 |
+| 連結 | 一次；任何未解符號都是錯誤 | 兩次，第一次的未解符號是清單（[`emit_pipeline.md`](emit_pipeline.md)） |
+| 輸出 | `FDE.EXE` 與 `FDE.MAP` | `EMITTEST.EXE` 與 `EMITTEST.MAP` |
+
+連結指令檔照 [`build_flags.md`](build_flags.md) 的連結指令：`system dos4g`、`option stack=8k`、輸出命名為 `FDE.EXE`、含 `main` 的目的檔排在第一個，三個 CRT 程式庫明列在 AIL 程式庫之後。map 一律寫出，它是實機偏差定位的依據（[`playtest.md`](playtest.md)）。
+
+兩個映像由不同的目的檔集合連結，連結器擺放全域與組語 routine 的位置因此不同，**在測試映像上成立的佈局約束不代表在遊戲映像上成立**。全域資料的逐 byte 比對與 RLE 組語的指令比對因此對兩個映像各跑一次，都登記在 build gate（[`build_gate.md`](build_gate.md)）。
+
+實際執行、兩版並排遊玩與偏差定位見 [`playtest.md`](playtest.md)。

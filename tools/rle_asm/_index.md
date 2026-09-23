@@ -19,10 +19,11 @@ python tools/rle_asm/asm_match.py selftest
 python tools/rle_asm/asm_match.py listing 000568db
 python tools/rle_asm/asm_match.py check            # 讀 emittest 建置的物件檔
 python tools/rle_asm/asm_match.py check --fresh    # 當場組譯 src/*.asm
+python tools/rle_asm/asm_match.py check --objs workspace/game_build/out/obj   # 讀遊戲本體建置的物件檔
 python tools/rle_asm/switch_impl.py status         # asm 或 c
 ```
 
-`asm_match.py check` 已登記進 build gate（`rle_asm.check`，隨 `emittest` 目標，需要不進版控的 `fdps_game_files/FDPS.LE`），兩支 selftest 也在 gate 裡。
+`asm_match.py check` 已登記進 build gate（`rle_asm.check` 隨 `emittest` 目標、`rle_asm.check_game` 隨 `game` 目標，都需要不進版控的 `fdps_game_files/FDPS.LE`），兩支 selftest 也在 gate 裡。
 
 Workflow：
 

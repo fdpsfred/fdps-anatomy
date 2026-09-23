@@ -33,6 +33,7 @@ python tools/build_gate/gate.py selftest
 ## 注意
 
 - **`selftest` 要一起跑**，而且它已經被排進 `check` 的測試套件裡。閘門的每一項判定都必須被證明會失敗過；永遠不會 FAIL 的閘門在壞掉的建置上也會說 PASS。
+- **`game` 目標是遊戲本體 `FDE.EXE`**（[`tools/game_build/`](../game_build/_index.md)），有映像基準值；另帶 `data_emit.check_game` 與 `rle_asm.check_game`，同樣兩項比對換成對遊戲映像跑。
 - **`emittest` 目標帶資料比對套件 `data_emit.check`**：已落地的全域逐 byte 對原版 `FDPS.LE`（[`tools/data_emit/`](../data_emit/_index.md)）。它需要不進版控的 `fdps_game_files/FDPS.LE`，沒有就報跳過。
 - **`--with-audio` 會開一個視窗**，而且需要不進版控的 `fdps_game_files/`；預設不跑，跳過的套件會列在結果裡。
 - 閘門建置時照樣掛光碟。編譯讀不到 `E:`，但閘門必須用**與正常建置相同的方式**建置，否則它閘的不是真正會出貨的那個流程；掛載定義由 `build_pipeline.md` 決定，兩個階段共用。

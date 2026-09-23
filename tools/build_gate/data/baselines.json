@@ -21,21 +21,61 @@
       "history": []
     },
     "ailsmoke": {
-      "recorded": "2026-08-28",
-      "commit": "ba5129c",
-      "reason": "Ticket 20: first baseline for the AIL client, taken from the ticket 19 link verification build.",
+      "recorded": "2026-09-24",
+      "commit": "cb94c81",
+      "reason": "票 22 以逐支 emit 的 fdps_dpmi_* 六支取代了票 19 的手寫 DPMI 替身（src/dpmi.c 在基準值 ba5129c 之後有 6 個 emit commit），基準值當時只跑 --target emittest 而沒有推進；票 24 跑完整 gate 時發現。link_ail.py all 實跑音效：startup/dig/sample/playing/timer/shutdown 全 ok",
       "warnings": [],
       "summary_warnings": 0,
       "profile": {
         "size": 119341,
-        "sha256": "8863a0ee31f18e2d5f18e60af7bbac65a6277366b3cfa9d18754e01c6eea11cc",
+        "sha256": "049e08565c3fe799642d4ecbacc8e63c2ece803953c7bd1f295228aea03b179c",
         "fixup_lo": 11276,
-        "fixup_hi": 28216,
-        "fixup_len": 16940,
-        "fixup_sites": 2416,
-        "outside_sha256": "5f3623796d1c1aeb88f733095c37fe05897d96f7c563c2bf20680885ae6eefc4",
-        "fixup_multiset_sha256": "eb58ed2c2bb3cb0059d3096d17afae5e8d22ee668cb5b1713b2c246e0e4279a0",
-        "residual_sha256": "19065f5f1c2b76835d4b9f18c3a82909ad06168c5b715441d4930598fdfb3620"
+        "fixup_hi": 28188,
+        "fixup_len": 16912,
+        "fixup_sites": 2412,
+        "outside_sha256": "03b3d6137f17b661b7c0ea14fa76a13e67d17cb1e1cc774f8c4452d9ebfc588a",
+        "fixup_multiset_sha256": "fe132c0f7f4870c8c3578026dd8c8fb2e8982c454975b84aacc4f5d656eba3d3",
+        "residual_sha256": "d2e4b3af3f0c9f5faffa3f2b1699e38cc0859d6ab345a29319c27a337f9dcf1b"
+      },
+      "history": [
+        {
+          "recorded": "2026-08-28",
+          "commit": "ba5129c",
+          "reason": "Ticket 20: first baseline for the AIL client, taken from the ticket 19 link verification build.",
+          "warnings": [],
+          "summary_warnings": 0,
+          "profile": {
+            "size": 119341,
+            "sha256": "8863a0ee31f18e2d5f18e60af7bbac65a6277366b3cfa9d18754e01c6eea11cc",
+            "fixup_lo": 11276,
+            "fixup_hi": 28216,
+            "fixup_len": 16940,
+            "fixup_sites": 2416,
+            "outside_sha256": "5f3623796d1c1aeb88f733095c37fe05897d96f7c563c2bf20680885ae6eefc4",
+            "fixup_multiset_sha256": "eb58ed2c2bb3cb0059d3096d17afae5e8d22ee668cb5b1713b2c246e0e4279a0",
+            "residual_sha256": "19065f5f1c2b76835d4b9f18c3a82909ad06168c5b715441d4930598fdfb3620"
+          },
+          "superseded_by": "票 22 以逐支 emit 的 fdps_dpmi_* 六支取代了票 19 的手寫 DPMI 替身（src/dpmi.c 在基準值 ba5129c 之後有 6 個 emit commit），基準值當時只跑 --target emittest 而沒有推進；票 24 跑完整 gate 時發現。link_ail.py all 實跑音效：startup/dig/sample/playing/timer/shutdown 全 ok",
+          "superseded_verdict": "different"
+        }
+      ]
+    },
+    "game": {
+      "recorded": "2026-09-24",
+      "commit": "cb94c81",
+      "reason": "票 24：遊戲本體首次連結（src/ 全部 89 個 C unit 與 6 個組語 unit，AIL 與 CRT 程式庫），FDE.EXE 以此為自我回歸基準",
+      "warnings": [],
+      "summary_warnings": 0,
+      "profile": {
+        "size": 367139,
+        "sha256": "67c001f98c352875fb65ae08bd822801f0808b265f331d565ad4e1ed3259c23e",
+        "fixup_lo": 11688,
+        "fixup_hi": 61063,
+        "fixup_len": 49375,
+        "fixup_sites": 6839,
+        "outside_sha256": "bd7a33169cb156e3e8c1345ecec8241aef3d76895433eb4b884d761979bc6ac2",
+        "fixup_multiset_sha256": "cc27d7d9256cf1fb30022cc5170d554647de441060592dc5680522560061e311",
+        "residual_sha256": "a59e3c4568276ed316daec050b68fbc54ae3716298597b03240c98d65c42f727"
       },
       "history": []
     }
