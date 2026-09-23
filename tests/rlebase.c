@@ -503,6 +503,285 @@ static void scal_partial_row_resyncs_through_skip_row(void)
     CHECK_EQ(scal_surface[6], SCAL_SENTINEL);
 }
 
+/* --- fdps_rle_skip_row (00056dc9), reached through blit mode 4 --------------
+ *
+ * The row skipper has no mode of its own and writes nothing, so what it
+ * produces -- how far the stream cursor moves -- is observed through the row
+ * that is drawn next.  Every case dispatches a two-row source to a two-row
+ * destination through the scaled kernel.  Vertically that is 1:1, and the
+ * loop at 00056d84 then calls the skipper exactly once after each drawn row:
+ * the cursor is popped back to the row start (POP ESI), the accumulator of 2
+ * is not above the source height of 2 so CALL fdps_rle_skip_row walks the row
+ * just drawn, and 2 + 2 is above it so the loop stops.  The second row is
+ * therefore decoded from wherever the skipper left the cursor after walking
+ * the first, and nothing else moves the cursor in between.  (The skipper also
+ * walks the second row after it is drawn; every stream carries a complete
+ * second row for that.)
+ *
+ * Row 0 is the stream under test.  Row 1 is a fill run of SKROW_MARK exactly
+ * as wide as the row, drawn 1:1 horizontally where the destination width
+ * equals the source width, so it lands as an unbroken run of SKROW_MARK
+ * starting at byte SKROW_PITCH (the kernel's own advance, pitch minus
+ * destination width, added to a cursor already at the end of row 0).  A
+ * skipper that stopped one byte early or late, charged a wrong width, or
+ * ended the row on a wrong test would make row 1 decode from some other byte
+ * -- a pixel byte, a skip run or the mark itself read as a command -- and the
+ * run of marks would not be where the checks look for it.
+ *
+ * Expected advances are read off the assembly: LODSB plus INC ESI for fill
+ * (00056deb) and for stretched (00056df7), LODSB plus ADD ESI,ECX for a
+ * literal (00056e14), LODSB alone for a skip.  The width charge is the SUB
+ * BX,CX in each arm, twice in the stretched one (00056df8, 00056dfb), and the
+ * only terminator is OR BX,BX / JNZ at the bottom of each arm.
+ */
+#define SKROW_MODE     4
+#define SKROW_SENTINEL 0x5a
+#define SKROW_MARK     0xee
+#define SKROW_PITCH    72
+#define SKROW_OPERAND(dest_width) \
+    ((unsigned int) (dest_width) | ((unsigned int) 2 << 16))
+
+static unsigned char skrow_surface[2 * SKROW_PITCH + 8];
+
+/* Room for the two wrap cases: the zero-width one needs two rows of over a
+   thousand command bytes each. */
+static unsigned char skrow_wrap_stream[2052];
+
+static void skrow_blit(unsigned char *stream, int src_width, int dest_width)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof skrow_surface; byte_index++) {
+        skrow_surface[byte_index] = SKROW_SENTINEL;
+    }
+    fdps_blit_dispatch(stream, skrow_surface, src_width, 2, SKROW_PITCH,
+                       SKROW_OPERAND(dest_width), SKROW_MODE);
+}
+
+/* Row 1 came out as `width` marks at the start of the second scanline and
+   nothing after them. */
+static void skrow_check_mark_row(int width)
+{
+    CHECK_EQ(skrow_surface[SKROW_PITCH], SKROW_MARK);
+    CHECK_EQ(skrow_surface[SKROW_PITCH + width - 1], SKROW_MARK);
+    CHECK_EQ(skrow_surface[SKROW_PITCH + width], SKROW_SENTINEL);
+}
+
+/* Op 00 (0x03, length 4) on a four-pixel row: the command byte and its single
+   pixel byte, so row 1 starts two bytes on. */
+static void skrow_fill_run_advances_two_bytes(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x03;
+    stream[1] = 0xaa;
+    stream[2] = 0x03;
+    stream[3] = SKROW_MARK;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    skrow_blit(stream, 4, 4);
+
+    skrow_check_mark_row(4);
+}
+
+/* Op 01 (0x41, length 2): two bytes, but it accounts for four columns.  An arm
+   that charged the length once would leave two pixels owing and read row 1's
+   command byte as part of row 0. */
+static void skrow_stretched_run_consumes_two_columns_per_unit(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x41;
+    stream[1] = 0x99;
+    stream[2] = 0x03;
+    stream[3] = SKROW_MARK;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    skrow_blit(stream, 4, 4);
+
+    skrow_check_mark_row(4);
+}
+
+/* Op 10 (0x82, length 3): the command byte plus its three pixel bytes, so row
+   1 starts four bytes on. */
+static void skrow_literal_run_advances_past_its_pixels(void)
+{
+    unsigned char stream[8];
+
+    stream[0] = 0x82;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x02;
+    stream[5] = SKROW_MARK;
+    stream[6] = 0xc0;
+    stream[7] = 0xc0;
+    skrow_blit(stream, 3, 3);
+
+    skrow_check_mark_row(3);
+}
+
+/* Op 11 (0xc1, length 2): nothing follows the command byte, so a two-pixel
+   row costs one byte. */
+static void skrow_transparent_run_advances_one_byte(void)
+{
+    unsigned char stream[5];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = SKROW_MARK;
+    stream[3] = 0xc0;
+    stream[4] = 0xc0;
+    skrow_blit(stream, 2, 2);
+
+    skrow_check_mark_row(2);
+}
+
+/* All four ops at length 1: widths 1, 2, 1 and 1 make the five-pixel row and
+   byte costs 2, 2, 2 and 1 make the seven-byte advance -- the same stream the
+   pass-through case draws, so the two agree on where the row ends. */
+static void skrow_walks_every_op_to_exact_width(void)
+{
+    unsigned char stream[11];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    stream[7] = 0x04;
+    stream[8] = SKROW_MARK;
+    stream[9] = 0xc0;
+    stream[10] = 0xc0;
+    skrow_blit(stream, 5, 5);
+
+    skrow_check_mark_row(5);
+}
+
+/* SHR CL,2 / INC CL makes 0x3f a length of 64, so a 64-wide row is one op; a
+   skipper that read it as 63 would take row 1's command byte into row 0. */
+static void skrow_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x3f;
+    stream[1] = 0xcc;
+    stream[2] = 0x3f;
+    stream[3] = SKROW_MARK;
+    stream[4] = 0xc0;
+    stream[5] = 0xc0;
+    skrow_blit(stream, 64, 64);
+
+    skrow_check_mark_row(64);
+}
+
+/* The widest literal, 0xbf: 64 pixel bytes after the command byte, so row 1
+   starts 65 bytes on.  This is the arm that adds the length to the pointer
+   (ADD ESI,ECX at 00056e14), at the largest step it can take.  The pixel bytes
+   are 0xc0, length-1 skips, so a cursor left inside them draws holes where
+   the marks should be. */
+static void skrow_literal_run_at_max_length_advances_65(void)
+{
+    static unsigned char stream[69];
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof stream; byte_index++) {
+        stream[byte_index] = 0xc0;
+    }
+    stream[0] = 0xbf;
+    stream[65] = 0x3f;
+    stream[66] = SKROW_MARK;
+    skrow_blit(stream, 64, 64);
+
+    skrow_check_mark_row(64);
+}
+
+/* Neither global is written: the width is only read (MOV BX,[0x00070024]) and
+   there is no DEC word ptr [0x00070022] in the body -- the caller keeps its
+   own row count across the rows this one walks.  The dispatcher publishes the
+   source height into 0x00070022 itself, so the value to find there afterwards
+   is that published 2 rather than a hand-seeded one; the scaled kernel only
+   compares and subtracts it, so after two skipper calls it is still 2, and
+   the width is still 3. */
+static void skrow_leaves_the_blit_globals_alone(void)
+{
+    unsigned char stream[8];
+
+    stream[0] = 0x82;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x02;
+    stream[5] = SKROW_MARK;
+    stream[6] = 0xc0;
+    stream[7] = 0xc0;
+    skrow_blit(stream, 3, 3);
+
+    skrow_check_mark_row(3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 2);
+}
+
+/* The exact-zero terminator on an unsigned sixteen-bit counter.  A length-4
+   fill on a two-pixel row leaves 2 - 4 = 0xfffe rather than ending the row,
+   and the skipper goes on until a later run lands the counter on zero: 1023
+   length-64 skips take it to 62 and one length-62 skip (0xfd) finishes it, so
+   row 1 starts 1026 bytes on.  Under a `width <= 0` terminator it would start
+   at byte 2, on a length-64 skip, and row 1 would stay all sentinel.  Row 0
+   is drawn 1:1, so its draw stops after two pixels of the fill. */
+static void skrow_overshooting_run_wraps_the_width_counter(void)
+{
+    int op_index;
+
+    skrow_wrap_stream[0] = 0x03;
+    skrow_wrap_stream[1] = 0xaa;
+    for (op_index = 0; op_index < 1023; op_index++) {
+        skrow_wrap_stream[2 + op_index] = 0xff;
+    }
+    skrow_wrap_stream[1025] = 0xfd;
+    skrow_wrap_stream[1026] = 0x01;
+    skrow_wrap_stream[1027] = SKROW_MARK;
+    skrow_wrap_stream[1028] = 0xc0;
+    skrow_wrap_stream[1029] = 0xc0;
+    skrow_blit(skrow_wrap_stream, 2, 2);
+
+    skrow_check_mark_row(2);
+}
+
+/* The terminator sits at the bottom of the loop -- the first op is decoded
+   before the width is ever tested -- so a width of zero is a row of 0x10000
+   pixels, not an empty one: 1024 length-64 skips bring the counter back to
+   zero and row 1 starts 1024 bytes on.  A skipper that tested first would not
+   move the cursor and row 1 would be drawn from the skip at byte 0.
+
+   The destination is 1 wide, because a 0-wide one would make the draw's own
+   DEC BX wrap.  With a source width of 0 the draw's CMP BP,DX always takes
+   the emit branch, so each row emits one copy of its first op: nothing for
+   row 0's skip, one mark for row 1's length-1 fill.  Row 1 is itself a full
+   0x10000-pixel row -- the fill, 1023 length-64 skips and a length-63 skip
+   (0xfe) -- because the skipper walks it too after it is drawn. */
+static void skrow_zero_width_walks_a_full_row(void)
+{
+    int op_index;
+
+    for (op_index = 0; op_index < 1024; op_index++) {
+        skrow_wrap_stream[op_index] = 0xff;
+    }
+    skrow_wrap_stream[1024] = 0x00;
+    skrow_wrap_stream[1025] = SKROW_MARK;
+    for (op_index = 0; op_index < 1023; op_index++) {
+        skrow_wrap_stream[1026 + op_index] = 0xff;
+    }
+    skrow_wrap_stream[2049] = 0xfe;
+    skrow_wrap_stream[2050] = 0xc0;
+    skrow_wrap_stream[2051] = 0xc0;
+    skrow_blit(skrow_wrap_stream, 0, 1);
+
+    skrow_check_mark_row(1);
+}
+
 void run_rlebase_tests(void)
 {
     RUN_TEST(pass_fill_run_writes_len_bytes);
@@ -523,4 +802,14 @@ void run_rlebase_tests(void)
     RUN_TEST(scal_vertical_downscale_drops_a_source_row);
     RUN_TEST(scal_row_advance_is_zero_extended);
     RUN_TEST(scal_partial_row_resyncs_through_skip_row);
+    RUN_TEST(skrow_fill_run_advances_two_bytes);
+    RUN_TEST(skrow_stretched_run_consumes_two_columns_per_unit);
+    RUN_TEST(skrow_literal_run_advances_past_its_pixels);
+    RUN_TEST(skrow_transparent_run_advances_one_byte);
+    RUN_TEST(skrow_walks_every_op_to_exact_width);
+    RUN_TEST(skrow_run_length_tops_out_at_64);
+    RUN_TEST(skrow_literal_run_at_max_length_advances_65);
+    RUN_TEST(skrow_leaves_the_blit_globals_alone);
+    RUN_TEST(skrow_overshooting_run_wraps_the_width_counter);
+    RUN_TEST(skrow_zero_width_walks_a_full_row);
 }
