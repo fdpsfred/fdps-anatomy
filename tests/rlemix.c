@@ -11,6 +11,7 @@
 #include "testharn.h"
 #include "blit.h"
 #include "gamedata.h"
+#include "rleblend.h"
 
 /* --- fdps_rle_blit_translucent (0005761b), blit mode 9 --------------------
  *
@@ -1083,6 +1084,453 @@ static void tint_run_length_tops_out_at_64(void)
     CHECK_EQ(tint_surface[64], TINT_SENTINEL);
 }
 
+/* --- fdps_rle_blit_translucent_color_range (00057a74), blit mode 12 -------
+ *
+ * Mode 9's blend with one range test per source pixel: in range the pixel goes
+ * through the ramp and the cube exactly as mode 9 sends it, out of range it is
+ * stored as itself.  The row assignment is mode 9's -- MOV EAX,0x2400 / MOV
+ * EDX,0 at 00057a9e, CMP ECX,0x8 / JBE at 00057aa8, SUB ECX,0x10 / NEG ECX /
+ * XCHG EDX,EAX above that, and MOV [EBP+0xc],EAX / MOV [EBP+0x10],EDX at
+ * 00057abe -- so at a level of 8 or less the SOURCE reads the row nine on and
+ * the DESTINATION the row the level names.
+ *
+ * The mode operand is a five-dword descriptor: ramp ([EAX]), level ([EAX+4]),
+ * cube ([EAX+8]) and the two bounds, of which the kernel takes only sixteen
+ * bits each (MOV BX,[EAX+0xc] at 00057a7d, MOV BX,[EAX+0x10] at 00057a88) into
+ * the two globals it then compares against.  The compares are signed (CMP
+ * AX,[min] / JL and CMP AX,[max] / JLE or JG) over a pixel byte zero-extended
+ * into AX by XOR EAX,EAX / LODSB.  Out of range, op 00 is REP STOSB at 00057b17,
+ * op 01 is INC EDI / STOSB / LOOP at 00057b84 and op 10 jumps straight to the
+ * STOSB at 00057c28, each writing the pixel byte still in AL.
+ *
+ * EDX on entry is the dispatcher's dest_pitch - src_width, so a width w and
+ * advance a is a dispatch with src_width w and dest_pitch a + w.
+ *
+ * The fixtures are this block's own and mirror mode 9's: the ramp is the full
+ * 18 x 256 and every unmarked entry is zero, the cube is filled with
+ * TCR_CUBE_GUARD and only expected entries are marked, and the surface is
+ * pre-filled with TCR_SENTINEL.  The cube indices are the ones the assembly's
+ * sequence at 00057b37..00057b45 (SHR 4 / AND 0xf0f0f / AND 0xffff | SHR 0xc)
+ * forms: 0x537 from 0x00305070, 0x5f7 from 0x00f05070 and 0x33 from
+ * 0x00300030.  Every out-of-range case marks the ramp entry and the cube entry
+ * a body that blended anyway would land on, so the two answers cannot both
+ * pass.
+ */
+#define TCR_MODE 12
+
+#define TCR_RAMP_ROWS 18
+#define TCR_RAMP_ROW_ENTRIES 256
+#define TCR_RAMP_ENTRIES (TCR_RAMP_ROWS * TCR_RAMP_ROW_ENTRIES)
+#define TCR_CUBE_BYTES 4096
+
+#define TCR_CUBE_GUARD 0xff
+#define TCR_SENTINEL 0x5a
+
+#define TCR_SRC_PIXEL 0x20
+
+/* The range the cases configure.  TCR_SRC_PIXEL sits inside it and
+   TCR_OUT_PIXEL outside, and none of the four bound-adjacent bytes collides
+   with a paint mark, the guard or the sentinel. */
+#define TCR_RANGE_MIN 0x10
+#define TCR_RANGE_MAX 0x30
+#define TCR_OUT_PIXEL 0x40
+
+#define TCR_WEIGHT_SRC_A 0x00300000
+#define TCR_WEIGHT_SRC_B 0x00f00000
+#define TCR_WEIGHT_DST_A 0x00005070
+#define TCR_WEIGHT_DST_B 0x00000030
+#define TCR_INDEX_A_A 0x537 /* (0x00300000 + 0x00005070) */
+#define TCR_INDEX_B_A 0x5f7 /* (0x00f00000 + 0x00005070) */
+
+#define TCR_PAINT_A_A 0x2a
+#define TCR_PAINT_B_A 0x2c
+
+#define TCR_DEST_BYTES 80
+
+static unsigned int tcr_ramp[TCR_RAMP_ENTRIES];
+static unsigned char tcr_cube[TCR_CUBE_BYTES];
+static unsigned char tcr_surface[TCR_DEST_BYTES];
+static int tcr_descriptor[5];
+
+static void tcr_set_ramp(int weight_row, int entry, unsigned int weighted_color)
+{
+    tcr_ramp[weight_row * TCR_RAMP_ROW_ENTRIES + entry] = weighted_color;
+}
+
+/* Clears the tables and the surface and fills the descriptor, bounds included.
+   The rectangle is not set here: fdps_blit_dispatch publishes it from its own
+   arguments, and the kernel publishes the bounds itself. */
+static void tcr_setup(unsigned int level, int color_min, int color_max)
+{
+    int entry_index;
+
+    for (entry_index = 0; entry_index < TCR_RAMP_ENTRIES; entry_index++) {
+        tcr_ramp[entry_index] = 0;
+    }
+    for (entry_index = 0; entry_index < TCR_CUBE_BYTES; entry_index++) {
+        tcr_cube[entry_index] = TCR_CUBE_GUARD;
+    }
+    for (entry_index = 0; entry_index < TCR_DEST_BYTES; entry_index++) {
+        tcr_surface[entry_index] = TCR_SENTINEL;
+    }
+
+    tcr_descriptor[0] = (int) tcr_ramp;
+    tcr_descriptor[1] = (int) level;
+    tcr_descriptor[2] = (int) tcr_cube;
+    tcr_descriptor[3] = color_min;
+    tcr_descriptor[4] = color_max;
+}
+
+static void tcr_blit(unsigned char *stream, int src_width, int src_rows,
+                     int row_advance)
+{
+    fdps_blit_dispatch(stream, tcr_surface, src_width, src_rows,
+                       row_advance + src_width,
+                       (unsigned int) tcr_descriptor, TCR_MODE);
+}
+
+/* Level 0 puts the source in row 9 and the destination in row 0, and the two
+   decoys sit at the rows a kernel that swapped them would read: that pairing
+   makes 0x00f00030, whose index 0xf3 is never marked. */
+static void tcr_level_zero_rows(void)
+{
+    tcr_set_ramp(9, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_set_ramp(0, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_set_ramp(9, TCR_SENTINEL, TCR_WEIGHT_DST_B);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+}
+
+/* Op 00, length (0x01 & 0x3f) + 1 = 2, with the pixel byte inside the range:
+   the blend is mode 9's, so both destination bytes come out at the cube entry
+   0x537.  The bounds are published into the two globals on entry (00057a81,
+   00057a8c) and are still there afterwards, and the DEC WORD at 00057c52 leaves
+   the row count 0. */
+static void tcr_fill_run_blends_a_pixel_inside_the_range(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[1], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, TCR_RANGE_MIN);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, TCR_RANGE_MAX);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The same op with the pixel byte outside the range is REP STOSB at 00057b17:
+   the byte itself reaches the surface, untouched by ramp or cube.  Its ramp
+   entry and the cube entry that entry would form are marked here, so a body
+   that blended it anyway would paint TCR_PAINT_B_A instead. */
+static void tcr_fill_run_stores_a_pixel_outside_the_range_raw(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = TCR_OUT_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_set_ramp(9, TCR_OUT_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_cube[TCR_INDEX_B_A] = TCR_PAINT_B_A;
+    tcr_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_OUT_PIXEL);
+    CHECK_EQ(tcr_surface[1], TCR_OUT_PIXEL);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+}
+
+/* JL against the low bound and JLE against the high one (00057b04, 00057b11),
+   so both ends are inside the blended range and the two bytes just outside
+   them are not.  A body spelling either test strictly would fail on the first
+   two blits and one spelling them the other way round on the last two. */
+static void tcr_bounds_are_inclusive_at_both_ends(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+
+    stream[1] = TCR_RANGE_MIN;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(9, TCR_RANGE_MIN, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+
+    stream[1] = TCR_RANGE_MAX;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(9, TCR_RANGE_MAX, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+
+    stream[1] = TCR_RANGE_MIN - 1;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(9, TCR_RANGE_MIN - 1, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_RANGE_MIN - 1);
+
+    stream[1] = TCR_RANGE_MAX + 1;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(9, TCR_RANGE_MAX + 1, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_RANGE_MAX + 1);
+}
+
+/* The compares are signed 16-bit over a pixel that was zero-extended into AX,
+   so only a bound can be negative.  A low bound of -1 lets every pixel through
+   -- read as an unsigned 0xffff it would let none -- and a high bound of -1
+   stops every pixel, which read as unsigned would stop none.  The two blits
+   disagree in opposite directions, so no single signedness mistake passes
+   both. */
+static void tcr_bounds_are_read_signed(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TCR_SRC_PIXEL;
+
+    tcr_setup(0, -1, 0x7f);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, -1);
+
+    tcr_setup(0, 0, -1);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 1, 1, 0);
+    CHECK_EQ(tcr_surface[0], TCR_SRC_PIXEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, -1);
+}
+
+/* MOV BX,word ptr [EAX+0xc] and [EAX+0x10] read sixteen bits of whole dword
+   slots, so bits 16 and up of either bound are dropped.  Both bounds carry a
+   high half here that would put the pixel outside the range if the dword were
+   used. */
+static void tcr_bounds_take_only_sixteen_bits(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(0, 0x00010000 + TCR_RANGE_MIN, 0x00010000 + TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_min, TCR_RANGE_MIN);
+    CHECK_EQ(data_fdps_graphics_rle_blit_translucent_color_max, TCR_RANGE_MAX);
+}
+
+/* Op 01 (0x41, length 2) in range: INC EDI, then the blend, then STOSB, twice
+   (00057b98..00057bc0), so bytes 1 and 3 are blended and bytes 0 and 2 keep
+   the surface's own content.  The row is four bytes wide because the op
+   subtracts the length twice (SUB BX,CX at 00057b61 and 00057b64). */
+static void tcr_stretched_run_blends_the_second_of_each_pair(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 4, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[1], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[3], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[4], TCR_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The same op out of range is INC EDI / STOSB / LOOP at 00057b84: it lands on
+   the same two bytes and skips the same two, but the byte it writes is the
+   stream's own.  The ramp and cube entries a blend would use are marked. */
+static void tcr_stretched_run_stores_an_out_of_range_pixel_raw(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = TCR_OUT_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_set_ramp(9, TCR_OUT_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_cube[TCR_INDEX_B_A] = TCR_PAINT_B_A;
+    tcr_blit(stream, 4, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[1], TCR_OUT_PIXEL);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[3], TCR_OUT_PIXEL);
+    CHECK_EQ(tcr_surface[4], TCR_SENTINEL);
+}
+
+/* Op 10 (0x81, length 2) tests every byte of its run: the LODSB and both
+   compares are inside the LOOP at 00057be0..00057c29.  The first byte is
+   inside the range and blends, the second is outside and is stored as itself;
+   a body that tested once for the run would paint both the same way. */
+static void tcr_literal_run_tests_every_byte(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0x81;
+    stream[1] = TCR_SRC_PIXEL;
+    stream[2] = TCR_OUT_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(9, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(9, TCR_OUT_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_set_ramp(0, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_cube[TCR_INDEX_B_A] = TCR_PAINT_B_A;
+    tcr_blit(stream, 2, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[1], TCR_OUT_PIXEL);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+}
+
+/* Op 11 (0xc1, length 2) is ADD EDI,ECX at 00057c3e with no read, no write and
+   no range test: the two bytes it covers keep the surface's own content, it
+   consumes no pixel byte, and the op 00 that follows lands two bytes on. */
+static void tcr_skip_run_leaves_the_destination_alone(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 4, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[1], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[2], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[3], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[4], TCR_SENTINEL);
+}
+
+/* At level 8 or below the source is read from row level + 9 and the
+   destination from row level, which is mode 9's assignment and not the
+   tinting kernels': 0x2400 is a byte offset added after the SHL ECX,0xa row
+   scale, so it is nine rows of 256 dwords.  Level 3 marks rows 12 and 3 and
+   puts the decoys at 3 and 12. */
+static void tcr_level_below_nine_reads_the_source_nine_rows_on(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(3, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(12, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(3, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_set_ramp(3, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_set_ramp(12, TCR_SENTINEL, TCR_WEIGHT_DST_B);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[1], TCR_SENTINEL);
+}
+
+/* Above 8 the row folds to 16 - level (SUB ECX,0x10 / NEG ECX at 00057ab1) and
+   XCHG EDX,EAX moves the nine-row offset to the destination: level 12 reads
+   the source from row 4 and the destination from row 13, with the decoys at 13
+   and 4 where a body that kept both offsets on the same side would look. */
+static void tcr_level_above_eight_folds_to_sixteen_minus_it(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(12, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_set_ramp(4, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_A);
+    tcr_set_ramp(13, TCR_SENTINEL, TCR_WEIGHT_DST_A);
+    tcr_set_ramp(13, TCR_SRC_PIXEL, TCR_WEIGHT_SRC_B);
+    tcr_set_ramp(4, TCR_SENTINEL, TCR_WEIGHT_DST_B);
+    tcr_cube[TCR_INDEX_A_A] = TCR_PAINT_A_A;
+    tcr_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+}
+
+/* The sum 0x00305070 folds to red 3, green 5, blue 7 and the assembly's
+   (v >> 12) | (v & 0xffff) at 00057b3f..00057b45 puts that at 0x537, green
+   major.  The obvious (r << 8) | (g << 4) | b would read 0x357, marked here
+   with a byte no assertion expects. */
+static void tcr_cube_index_is_green_major(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x00;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_cube[0x357] = 0x3c;
+    tcr_blit(stream, 1, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+}
+
+/* The dispatcher's pitch - width (5 - 2 = 3) is published into the global on
+   entry (MOV [dst_row_advance],EDX at 00057a74) and read back at every row end
+   (ADD EDI,[dst_row_advance] at 00057c4c), so the second row starts three
+   bytes past where the first one stopped, the row count is consumed to zero
+   and the width is re-read (MOV BX,[src_width] at 00057ad8) for the second
+   row. */
+static void tcr_row_advance_is_published_and_applied(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = TCR_SRC_PIXEL;
+    stream[2] = 0x01;
+    stream[3] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 2, 2, 3);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[1], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[2], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[4], TCR_SENTINEL);
+    CHECK_EQ(tcr_surface[5], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[6], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[7], TCR_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_row_advance, 3);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL at 00057af2 over a command byte whose low six bits are all
+   set: 64 pixels is the longest run the format encodes and zero cannot be
+   encoded at all. */
+static void tcr_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = TCR_SRC_PIXEL;
+    tcr_setup(0, TCR_RANGE_MIN, TCR_RANGE_MAX);
+    tcr_level_zero_rows();
+    tcr_blit(stream, 64, 1, 0);
+
+    CHECK_EQ(tcr_surface[0], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[63], TCR_PAINT_A_A);
+    CHECK_EQ(tcr_surface[64], TCR_SENTINEL);
+}
+
 void run_rlemix_tests(void)
 {
     RUN_TEST(tran_fill_run_blends_len_bytes);
@@ -1116,4 +1564,18 @@ void run_rlemix_tests(void)
     RUN_TEST(tint_cube_index_is_green_major);
     RUN_TEST(tint_row_advance_is_published_and_applied);
     RUN_TEST(tint_run_length_tops_out_at_64);
+    RUN_TEST(tcr_fill_run_blends_a_pixel_inside_the_range);
+    RUN_TEST(tcr_fill_run_stores_a_pixel_outside_the_range_raw);
+    RUN_TEST(tcr_bounds_are_inclusive_at_both_ends);
+    RUN_TEST(tcr_bounds_are_read_signed);
+    RUN_TEST(tcr_bounds_take_only_sixteen_bits);
+    RUN_TEST(tcr_stretched_run_blends_the_second_of_each_pair);
+    RUN_TEST(tcr_stretched_run_stores_an_out_of_range_pixel_raw);
+    RUN_TEST(tcr_literal_run_tests_every_byte);
+    RUN_TEST(tcr_skip_run_leaves_the_destination_alone);
+    RUN_TEST(tcr_level_below_nine_reads_the_source_nine_rows_on);
+    RUN_TEST(tcr_level_above_eight_folds_to_sixteen_minus_it);
+    RUN_TEST(tcr_cube_index_is_green_major);
+    RUN_TEST(tcr_row_advance_is_published_and_applied);
+    RUN_TEST(tcr_run_length_tops_out_at_64);
 }
