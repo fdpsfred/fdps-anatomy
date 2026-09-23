@@ -4,7 +4,7 @@
 
 ## 命名與載入
 
-檔名的 `nn` 是 0 起算的章節索引，以 `map%02d.dat`／`map%02d.cod` 組名。`FIELD.VFS` 有 `MAP00`–`MAP62` 共 63 組；章節流程以章節編號 0–`0x1D` 載入 `MAP00`–`MAP29`。其餘的是過場用地圖，由 `ICON%02d.DAT` 腳本的 `SWITCH_MAP` 把章節編號改成該值後重建地圖單位而載入（例：`ICON11` 的 `SWITCH_MAP 0x34` 載 `MAP52`，`ICON08` 載 `MAP55`）；`MAP46` 沒有任何腳本或章節編號會切過去。
+檔名的 `nn` 是 0 起算的章節索引，以 `map%02d.dat`／`map%02d.cod` 組名。`FIELD.VFS` 有 `MAP00`–`MAP64` 共 63 組（沒有 `MAP30` 與 `MAP33`）；章節流程以章節編號 0–`0x1D` 載入 `MAP00`–`MAP29`。其餘的是過場用地圖，由 `ICON%02d.DAT` 腳本的 `SWITCH_MAP` 把章節編號改成該值後重建地圖單位而載入（例：`ICON11` 的 `SWITCH_MAP 0x34` 載 `MAP52`，`ICON08` 載 `MAP55`）；`MAP31` 與 `MAP49` 沒有任何腳本或章節編號會切過去（`WIN05.DAT` 開頭就是 `SWITCH_MAP 0x2E` 切到 `MAP46`，`WIN29` 切到 `MAP63`、`GOODEND` 切到 `MAP64`）。
 
 ## `MAPnn.DAT`
 
