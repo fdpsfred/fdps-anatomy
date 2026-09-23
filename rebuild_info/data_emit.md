@@ -6,7 +6,7 @@
 
 單元測試映像連結兩次（[`emit_pipeline.md`](emit_pipeline.md)「資料還沒 emit 之前怎麼連結」），第一次不帶 stub，報出來的未定義符號裡每一個遊戲全域都是還沒有定義的。定義落地之後下一次建置就不會再報它，所以清單自己縮短，「做完」的判準是清單空掉，不是某個計數到達某個數字——計數會與程式碼漂移，連結器的抱怨不會。
 
-清單現在是空的：232 個遊戲全域全部有定義，第一次連結報不出任何未定義符號。這個機制留著當回歸檢查——任何新出現的未定義全域都會在下一次建置的第一次連結被報出來。
+清單是空的：232 個遊戲全域全部有定義，第一次連結報不出任何未定義符號。這個機制留著當回歸檢查——任何新出現的未定義全域都會在下一次建置的第一次連結被報出來。
 
 ## 內容：原版映像的初始 byte，沒有選擇
 
@@ -15,7 +15,7 @@
 | 映像內容 | 定義 |
 | --- | --- |
 | 全為 0、沒有佈局約束 | tentative 定義（`int x;`），落進 `_BSS`。這是絕大多數 |
-| 全為 0、帶佈局約束 | 帶初值的定義（`char x = 0;`、`unsigned char x[200] = { 0 };`）。值是 0 不改變寫法的理由：tentative 進 `_BSS`，就不在它必須緊貼的鄰居旁邊（下一節） |
+| 全為 0、帶佈局約束 | 帶初值的定義（`int x = 0;`、`unsigned char x[200] = { 0 };`）。值是 0 不改變寫法的理由：tentative 進 `_BSS`，就不在它必須緊貼的鄰居旁邊（下一節） |
 | 非 0 | 帶初值的定義，值照型別的讀法寫：有號量寫有號十進位、旗標與遮罩寫十六進位 |
 | 重定位過的指標 | 寫成它指向的符號名（章節 dispatch 表的每一格都是 function 名） |
 
@@ -35,7 +35,9 @@
 | `#pragma pack(1)` | 對全域無效。不對齊的佈局（奇數位址上的 `short`、緊跟在 byte 後的 `int`）用分開的全域寫不出來 |
 | 兩個 `.c` | `_DATA` 照連結順序接起來。後一個模組的 `_DATA` 從前一個結束處的哪個對齊開始沒有量到：量測的第一個 unit 結束在 4 的倍數上 |
 
-所以「兩個符號必須相鄰」只有一種寫法：兩者都帶初值、落在同一個 `.c`、在原始碼裡前後緊接，而且對齊允許。tentative 定義的相鄰永遠不能依賴（[`pitfalls.md`](pitfalls.md) 的 B 類）。
+所以「兩個符號必須相鄰」只有一種寫法：兩者都帶初值、落在同一個 `.c`、在原始碼裡前後緊接，而且對齊允許。tentative 定義的相鄰永遠不能依賴（[`pitfalls.md`](pitfalls.md) 的浮動指示佇列與地形修正表兩條）。
+
+自然對齊也決定一段相鄰序列的**開頭**在哪：以 `char` 陣列開頭的序列，接在一個奇數尾端的物件後面就從奇數位址開始，序列裡後面的 `int` 與指標前面會被塞填充，整段的相對偏移全部走樣。序列開頭需要原版的對齊時，前面放一個帶初值的 `static int` 把它墊到 4 的倍數。
 
 ## 定義在 `.c` 裡的位置就是佈局
 
@@ -49,28 +51,35 @@
 
 | 約束 | 意思 | 寫法 |
 | --- | --- | --- |
-| `follows: X` | 這個符號必須從 X 結束的地方開始 | 兩者都帶初值、同一個 `.c`，`land.py` 依位址把 X 排在它正前方 |
-| `zero_guard_before` | 這個符號前面 4 byte 必須是重建版自己擁有、初值 0、沒有人寫的儲存（`-1` 索引會讀到） | 定義本身以一個帶初值的 `static` 0 dword 開頭，緊接在符號前 |
-| `zero_pad_after: N` | 讀取越過這個符號的尾端 N byte，原版那裡是沒有引用的 0 填充（byte 旗標被當 dword 讀） | 定義本身以一個 N byte、帶初值的 `static` 0 陣列結尾 |
+| `follows: X` | 這個符號必須從 X 結束的地方開始（X 帶 `zero_pad_after` 時，從 X 的尾端填充結束處開始） | 兩者都帶初值、同一個 `.c`，`land.py` 依位址把 X 排在它正前方 |
+| `zero_guard_before` | 這個符號前面 4 byte 必須是重建版自己擁有、初值 0、沒有人寫的儲存 | 定義本身以一個帶初值的 `static` 0 dword 開頭，緊接在符號前。兩種用途：擋 `-1` 索引的讀取，或把一段相鄰序列的開頭墊到 4 的倍數 |
+| `zero_pad_after: N` | 原版在這個符號尾端之後有 N byte 沒有引用的 0：讀取越過尾端（byte 旗標被當 dword 讀），或一段相鄰序列在那裡有空隙而越界寫入會穿過它 | 定義本身以一個 N byte、帶初值的 `static` 0 陣列結尾 |
 
-現有的約束是兩條 `follows` 鏈與一個前置守衛：
+現有的約束是兩段相鄰序列與一個前置守衛，全部 32 個符號：
 
-| 符號 | 約束 | 需要它的讀取 |
+| 符號 | 約束 | 需要它的讀寫 |
 | --- | --- | --- |
-| `data_fdps_battle_tile_attr_def_modifier_table`（`0x60058`，`gamedata.c`） | `follows: data_fdps_battle_tile_attr_ap_modifier_table` | 地形類別 6 讀 AP 表 `[6]`，原版落在 DEF 表 `[0]`（常數 0）。讀取端是 `fdps_combat_compute_hit_outcome`（`00019f80`）、`fdps_unit_resolve_attack_hit`（`0001c520`）、`fdps_draw_cursor_info_panel`（`0002dcf0`） |
-| `data_fdps_village_mode_flag`（`0x60070`，`gamedata.c`） | `follows: data_fdps_battle_tile_attr_def_modifier_table`、`zero_pad_after: 3` | 同三個讀取端對 DEF 表 `[6]` 的 dword 讀取（`0001a148`、`0001c6aa`、`0002de59`），原版落在旗標與它後面三個 byte 上，值為 0 |
-| `data_fdps_battle_indicator_queue_unit_idx`（`0x641e8`，`indicat.c`） | `follows: data_fdps_indicator_queue_cell_x_offset` | 浮動指示佇列的游標沒有上界，第 201 格的寫入在原版落進下一個陣列（生產端 `fdps_show_sprite_indicator`，`0001f510`） |
-| `data_fdps_indicator_queue_glyph_ids`（`0x642b0`，`indicat.c`） | `follows: data_fdps_battle_indicator_queue_unit_idx` | 同上，第二個陣列的溢位落在第三個陣列上 |
-| `data_fdps_indicator_queue_count`（`0x64378`，`indicat.c`） | `follows: data_fdps_indicator_queue_glyph_ids` | 生產端以 `[count + i + 0x642b0]` 存入而不檢查上界，第三個陣列的溢位寫在游標自己身上 |
-| `data_fdps_audio_sample_handle_table`（`0x69d30`，`audio.c`） | `zero_guard_before` | 音效索引 `-1` 是活的輸入值，等待迴圈不檢查就讀 `table[-1]`，原版讀到表前面一塊沒有引用、恆為 0 的填充 |
+| `data_fdps_battle_tile_attr_def_modifier_table`（`0x60058`） | `follows: data_fdps_battle_tile_attr_ap_modifier_table` | 地形類別 6 讀 AP 表 `[6]`，原版落在 DEF 表 `[0]`（常數 0）。讀取端是 `fdps_combat_compute_hit_outcome`（`00019f80`）、`fdps_unit_resolve_attack_hit`（`0001c520`）、`fdps_draw_cursor_info_panel`（`0002dcf0`） |
+| `data_fdps_village_mode_flag`（`0x60070`） | `follows: data_fdps_battle_tile_attr_def_modifier_table`、`zero_pad_after: 3` | 同三個讀取端對 DEF 表 `[6]` 的 dword 讀取（`0001a148`、`0001c6aa`、`0002de59`），原版落在旗標與它後面三個 byte 上，值為 0 |
+| `data_fdps_indicator_queue_cell_x_offset`（`0x64120`） | `zero_guard_before` | 下面這整段序列的開頭必須 4 byte 對齊，序列裡的 `int` 與指標才落在原版偏移；它在 `gamedata.c` 裡接在兩個 1 byte 旗標後面 |
+| `data_fdps_battle_indicator_queue_unit_idx`（`0x641e8`） | `follows: data_fdps_indicator_queue_cell_x_offset` | 浮動指示佇列的游標沒有上界，四個生產端 `fdps_show_number_indicator`（`0001f510`）、`fdps_show_miss_indicator`（`0001f690`）、`fdps_show_cure_indicator`（`0001f7d0`）、`fdps_show_sprite_indicator`（`0001fc00`）以 `[cursor + i + 0x64120]` 存入，第 201 格起落進下一個陣列 |
+| `data_fdps_indicator_queue_glyph_ids`（`0x642b0`） | `follows: data_fdps_battle_indicator_queue_unit_idx` | 同上，`unit_idx` 的溢位落在這個陣列上 |
+| `data_fdps_indicator_queue_count`（`0x64378`） | `follows: data_fdps_indicator_queue_glyph_ids` | 游標本身：`glyph_ids[200]` 與 `unit_idx[400]` 就是它。生產端每一次存入之前都重讀游標，游標恰為 200 時開頭的空白字形 `0xFF`（`0001f669`）寫在它的低 byte 上，游標跳成 255，之後的存入就從那裡繼續 |
+| 從 `data_fdps_battle_teleport_dest_tile_x`（`0x6437c`）到 `data_fdps_inverse_palette_cube`（`0x643f0`，4096 byte）的 25 個符號 | 每一個都 `follows` 它的前一個 | 游標跳過 200 之後，字形存入 `[cursor + i + 0x642b0]`（`0001f653`、`0001f669`、`0001f7b2`、`0001f8f2`、`0001fd30`）一路寫到 `0x644b2`，經過傳送目標座標、法術視窗的 tick、隊伍金錢、十八個資源指標（sprite sheet、調色盤、音效庫、動畫、全遊戲文字）、光碟路徑、離開旗標，落進反向調色盤立方的開頭；`fdps_play_indicator_queue`（`0001f340`）以 `i < cursor` 把它們當字形讀回來 |
+| `data_fdps_teleport_destination_tile_y`（`0x64380`）、`data_fdps_spell_list_window_last_tick`（`0x64390`） | 另帶 `zero_pad_after: 12` | 原版在兩者後面各有 12 byte 沒有引用的 0，溢寫會穿過這兩段空隙，後面的成員要留在原版偏移 |
+| `data_fdps_audio_sample_handle_table`（`0x69d30`） | `zero_guard_before` | 音效索引 `-1` 是活的輸入值，等待迴圈不檢查就讀 `table[-1]`，原版讀到表前面一塊沒有引用、恆為 0 的填充 |
 
-鏈上的每個成員都必須帶初值、同屬一個 `.c`、照位址順序排；`gamedata.c` 的鏈是 AP 表→DEF 表→旗標，`indicat.c` 的鏈是三個 200 byte 陣列→游標。
+兩段序列都在 `gamedata.c`，每個成員都帶初值、照位址順序排：第一段是 AP 表→DEF 表→旗標；第二段是 `0x64120..0x653ef` 的 29 個符號，從三個 200 byte 陣列、游標一直到反向調色盤立方，重建版照原版偏移逐一擺放，連兩段 12 byte 空隙一起。溢寫在原版會把字形編號寫進那些資源指標，重建版照樣發生，這一點由 code 那一側照原樣不檢查、資料這一側照原樣相鄰共同保證。
 
-旗標的 `zero_pad_after: 3` 補的是鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用）。在重建版裡，照位址順序緊接在旗標後面的帶初值物件是 `data_fdps_ui_terrain_hud_user_enabled` 與 `data_fdps_ui_play_active_flag`，兩個都是 1 byte、初值 `0x01`；沒有這段 3 byte 的 `static` 0 陣列，它們會落在旗標後的 `+1`、`+2`，地形類別 6 的 DEF 讀取就讀出 `0x00010100` 而不是 0，防禦修正變成約 65536%。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己、恆為 0，閘門也驗得到。**這段尾端不能拿掉**，也不能因為「量過模組之間的對齊」而拿掉——擋住的是同一個檔裡後面的物件。
+旗標的 `zero_pad_after: 3` 補的是第一段鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用）。在重建版裡，照位址順序緊接在旗標後面的帶初值物件是 `data_fdps_ui_terrain_hud_user_enabled` 與 `data_fdps_ui_play_active_flag`，兩個都是 1 byte、初值 `0x01`；沒有這段 3 byte 的 `static` 0 陣列，它們會落在旗標後的 `+1`、`+2`，地形類別 6 的 DEF 讀取就讀出 `0x00010100` 而不是 0，防禦修正變成約 65536%。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己、恆為 0，閘門也驗得到。**這段尾端不能拿掉**，也不能因為「量過模組之間的對齊」而拿掉——擋住的是同一個檔裡後面的物件。
 
-**零值符號帶初值的代價是映像變大。** 六個內容全 0 的符號因為約束而落進 `_DATA`，其中 `indicat.c` 的四個（604 byte）與 `audio.c` 的表加守衛（36 byte）在原版是 BSS，執行檔裡連內容都沒有（[`pitfalls.md`](pitfalls.md)），重建版把這 640 byte 實際寫進映像。這不能省：tentative 定義進 `_BSS`、順序由工具鏈決定，相鄰關係就斷了。映像大小不在等價判準內（[ADR-0001](../docs/adr/0001-only-functional-equivalence.md)）。
+**零值符號帶初值的代價是映像變大。** 31 個內容全 0 的符號因為約束而落進 `_DATA`，其中第二段序列（4816 byte，加開頭的對齊守衛 4 byte）與音效 handle 表加守衛（36 byte）在原版是 BSS，執行檔裡連內容都沒有（[`pitfalls.md`](pitfalls.md)），重建版把這 4856 byte 實際寫進映像。這不能省：tentative 定義進 `_BSS`、順序由工具鏈決定，相鄰關係就斷了。映像大小不在等價判準內（[ADR-0001](../docs/adr/0001-only-functional-equivalence.md)）。
 
-兩個必須相鄰的符號若被路由到不同的檔，擁有權跟著佈局走：`tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES` 記下理由，`extern` 連同說明搬到新擁有者的 `.h`。
+兩個必須相鄰的符號若被路由到不同的檔，擁有權跟著佈局走：整段序列歸已經擁有多數成員的那個檔，`tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES` 逐一記下理由，`extern` 連同說明搬到新擁有者的 `.h`。第二段序列的成員不分子系統全部歸 `gamedata.c`；其中照子系統本該屬於別檔的六個（佇列本身四個、動畫與法術視窗各一個）各有一條 `DATA_OVERRIDES`。
+
+## 已落地的判定可以重判
+
+判定依據的證據不完整時（例：一個越界寫入其實跑得比判定時看到的更遠），受影響的已落地符號帶著新證據**逐一**重判，新證據只是證據、不是要照抄的結論。重判後定義、佈局約束或擁有者有變的才重新落地；`land.py` 以定義內容的雜湊分辨判定有沒有改變，沒改的不動。擁有者改變時先把舊檔的條目拿掉，再照新判定寫進新擁有者，中間那一次建置由 stub 模組暫時補上。
 
 ## 閘門：與原版逐 byte 比對
 
@@ -81,7 +90,7 @@ build gate 的 `emittest` 目標帶一個測試套件 `data_emit.check`（`tools
 | 一般 byte | 逐 byte 相等；原版的零填充區讀成 0，所以一個原版其實有初值的全域無法被當成零值蒙混過去 |
 | 重定位過的指標 | 兩邊都解析成指向的符號名，名字相等（原版經 Ghidra 快照、重建版經 map）；一邊有重定位一邊沒有就是不等 |
 | 定義所在的 object | 必須是 routing 指定的那個 `.c`，不能是 stub 模組 |
-| `follows` | 位址恰好等於前一個符號的位址加它的大小 |
+| `follows` | 位址恰好等於前一個符號的位址加它的大小，再加前一個符號的 `zero_pad_after` |
 | `zero_guard_before` | 前 4 byte 為 0，而且沒有任何公開符號從那 4 byte 開始 |
 | `zero_pad_after` | 尾端之後 N byte 為 0，而且沒有任何公開符號從那 N byte 開始 |
 
@@ -89,7 +98,8 @@ build gate 的 `emittest` 目標帶一個測試套件 `data_emit.check`（`tools
 
 - 存同樣 byte 的兩種型別（有號或無號）——那由編譯器對 `.h` 的比對與判定時讀 assembly 負責。
 - 沒有人記下來的佈局依賴。
-- 已落地符號範圍以外、卻被越界讀取碰到、而判定沒有以 `zero_pad_after`／`zero_guard_before` 記下的 byte。它比對的是每個符號自己的大小，`follows` 只驗起點。
+- 已落地符號範圍以外、卻被越界讀寫碰到、而判定沒有以 `zero_pad_after`／`zero_guard_before` 記下的 byte。它比對的是每個符號自己的大小，`follows` 只驗起點。
+- 越界讀寫本身是否照原樣發生：它證明的是 byte 擺在原版偏移上，程式碼那一側不檢查上界由 function emit 的審查負責。
 - 符號之外的東西：它只讀 manifest 列的那些符號，連結佈局的其他改變不在它的視野裡。
 
 ## 中斷復原的界線與足跡
@@ -121,13 +131,13 @@ tools/code_emit/data/routing.md  rebuild_info/code_layout.md
 | 分類 | 數量 |
 | --- | --- |
 | 已落地 | 232 |
-| 　零值（tentative，落 `_BSS`） | 207 |
-| 　帶初值 | 25 |
+| 　零值（tentative，落 `_BSS`） | 182 |
+| 　帶初值 | 50 |
 | 　　映像初值非 0 | 19（含 4 張 function 指標表：章節 init／event／post-action／end，共 140 格） |
-| 　　內容全 0、因佈局約束而帶初值 | 6 |
-| 帶 `follows` 約束 | 5 |
-| 帶 `zero_pad_after` 約束 | 1 |
-| 帶 `zero_guard_before` 約束 | 1 |
+| 　　內容全 0、因佈局約束而帶初值 | 31 |
+| 帶 `follows` 約束 | 30 |
+| 帶 `zero_pad_after` 約束 | 3 |
+| 帶 `zero_guard_before` 約束 | 2 |
 | 連結器清單上尚未定義 | 0 |
 
-落在 28 個 `.c`：`gamedata.c` 135 個（跨子系統共用的狀態集中在那裡），其餘每檔 1 到 10 個。
+落在 25 個 `.c`：`gamedata.c` 141 個（跨子系統共用的狀態與兩段相鄰序列集中在那裡），其餘每檔 1 到 10 個。
