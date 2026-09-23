@@ -975,6 +975,158 @@ static void mirh_run_length_tops_out_at_64(void)
     CHECK_EQ(mirh_surface[MIRH_BASE + 64], MIRH_SENTINEL);
 }
 
+/* --- fdps_rle_blit_mirrored_vertical (000575ed), blit mode 8 ----------------
+ *
+ * Mode 8 draws nothing itself.  It moves the destination cursor down to the
+ * rectangle's last raster line -- pitch * (rows - 1), with the row count
+ * decremented in DX only (DEC DX at 000575fe, MUL EDX at 00057600) -- loads
+ * the row advance -(pitch + width) (ADD DX / NEG EDX at 0005760d) and
+ * tail-jumps into the pass-through kernel, which consumes the stream exactly
+ * as mode 0 does.  So a row mode 0 draws at raster line r lands here at line
+ * rows - 1 - r, with its columns in mode 0's order.
+ *
+ * Mode 8 gets no row advance from the dispatcher, so a C case's width, rows
+ * and pitch are the dispatch's src_width, src_rows and dest_pitch unchanged;
+ * the mode operand is not read and is passed 0.  The destination is MIRV_BASE
+ * bytes into the surface so a first row placed one line too high (above the
+ * pointer) overruns into bytes the checks look at.
+ */
+#define MIRV_MODE     8
+#define MIRV_SENTINEL 0x5a
+#define MIRV_BASE     8
+
+static unsigned char mirv_surface[80];
+
+static void mirv_clear(void)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof mirv_surface; byte_index++) {
+        mirv_surface[byte_index] = MIRV_SENTINEL;
+    }
+}
+
+/* The reflection itself.  Two one-pixel-per-row fill runs over a two-wide
+   sprite in a pitch of four: mode 0 puts 0xaa on the top row and 0xbb on the
+   one below it, mode 8 puts them the other way up inside the same two-by-two
+   rectangle.  The start is 4 * (2 - 1) = 4 and the advance -(4 + 2) = -6
+   takes the cursor from the end of the first row (byte 6) back to byte 0.
+   The row count is left at zero by the pass-through kernel's DEC. */
+static void mirv_reflects_the_rows(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0x01;
+    stream[3] = 0xbb;
+    mirv_clear();
+    fdps_blit_dispatch(stream, mirv_surface + MIRV_BASE, 2, 2, 4, 0, MIRV_MODE);
+
+    CHECK_EQ(mirv_surface[MIRV_BASE - 1], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 0], 0xbb);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 1], 0xbb);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 2], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 3], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 4], 0xaa);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 5], 0xaa);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 6], MIRV_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* DEC DX before the multiply: with one row the displacement is pitch * 0, so a
+   single-row sprite lands on the pointer it was handed and mode 8 draws exactly
+   what mode 0 draws.  Without the decrement it would start a whole pitch lower,
+   which is what the checks on MIRV_BASE + 4 and + 5 catch. */
+static void mirv_single_row_starts_at_the_pointer(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x01;
+    stream[1] = 0xcc;
+    mirv_clear();
+    fdps_blit_dispatch(stream, mirv_surface + MIRV_BASE, 2, 1, 4, 0, MIRV_MODE);
+
+    CHECK_EQ(mirv_surface[MIRV_BASE - 1], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 0], 0xcc);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 1], 0xcc);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 2], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 4], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 5], MIRV_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The advance has to pay the width back as well as the pitch, because the
+   pass-through kernel adds it only once the cursor has walked the row.  Three
+   two-wide rows in a pitch of five start at 5 * 2 = 10 and every row must land
+   back in columns 0 and 1: at MIRV_BASE + 10, + 5 and + 0 (12 - 7, then
+   7 - 7).  An advance of -pitch would put the second row at + 7 and the third
+   at + 4, which the sentinel checks there rule out.  Neither the width nor the
+   pitch is written by the routine, so both still hold what the dispatcher
+   published. */
+static void mirv_advance_pays_back_the_width(void)
+{
+    unsigned char stream[6];
+
+    stream[0] = 0x01;
+    stream[1] = 0x11;
+    stream[2] = 0x01;
+    stream[3] = 0x22;
+    stream[4] = 0x01;
+    stream[5] = 0x33;
+    mirv_clear();
+    fdps_blit_dispatch(stream, mirv_surface + MIRV_BASE, 2, 3, 5, 0, MIRV_MODE);
+
+    CHECK_EQ(mirv_surface[MIRV_BASE - 1], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 10], 0x11);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 11], 0x11);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 5], 0x22);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 6], 0x22);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 0], 0x33);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 1], 0x33);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 7], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 4], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 2], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 12], MIRV_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 2);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, 5);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The stream is consumed forwards while the destination climbs, so the four
+   ops keep their mode-0 meaning within a row and only the row order is
+   reversed.  Row 0 is the stream pass_all_four_ops_in_one_row draws -- fill,
+   stretched, literal, skip at length 1, widths 1, 2, 1 and 1 -- and it comes
+   out in mode 0's left-to-right order on the LOWER line (start 6 * 1 = 6).
+   Row 1 is a length-5 fill (0x04) that the advance -(6 + 5) brings back to
+   byte 0. */
+static void mirv_keeps_column_order_within_a_row(void)
+{
+    unsigned char stream[9];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    stream[7] = 0x04;
+    stream[8] = 0xd4;
+    mirv_clear();
+    fdps_blit_dispatch(stream, mirv_surface + MIRV_BASE, 5, 2, 6, 0, MIRV_MODE);
+
+    CHECK_EQ(mirv_surface[MIRV_BASE + 6], 0xa1);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 7], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 8], 0xb2);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 9], 0xc3);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 10], MIRV_SENTINEL);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 0], 0xd4);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 4], 0xd4);
+    CHECK_EQ(mirv_surface[MIRV_BASE + 5], MIRV_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
 void run_rlebase_tests(void)
 {
     RUN_TEST(pass_fill_run_writes_len_bytes);
@@ -1012,4 +1164,8 @@ void run_rlebase_tests(void)
     RUN_TEST(mirh_all_four_ops_in_one_row);
     RUN_TEST(mirh_second_row_steps_by_the_full_pitch);
     RUN_TEST(mirh_run_length_tops_out_at_64);
+    RUN_TEST(mirv_reflects_the_rows);
+    RUN_TEST(mirv_single_row_starts_at_the_pointer);
+    RUN_TEST(mirv_advance_pays_back_the_width);
+    RUN_TEST(mirv_keeps_column_order_within_a_row);
 }
