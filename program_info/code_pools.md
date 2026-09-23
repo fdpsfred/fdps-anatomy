@@ -194,13 +194,19 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 ### 其中有一批不是 C
 
-`fdps` 裡有一族 function 是遊戲自己寫的組合語言，不是 `wcc386` 的產物，最大的一群是 `fdps_blit_dispatch`（`000568db`）底下 `00056a0d`–`00057a74` 的十三個 RLE sprite blit kernel，另外還有 `fdps_xor_crypt_buffer`（`000568b7`）。
+`fdps` 的最後一段 `00056799`–`00057c5f`（到 object 1 的結尾）是遊戲自己寫的組合語言模組，不是 `wcc386` 的產物，共 24 支：
 
-辨識特徵一致：沒有 prologue，參數由呼叫端預先放在 ESI／EDI／ECX／EDX，直接沿用呼叫端的 EBP frame，並且會蓋掉呼叫端的傳入參數槽。Ghidra 對它們推出來的 `__watcall` 簽章是猜的，不是真的呼叫慣例。
+| 範圍 | function | 重建形式 |
+| --- | --- | --- |
+| `00056799`–`00056897` | 鍵盤 7 支：`fdps_keyboard_scancode_ptr`、`fdps_wait_any_key`、`fdps_flush_keyboard_queue`、`fdps_read_keyboard_queue`、`fdps_install_keyboard_isr`、`fdps_uninstall_keyboard_isr`、`fdps_keyboard_isr` | C |
+| `00056898`–`000568da` | 存檔 2 支：`fdps_compute_save_checksum`、`fdps_xor_crypt_buffer` | C |
+| `000568db`–`00057c5f` | RLE 繪製 15 支：分派者 `fdps_blit_dispatch` 與它底下的 14 支——13 種畫法（mode 0–12）加兩支縮放畫法共用的 `fdps_rle_skip_row` | 原版組語 |
 
-這些 function 原版是手寫組語，但暫存器交接與對呼叫端 frame 的讀寫都封閉在 `fdps_blit_dispatch` 之內、對外不可觀察，所以重建以一般 C（預設堆疊慣例）同時改寫 dispatcher 與 kernel 兩端即為功能等價；`fdps_xor_crypt_buffer` 同理。唯一的差異是速度（C 版每像素的指令數是 `REP STOSB`／`REP MOVSB` 的數倍），遊戲以垂直歸線與 timer tick 定步調，是否看得出來由實機驗證決定。參數表怎麼定見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
+辨識特徵一致：沒有 prologue，參數由呼叫端預先放在 ESI／EDI／ECX／EDX，直接沿用呼叫端的 EBP frame，並且會蓋掉呼叫端的傳入參數槽。Ghidra 對它們推出來的 `__watcall` 簽章是猜的，不是真的呼叫慣例。前向短跳後面都跟著 `NOP` 填充，是單趟組譯器的特徵（[`rebuild_info/build_flags.md`](../rebuild_info/build_flags.md)）。
 
-存檔相關的兩支同樣是手寫組語，它們的常數決定存檔相容性：
+**RLE 那 15 支在重建裡保留原版組語**，從 `FDPS.LE` 逐道轉錄成 `src/rledisp.asm`、`rlebase.asm`、`rlepal.asm`、`rleturn.asm`、`rlemix.asm`，指令序列與每道指令的長度都與原版相同。理由是速度：這一組是每畫一個 sprite、每塊地圖格、每個字形都會跑的逐像素熱路徑，原版一段同色像素是一道 `REP STOSB`／`REP MOVSB`，寫成 C 就成了每像素數道指令的迴圈。暫存器交接與對分派者 frame 的讀寫雖然封閉在分派者之內、改寫成 C 仍是功能等價，但速度不是，所以不採用。分派者必須跟著一起是組語，理由見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)；C 譯本以 `#if 0` 留在原檔作閱讀參考，切換方法見 [`rebuild_info/code_layout.md`](../rebuild_info/code_layout.md)。
+
+鍵盤 7 支與存檔 2 支不在熱路徑上，重建以一般 C 改寫，依 ADR-0001 功能等價。存檔的兩支，常數決定存檔相容性：
 
 - `fdps_xor_crypt_buffer`（`000568b7`）是 `FDE.SAV` 的 XOR 串流加解密，加密與解密共用同一支。密鑰狀態放在 DX：起始 `0xa5`，每個 byte 先 `DX += 0x9014` 再 `ROL DX,3`，取 DL 與資料 XOR，主體是 `LODSB`／`STOSB`／`LOOP`。
 - `00056898` 是存檔的加總 checksum，範圍是 `len - 4` 個 byte——尾端 4 byte 的 checksum 欄位本身不計入。

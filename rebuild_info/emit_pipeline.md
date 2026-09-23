@@ -125,8 +125,9 @@ B、E、H 三類的共同症狀是「數值或指標讀到不相干的東西」�
 
 | 規則 | 內容 |
 | --- | --- |
-| 一對一鏡像 | `tests/<stem>.c` 對應 `src/<stem>.c` |
-| 註冊 | 該檔定義 `void run_<stem>_tests(void)`，用 `RUN_TEST` 登記每個 case。進入點由建置腳本從這個函式名產生，新增測試檔不需要接任何線 |
+| 一對一鏡像 | `tests/<stem>.c` 對應 `src/<stem>.c`，組語檔同理：`tests/<stem>.c` 對應 `src/<stem>.asm` |
+| 沒有 C 介面的組語 | RLE 繪製的 kernel 只能經 `fdps_blit_dispatch` 進入，所以 `tests/rlebase.c`、`rlepal.c`、`rleturn.c`、`rlemix.c` 的每個 case 都呼叫分派者並指定該 kernel 的 mode，`tests/rledisp.c` 測分派者本身。這些 case 不依賴連進來的是組語還是 C 譯本，兩種都要過。C 譯本原有的直接呼叫測試留在 `tests/rle.c`、`rlecolor.c`、`rlerot.c`、`rleblend.c` 的 `#if 0` 參考區，檔頭寫明它們測的是參考用的 C 譯本，切回 C 版時一起重新啟用（[`code_layout.md`](code_layout.md)） |
+| 註冊 | 該檔定義 `void run_<stem>_tests(void)`，用 `RUN_TEST` 登記每個 case。進入點由建置腳本從這個函式名產生，新增測試檔不需要接任何線；寫在 `#if 0` 裡的不算定義，不會被登記 |
 | 遊戲進入點 | 測試映像的 `main` 是產生出來的那支，所以 `src/main.c` 在**測試建置裡**以命令列 `-dmain=fdps_game_main` 編譯，把遊戲的 `main` 改名避開重複定義；其餘 unit 不帶這個 define，`src/` 裡也沒有對應的條件編譯。遊戲本體的建置不加它。沒有測試呼叫遊戲的 `main`——它不是 `exit(1)` 就是跑進永不回來的主迴圈 |
 | 斷言 | `CHECK_EQ`，見 `tests/testharn.h` |
 | 涵蓋政策 | 風險導向：數值計算、分支結構、狀態轉移，以及任何用到「CALL 之後的回傳值」的地方必須測；純繪圖副作用可延後並註明 |

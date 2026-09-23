@@ -245,6 +245,44 @@ library emu387.lib
 
 object 3（`0x70000`，84 byte）不是上面任何一段產生的——它是某個 vendor 模組自帶的、不屬於 DGROUP 也不屬於 CGROUP 的資料段（取用範圍見 [`memory_layout.md`](../program_info/memory_layout.md)）。它掛在哪個 lib 上屬於票 14／19。
 
+## 手寫組語：原版不是 WASM 組的，但 WASM 寫得出同樣的指令序列
+
+RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支，範圍見 [`program_info/code_pools.md`](../program_info/code_pools.md)）在重建裡保留原版組語，以 `wasm` 組譯。標準是**指令序列逐道相同、每道指令長度相同**，byte 只允許在「同一道指令的另一種等長編碼」與重定位欄位不同；檢查工具是 [`tools/rle_asm/asm_match.py`](../tools/rle_asm/_index.md)，已登記進 build gate。
+
+### 原版的組譯器不是 WASM 10.0a
+
+兩個特徵都在這 15 支裡逐道量過：
+
+| 特徵 | 原版 | WASM 10.0a |
+| --- | --- | --- |
+| 暫存器對暫存器的 `mov`／`add`／`sub`／`xor`／`and`／`or`／`cmp` | 目的運算元放在 ModRM.reg 的那一個 opcode，例：`or bx,bx` 是 `66 0B DB` | 另一個方向，`66 09 DB` |
+| `cmp ax,0` | 累加器形式 `66 3D 00 00` | imm8 形式 `66 83 F8 00` |
+| 前向分支 | 先預留長形式，距離夠短就縮成短跳，**省下的 byte 用 NOP 補回**：條件跳躍 2 byte + 4 個 `NOP`，`JMP` 2 byte + 3 個 `NOP`；目標太遠才留長形式 | 多趟組譯，直接排出最短形式，不留填充 |
+| 後向分支 | 距離已知，直接取最短形式，沒有填充 | 同左 |
+
+前兩列長度相同、CPU 的動作與週期相同，屬於允許的差異，**照一般寫法寫即可，不能為了對齊 byte 改寫 `DB`**。第三列是單趟組譯器的指紋：15 支共 505 個 `NOP`，全部是前向短跳後的填充，沒有任何分支的目標落在 `NOP` 上。
+
+### 用 WASM 寫出同樣序列的規則
+
+- **前向短跳**寫 `jcc short 標籤`／`jmp short 標籤`，後面照原版逐行寫 `nop`。條件跳躍沒跳時會順著執行這些 `NOP`，省掉就改變了執行的指令數。
+- **其餘分支不指定長短**，讓 WASM 自己選：後向分支與超出短跳範圍的前向分支都會出原版的長度。
+- **例外：原版是前向長跳、但縮成短跳後目標就進得了短跳範圍的條件跳躍。** 原版的規則以「保留長形式時的距離」判斷，WASM 以「自己縮短後的距離」判斷，所以 32-bit 位移 D 落在 124–127 的前向 `jcc`，WASM 不指定長短時一律組成短跳。這時要寫 `jcc near ptr 標籤` 強制長形式。本遊戲只有兩處（`0x57801`、`0x57984` 的 `jb`，D 都是 127）。同樣處境的 `JMP` 實測 WASM 自己保留長形式（D=126 的 `0x56e89`、`0x5718a`），不必處理。
+- **`jcc near ptr` 的位移有錯**，只在 D 夠大時才對。實測（`jb near ptr`，D 以 6 byte 長形式的結尾起算）：
+
+  | 方向 | 組錯（目標多 1 byte） | 組對 |
+  | --- | --- | --- |
+  | 前向 | D ≤ 126 | D ≥ 127 |
+  | 後向 | 跳過的 byte 數 ≤ 123 | ≥ 124 |
+
+  所以 D=124–126 的前向長 `jcc` 在 WASM 裡沒有乾淨的寫法；本遊戲沒有這種分支。`jmp near ptr` 的位移一律正確。
+- **標籤是整個模組共用的**，同一個 `.asm` 裡的每支 routine 要用各自的前綴（前綴表在 `asm_match.py` 的 `ROSTER`），否則 `E071: Symbol already defined`。
+- **資料以 `extrn 符號:word` 之類宣告後直接用符號**，不需要 `.model flat`。WASM 對外部符號產生的 fixup 以目標決定 frame，wcc386 用 `FLAT` group；實測兩種在 DOS/4G 的 LE 裡解出同一個位址。
+- 一個檔裡兩支 routine 之間的跳躍在接成一個模組後不再是 fixup，距離可能變短，所以落地後要以接好的檔重新比對一次（`asm_match.py check --fresh`）。
+
+### 與 C 呼叫端的契約
+
+分派者照原版保存 EBX／ESI／EDI／EBP、破壞 EAX／ECX／EDX，正是 `-4s` 堆疊慣例的 callee-saved 集合，所以 `blit.h` 的 `#pragma aux fdps_blit_dispatch "*" parm caller [];` 不必加 `modify`。重建以 `-od` 編譯，呼叫端本來就不把值留在暫存器裡跨過呼叫。
+
 ## 個別 function 的 calling convention
 
 **預設是堆疊慣例（`-4s`），但不能假設全域統一。** 每個 function 的 cc 必須在 emit 時於程式碼中明確宣告，不靠旗標帶過。

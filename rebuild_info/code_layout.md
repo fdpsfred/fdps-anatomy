@@ -86,9 +86,47 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 `next_batch.py` 以 `routing.json` 為工作清單的名冊，`emit_state.json` 只記進度；兩邊對某支 function 的目標檔不一致時它報錯而不是二選一，因為那正是「同一支 function 被寫進兩個檔」的前兆。
 
+## RLE 繪製：組語檔與保留的 C 譯本
+
+RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執行檔的是原版組語，理由見 [`program_info/code_pools.md`](../program_info/code_pools.md)，寫法與比對標準見 [`build_flags.md`](build_flags.md)。組語分五個檔，對應原本 C 的分組：
+
+| 組語檔 | 內容 | C 譯本 | 測試 |
+| --- | --- | --- | --- |
+| `rledisp.asm` | `fdps_blit_dispatch` | `blit.c` 的最後一段 | `tests/rledisp.c` |
+| `rlebase.asm` | mode 0 直通、mode 4 縮放、`fdps_rle_skip_row`、mode 7／8 鏡射 | `rle.c` | `tests/rlebase.c` |
+| `rlepal.asm` | mode 1／2 重映、mode 3 換色 | `rlecolor.c` | `tests/rlepal.c` |
+| `rleturn.asm` | mode 5 旋轉、mode 6 旋轉縮放 | `rlerot.c` | `tests/rleturn.c` |
+| `rlemix.asm` | mode 9 半透明、mode 10／11 著色、mode 12 顏色範圍半透明 | `rleblend.c` | `tests/rlemix.c` |
+
+**組語檔不能與 C 檔同主檔名。** 建置把 `src/X.c` 與 `src/X.asm` 都輸出成 `OBJS\X.OBJ`，後寫的蓋掉先寫的，所以不能叫 `rle.asm`。
+
+**組語檔裡每支 routine 照原版位址順序排，各自一個標籤前綴。** WASM 的標籤是模組共用的。五個檔由 [`tools/rle_asm/land.py`](../tools/rle_asm/_index.md) 從逐支轉錄的片段接成，檔頭一段說明、合併後的 `extrn`、每支的 `public`，然後是各 routine 原文。
+
+**C 譯本整段保留在原檔，包在帶標記的 `#if 0` 裡**：
+
+```c
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+...
+#endif /* RLE_C_REFERENCE */
+```
+
+用 `#if 0` 而不是 `/* */`，因為那些 C 裡滿是區塊註解，而 `/* */` 不能巢狀。這不是測試 hook（[ADR-0003](../docs/adr/0003-manual-playtest-over-automated-golden.md) 禁止的是讓生產程式碼為測試改變行為的條件編譯），它是一段不參與建置的參考文字。標記區共 13 個：
+
+- 原始碼 5 個：`blit.c`（分派者）、`rle.c`、`rlecolor.c`、`rlerot.c`、`rleblend.c`（畫法）。`rlerot.c` 與 `rleblend.c` 的全域定義在標記區之外，組語以 `extrn` 讀寫它們。
+- 標頭 4 個：`rle.h`、`rlecolor.h`、`rlerot.h`、`rleblend.h` 裡 13 種畫法與 `fdps_rle_skip_row` 的 C 原型。在組語版裡它們不是真的介面：kernel 只能從分派者的暫存器與 frame 進入，C 不得呼叫。對外只剩 `blit.h` 的 `fdps_blit_dispatch`。
+- 測試 4 個：`tests/rle.c`、`rlecolor.c`、`rlerot.c`、`rleblend.c` 直接呼叫 C 版畫法的測試。建置腳本不登記 `#if 0` 裡的測試進入點（[`tools/code_emit/`](../tools/code_emit/_index.md)）。
+
+### 改回 C 版的步驟
+
+1. `python tools/rle_asm/switch_impl.py c`——把 13 個標記區的 `#if 0` 翻成 `#if 1`，並把五個 `.asm` 停放到 `workspace/rle_asm/parked/`。建置編的是 `src/` 裡現有的檔，組語檔留著就會與 C 重複定義。狀態不一致（標記少了、半套翻轉、`.asm` 缺一部分）時它拒絕動手。
+2. `python tools/code_emit/build_emit.py all`——建置零錯誤零警告、兩套測試全綠：`tests/rledisp.c`／`rlebase.c`／`rlepal.c`／`rleturn.c`／`rlemix.c` 經分派者的測試（兩種實作都要過），加上重新啟用的 C 版直接呼叫測試。
+3. build gate（`python tools/build_gate/gate.py check --target emittest`）裡的 `rle_asm.check` 在 C 版狀態下必然失敗——它比對的就是組語檔。長期改回 C 版時要一併把它從 `tools/build_gate/gate.py` 的 `TEST_SUITES` 拿掉；只是暫時切過去驗證時，其餘套件全綠即可。
+
+改回組語版是 `python tools/rle_asm/switch_impl.py asm`，再跑一次第 2 步（C 版直接呼叫的測試回到 `#if 0`，只剩經分派者的那一套）與完整的 build gate。這條路實際走過一次：C 版建置與兩套測試全綠，切回組語版後 gate 全綠。
+
 ## 檔案表
 
-89 個 `.c`，各自配一個同名 `.h`。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
+89 個 `.c`，各自配一個同名 `.h`；另有 6 個 `.asm`（上一節的五個與 AIL 用的 `ailflags.asm`）。逐檔的 function 清單與行數在 `tools/code_emit/data/routing.md`。
 
 ### 戰鬥地圖 AI
 
@@ -193,12 +231,15 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 | 檔 | 負責 |
 | --- | --- |
-| `blit.c` | 矩形 blit 原語：透明、鑲嵌、著色、混合、旋轉縮放 |
+| `blit.c` | 矩形 blit 原語：透明、鑲嵌、著色、混合、旋轉縮放；`fdps_blit_dispatch` 的 C 譯本（`#if 0`，參考用） |
 | `sprite.c` | sprite 原語：composite sprite、tilemap、CEL 展開與 blit |
-| `rle.c` | RLE 基本 blitter：直通、縮放、水平／垂直鏡射、跳列 |
-| `rlerot.c` | RLE 旋轉與旋轉縮放 |
-| `rlecolor.c` | RLE 調色盤重映與換色 |
-| `rleblend.c` | RLE 半透明與著色 |
+| `rledisp.asm` | RLE 分派者 `fdps_blit_dispatch`，原版組語 |
+| `rlebase.asm` | RLE 基本畫法：直通、縮放、跳列、水平／垂直鏡射，原版組語 |
+| `rlepal.asm` | RLE 調色盤重映與換色，原版組語 |
+| `rleturn.asm` | RLE 旋轉與旋轉縮放，原版組語 |
+| `rlemix.asm` | RLE 半透明與著色，原版組語 |
+| `rle.c`、`rlecolor.c` | 上面三個 `.asm` 的 C 譯本，整段 `#if 0`（參考用） |
+| `rlerot.c`、`rleblend.c` | 旋轉與半透明畫法的 C 譯本（`#if 0`，參考用），以及組語讀寫的旋轉步進與顏色範圍全域的定義（編譯） |
 | `palette.c` | 調色盤暫存器與查找表 |
 | `palcycle.c` | 場景與 UI 的調色盤循環動畫 |
 | `transit.c` | 畫面轉場：方塊、滑動、隨機塊、縮放 |
