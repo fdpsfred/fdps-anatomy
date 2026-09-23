@@ -580,6 +580,11 @@ DATA_OVERRIDES = {
         "Layout neighbour: 4-aligned head of gamedata.c's contiguous "
         "initialised run 0x64120..0x653ef (29 globals, 25 already there), "
         "which the unbounded indicator-queue cursor overruns."),
+    "data_fdps_spell_list_window_last_tick": ("gamedata.c",
+        "Layout neighbour: must sit at 0x64390 right after "
+        "data_fdps_teleport_destination_tile_y, with the unreferenced 12-byte "
+        "gap after it, inside gamedata.c's contiguous initialised run "
+        "0x64120..0x653ef, which the indicator-queue overrun writes through."),
 }
 
 

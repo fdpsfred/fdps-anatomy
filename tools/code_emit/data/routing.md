@@ -50,7 +50,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `deploy.c` | 3 | 502 | 1 | 1 | 503 |
 | `dpmi.c` | 6 | 363 | 0 | 0 | 363 |
 | `ending.c` | 1 | 314 | 0 | 0 | 314 |
-| `gamedata.c` | 0 | 0 | 140 | 140 | 140 |
+| `gamedata.c` | 0 | 0 | 141 | 141 | 141 |
 | `gauge.c` | 9 | 955 | 1 | 1 | 956 |
 | `icon.c` | 9 | 956 | 0 | 0 | 956 |
 | `indicat.c` | 6 | 664 | 0 | 0 | 664 |
@@ -80,7 +80,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `shop.c` | 4 | 673 | 4 | 4 | 677 |
 | `shopdraw.c` | 3 | 358 | 0 | 0 | 358 |
 | `spell.c` | 6 | 717 | 0 | 0 | 717 |
-| `spellmnu.c` | 4 | 558 | 1 | 1 | 559 |
+| `spellmnu.c` | 4 | 558 | 0 | 0 | 558 |
 | `sprite.c` | 8 | 538 | 0 | 0 | 538 |
 | `statunit.c` | 3 | 510 | 2 | 2 | 512 |
 | `statwin.c` | 4 | 354 | 1 | 1 | 355 |
@@ -1129,7 +1129,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | --- | --- | --- | --- |
 | `00060140` | data | `data_fdps_map_spawn_pos_table_ptr` | read only from deploy.c |
 
-### `gamedata.c` -- 140 globals
+### `gamedata.c` -- 141 globals
 
 | address | segment | symbol | why here |
 | --- | --- | --- | --- |
@@ -1198,6 +1198,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00064378` | bss | `data_fdps_indicator_queue_count` | Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the unbounded indicator-queue cursor overruns through itself. |
 | `0006437c` | bss | `data_fdps_battle_teleport_dest_tile_x` | read from 3 files: item.c, spell.c, spellmnu.c |
 | `00064380` | bss | `data_fdps_teleport_destination_tile_y` | read from 3 files: item.c, spell.c, spellmnu.c |
+| `00064390` | bss | `data_fdps_spell_list_window_last_tick` | Layout neighbour: must sit at 0x64390 right after data_fdps_teleport_destination_tile_y, with the unreferenced 12-byte gap after it, inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the indicator-queue overrun writes through. |
 | `000643a0` | bss | `data_fdps_audio_basewav_sfx_bank_buf_ptr` | read from 2 files: audio.c, main.c |
 | `000643a4` | bss | `data_fdps_shared_party_total_gold` | read from 13 files: btlact.c, btlend.c, btlmenu.c, chevt3.c, chevt5.c, death.c, roster.c, save.c, savefile.c, shop.c, vilbar.c, village.c, vilmenu.c |
 | `000643a8` | bss | `data_fdps_animation_baseani_archive_ptr` | read from 3 files: anim.c, death.c, main.c |
@@ -1380,12 +1381,6 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `000601ac` | data | `data_fdps_shop_item_picker_cursor_idx` | read only from shop.c |
 | `000601b0` | data | `data_fdps_shop_buy_target_scroll_offset` | read only from shop.c |
 | `000601b4` | data | `data_fdps_shop_buy_target_cursor_idx` | read only from shop.c |
-
-### `spellmnu.c` -- 1 globals
-
-| address | segment | symbol | why here |
-| --- | --- | --- | --- |
-| `00064390` | bss | `data_fdps_spell_list_window_last_tick` | read only from spellmnu.c |
 
 ### `statunit.c` -- 2 globals
 

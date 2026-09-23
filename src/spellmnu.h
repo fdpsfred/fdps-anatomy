@@ -53,22 +53,8 @@ extern void fdps_draw_spell_list_page(int unit_index, int list_top,
                                       int pitch);
 #pragma aux fdps_draw_spell_list_page "*" parm caller [];
 
-/* 00064390.  The tick the spell-list window last drew a frame for.  The pacing
- * state of the wait loop below -- a global rather than a local, and that is
- * observable: it keeps its value between calls, so a window opened again on
- * the tick a previous one closed on draws nothing until the timer moves.
- *
- * IT IS SIGNED, AND BOTH ANIMATION PHASES ARE TAKEN FROM IT RATHER THAN FROM
- * THE LIVE COUNTER.  The arrow blink is (this / 8) & 1 through a SAR pair at
- * 00027932, and the walk frame is (this % 16) / 4 through IDIV and SAR at
- * 00027ab7 and 00027ac3; every one of those divisions is signed, so the phase
- * chosen once the counter has passed 0x7fffffff is the one signed division
- * gives.  The latch is advanced to data_fdps_timer_tick_counter only on the
- * last line of the frame.
- *
- * Never cleared.  Nothing resets it when the window closes or a chapter
- * ends. */
-extern int data_fdps_spell_list_window_last_tick;
+/* The wait loop's frame latch, data_fdps_spell_list_window_last_tick
+   (00064390), is owned by src/gamedata.c and declared in gamedata.h. */
 
 /* Holds the assembled spell-list window on the screen, keeps the caster
    walking and the scroll arrows blinking in it, and comes back with the first

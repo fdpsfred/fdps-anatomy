@@ -40,11 +40,6 @@
  * Initialised definitions come first and their order is the layout
  * (rebuild_info/data_emit.md); zero-filled ones follow. */
 
-/* 00064390. Starts at zero in BSS; the first pass of the spell list wait loop
-   compares it with the current tick and stores the new tick, so the zero start
-   only means the first frame always redraws. */
-int data_fdps_spell_list_window_last_tick;
-
 /* End of global data. */
 
 /* The stack buffer the spell ids are collected into: SUB ESP,0x40 at 000276f6
