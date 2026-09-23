@@ -5682,7 +5682,7 @@
     },
     "000643ec": {
       "symbol": "data_fdps_animation_baseani_entry_ptr",
-      "target": "anim.c",
+      "target": "gamedata.c",
       "type": "/byte *",
       "size": 4,
       "segment": "bss",
@@ -5691,7 +5691,7 @@
       "reader_files": [
         "anim.c"
       ],
-      "reason": "read only from anim.c",
+      "reason": "Layout neighbour: must sit at 0x643ec right after data_fdps_shared_quit_game_requested in gamedata.c's contiguous initialised run 0x64120..0x653ef, which the indicator-queue glyph overrun writes through.",
       "status": "pending"
     },
     "000643f0": {

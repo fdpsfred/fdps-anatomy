@@ -561,6 +561,11 @@ DATA_OVERRIDES = {
         "Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids "
         "(indicat.c) contiguously so the unbounded glyph_ids overrun lands on "
         "this cursor as in the original."),
+    "data_fdps_animation_baseani_entry_ptr": ("gamedata.c",
+        "Layout neighbour: must sit at 0x643ec right after "
+        "data_fdps_shared_quit_game_requested in gamedata.c's contiguous "
+        "initialised run 0x64120..0x653ef, which the indicator-queue glyph "
+        "overrun writes through."),
 }
 
 

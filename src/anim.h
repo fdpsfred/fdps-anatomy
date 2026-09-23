@@ -19,16 +19,6 @@
 #ifndef ANIM_H
 #define ANIM_H
 
-/* 000643ec.  The member BaseAni.vfs lookup found last, kept as a global
-   although the one caller also takes the answer as a return value.  Written on
-   every lookup, before the answer is tested, so it holds NULL for as long as a
-   failed lookup takes to print its message and end the process; nothing ever
-   clears it and nothing outside fdps_baseani_get_entry_or_exit reads it -- all
-   three references in the image are that function's own store, test and load.
-   It points INTO the resident archive image, so it is not a block anything may
-   free. */
-extern unsigned char *data_fdps_animation_baseani_entry_ptr;
-
 /* Finds the member called name inside the resident BaseAni.vfs image and hands
    back a pointer to it, or ends the process when the archive holds no such
    member.

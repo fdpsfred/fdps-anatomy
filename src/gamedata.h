@@ -1036,6 +1036,16 @@ extern char data_fdps_cdrom_path[3];
    value from another. */
 extern unsigned char data_fdps_shared_quit_game_requested;
 
+/* 000643ec.  The member BaseAni.vfs lookup found last, kept as a global
+   although the one caller also takes the answer as a return value.  Written on
+   every lookup, before the answer is tested, so it holds NULL for as long as a
+   failed lookup takes to print its message and end the process; nothing ever
+   clears it and nothing outside fdps_baseani_get_entry_or_exit reads it -- all
+   three references in the image are that function's own store, test and load.
+   It points INTO the resident archive image, so it is not a block anything may
+   free. */
+extern unsigned char *data_fdps_animation_baseani_entry_ptr;
+
 /* 00069de8.  Flat linear address of the 512-byte DOS real-mode block the
    MSCDEX request header is built in.  It is the real-mode segment
    fdps_cd_alloc_dos_buffers got back from DPMI, shifted left four: DOS/4GW

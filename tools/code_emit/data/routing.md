@@ -12,7 +12,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `aiact.c` | 3 | 505 | 0 | 0 | 505 |
 | `aiscore.c` | 6 | 841 | 0 | 0 | 841 |
 | `aitarget.c` | 5 | 580 | 0 | 0 | 580 |
-| `anim.c` | 6 | 628 | 1 | 1 | 629 |
+| `anim.c` | 6 | 628 | 0 | 0 | 628 |
 | `audio.c` | 12 | 709 | 8 | 8 | 717 |
 | `blit.c` | 10 | 876 | 0 | 0 | 876 |
 | `btlact.c` | 2 | 365 | 0 | 0 | 365 |
@@ -50,7 +50,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `deploy.c` | 3 | 502 | 1 | 1 | 503 |
 | `dpmi.c` | 6 | 363 | 0 | 0 | 363 |
 | `ending.c` | 1 | 314 | 0 | 0 | 314 |
-| `gamedata.c` | 0 | 0 | 135 | 135 | 135 |
+| `gamedata.c` | 0 | 0 | 136 | 136 | 136 |
 | `gauge.c` | 9 | 955 | 1 | 1 | 956 |
 | `icon.c` | 9 | 956 | 0 | 0 | 956 |
 | `indicat.c` | 6 | 664 | 4 | 4 | 668 |
@@ -1060,12 +1060,6 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 ## Globals by file
 
 
-### `anim.c` -- 1 globals
-
-| address | segment | symbol | why here |
-| --- | --- | --- | --- |
-| `000643ec` | bss | `data_fdps_animation_baseani_entry_ptr` | read only from anim.c |
-
 ### `audio.c` -- 8 globals
 
 | address | segment | symbol | why here |
@@ -1135,7 +1129,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | --- | --- | --- | --- |
 | `00060140` | data | `data_fdps_map_spawn_pos_table_ptr` | read only from deploy.c |
 
-### `gamedata.c` -- 135 globals
+### `gamedata.c` -- 136 globals
 
 | address | segment | symbol | why here |
 | --- | --- | --- | --- |
@@ -1220,6 +1214,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `000643e4` | bss | `data_fdps_vga_fight_palette_ptr` | read from 5 files: church.c, cmbspell.c, combat.c, ending.c, main.c |
 | `000643e8` | bss | `data_fdps_cdrom_path` | read from 3 files: cdaudio.c, main.c, title.c |
 | `000643eb` | bss | `data_fdps_shared_quit_game_requested` | read from 6 files: btlmenu.c, chend2b.c, main.c, title.c, vilbar.c, village.c |
+| `000643ec` | bss | `data_fdps_animation_baseani_entry_ptr` | Layout neighbour: must sit at 0x643ec right after data_fdps_shared_quit_game_requested in gamedata.c's contiguous initialised run 0x64120..0x653ef, which the indicator-queue glyph overrun writes through. |
 | `000643f0` | bss | `data_fdps_inverse_palette_cube` | read from 19 files: anim.c, church.c, cmbspell.c, combat.c, ending.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `000653f0` | bss | `data_fdps_palette_shade_ramp_table` | read from 19 files: anim.c, church.c, cmbspell.c, combat.c, ending.c, gauge.c, main.c, mapdraw.c, msgwin.c, palette.c, shopdraw.c, spell.c, sprite.c, statwin.c, title.c, unitstat.c, vilbar.c, village.c, vilmenu.c |
 | `00069bf0` | bss | `data_fdps_scene_layer_scroll_x_accumulator` | read from 2 files: mapdraw.c, rsrc.c |
