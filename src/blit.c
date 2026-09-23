@@ -846,6 +846,15 @@ void fdps_blit_rotated_scaled(unsigned char *dst, unsigned char *src,
     }
 }
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The routine below is the C translation of
+   the original's hand-written assembly, kept for reading.  What is linked is
+   src/rledisp.asm, transcribed from FDPS.LE instruction for instruction
+   (ticket 22.3).  rebuild_info/code_layout.md says how to switch the
+   rebuild back to this C, and tools/rle_asm/switch_impl.py does it.
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 000568db.  Hand-written assembly, like the thirteen kernels it dispatches
    to: it has a frame but no compiler prologue, it hands its arguments over in
    ESI, EDI and EDX, and the kernels reach back into this frame for the sixth
@@ -930,3 +939,5 @@ void fdps_blit_dispatch(unsigned char *rle_stream, unsigned char *dest_pixel,
                                               (int *) mode_operand);
     }
 }
+
+#endif /* RLE_C_REFERENCE */

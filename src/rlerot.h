@@ -69,6 +69,16 @@ extern unsigned short data_fdps_graphics_rle_blit_rot_row_step_y_accumulator;
 extern unsigned short data_fdps_graphics_rle_rotate_cos_magnitude;
 extern unsigned short data_fdps_graphics_rle_rotate_sin_magnitude;
 
+/* ------------------------------------------------------------------------
+   The C prototypes of the kernels, REFERENCE ONLY.  In the linked build the
+   kernels are the assembly in src/rleturn.asm and have no C interface:
+   they are entered only from fdps_blit_dispatch, with their inputs in
+   registers and in the dispatcher's own stack frame, so nothing in C may
+   call them.  These declarations belong to the C translation kept under
+   the matching #if 0 in the .c file (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056e2a.  Blit mode 5, the rotating sprite blit: decodes the four ops into
    an 8bpp destination surface while walking the destination along the rotation
    vector `rotate_dx`, `rotate_dy` describes.
@@ -135,5 +145,7 @@ extern void fdps_rle_blit_rotated_scaled(unsigned char *rle_stream,
                                          unsigned char *dest_pixel,
                                          int *blit_geometry);
 #pragma aux fdps_rle_blit_rotated_scaled "*" parm caller [];
+
+#endif /* RLE_C_REFERENCE */
 
 #endif

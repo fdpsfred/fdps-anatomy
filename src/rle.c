@@ -7,6 +7,15 @@
 #include "gamedata.h"
 #include "rle.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The routines below are the C translation of
+   the original's hand-written assembly, kept for reading.  What is linked is
+   src/rlebase.asm, transcribed from FDPS.LE instruction for instruction
+   (ticket 22.3).  rebuild_info/code_layout.md says how to switch the
+   rebuild back to this C, and tools/rle_asm/switch_impl.py does it.
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056a0d.  Hand-written assembly, not compiler output: no prologue, ESI is
    the stream, EDI the destination, EDX the row advance, BX the width left in
    the row and CL the command byte.  The C below is the same decode and the
@@ -672,3 +681,5 @@ void fdps_rle_blit_mirrored_vertical(unsigned char *rle_stream,
     fdps_rle_blit_passthrough(rle_stream, bottom_row_pixel,
                               upward_row_advance);
 }
+
+#endif /* RLE_C_REFERENCE */

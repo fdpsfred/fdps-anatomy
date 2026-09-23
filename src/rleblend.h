@@ -47,6 +47,16 @@
 extern short data_fdps_graphics_rle_blit_translucent_color_min;
 extern short data_fdps_graphics_rle_blit_translucent_color_max;
 
+/* ------------------------------------------------------------------------
+   The C prototypes of the kernels, REFERENCE ONLY.  In the linked build the
+   kernels are the assembly in src/rlemix.asm and have no C interface:
+   they are entered only from fdps_blit_dispatch, with their inputs in
+   registers and in the dispatcher's own stack frame, so nothing in C may
+   call them.  These declarations belong to the C translation kept under
+   the matching #if 0 in the .c file (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 0005761b.  Blit mode 9, the translucent sprite blit: draws one sprite stream
    with every pixel it paints blended into the destination pixel underneath it,
    so the whole sprite comes out see-through at the level the descriptor names.
@@ -178,5 +188,7 @@ extern void fdps_rle_blit_translucent_color_range(unsigned char *rle_stream,
                                                   int dest_row_advance,
                                                   int *blend_descriptor);
 #pragma aux fdps_rle_blit_translucent_color_range "*" parm caller [];
+
+#endif /* RLE_C_REFERENCE */
 
 #endif

@@ -175,6 +175,19 @@ TEST_SUITES = [
     {"name": "data_emit.check",
      "argv": ["tools/data_emit/check_data.py"],
      "needs": ("gamefiles",), "target": "emittest"},
+    # The RLE blitters are assembly transcribed from the original, and their
+    # bar is the original's instruction sequence rather than behaviour alone
+    # (tools/rle_asm/).  The check reads the objects the emittest build just
+    # assembled, so it judges what was linked; it needs the shipped FDPS.LE.
+    {"name": "rle_asm.selftest",
+     "argv": ["tools/rle_asm/asm_match.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "rle_asm.switch_selftest",
+     "argv": ["tools/rle_asm/switch_impl.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "rle_asm.check",
+     "argv": ["tools/rle_asm/asm_match.py", "check"],
+     "needs": ("gamefiles",), "target": "emittest"},
 ]
 
 

@@ -7,6 +7,15 @@
 #include "gamedata.h"
 #include "rlecolor.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The routines below are the C translation of
+   the original's hand-written assembly, kept for reading.  What is linked is
+   src/rlepal.asm, transcribed from FDPS.LE instruction for instruction
+   (ticket 22.3).  rebuild_info/code_layout.md says how to switch the
+   rebuild back to this C, and tools/rle_asm/switch_impl.py does it.
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056a8d.  Hand-written assembly, not compiler output: no prologue, ESI is
    the stream, EDI the destination, EDX the row advance, BX the width left in
    the row and CL the command byte, and the table base arrives as [EBP+0x1c] --
@@ -419,3 +428,5 @@ void fdps_rle_blit_recolor(unsigned char *rle_stream,
         data_fdps_graphics_rle_blit_remaining_rows--;
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
 }
+
+#endif /* RLE_C_REFERENCE */

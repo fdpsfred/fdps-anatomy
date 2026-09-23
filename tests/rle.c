@@ -15,6 +15,16 @@
 #include "gamedata.h"
 #include "rle.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The cases below call the C translation in
+   src/rle.c directly, which is not what the rebuild links: the kernels
+   are the assembly in src/rlebase.asm, reachable only through
+   fdps_blit_dispatch, and tests/rlebase.c covers them that way.  These are kept
+   so that switching the rebuild back to the C translation brings its own
+   tests back with it (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 #define SENTINEL 0x5a
 
 static unsigned char dest_surface[80];
@@ -1057,3 +1067,5 @@ void run_rle_tests(void)
     RUN_TEST(vmirror_advance_pays_back_the_width);
     RUN_TEST(vmirror_keeps_column_order_within_a_row);
 }
+
+#endif /* RLE_C_REFERENCE */

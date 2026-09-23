@@ -34,6 +34,16 @@
 #include "gamedata.h"
 #include "rleblend.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The cases below call the C translation in
+   src/rleblend.c directly, which is not what the rebuild links: the kernels
+   are the assembly in src/rlemix.asm, reachable only through
+   fdps_blit_dispatch, and tests/rlemix.c covers them that way.  These are kept
+   so that switching the rebuild back to the C translation brings its own
+   tests back with it (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* Repeated here rather than shared with src/rleblend.c: these are what the
    assembly encodes, and a test that took them from the emitted header would
    only prove the code agrees with itself. */
@@ -1391,3 +1401,5 @@ void run_rleblend_tests(void)
     RUN_TEST(range_row_advance_is_published_and_applied);
     RUN_TEST(range_run_length_tops_out_at_64);
 }
+
+#endif /* RLE_C_REFERENCE */

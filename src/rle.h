@@ -23,6 +23,16 @@
 #ifndef RLE_H
 #define RLE_H
 
+/* ------------------------------------------------------------------------
+   The C prototypes of the kernels, REFERENCE ONLY.  In the linked build the
+   kernels are the assembly in src/rlebase.asm and have no C interface:
+   they are entered only from fdps_blit_dispatch, with their inputs in
+   registers and in the dispatcher's own stack frame, so nothing in C may
+   call them.  These declarations belong to the C translation kept under
+   the matching #if 0 in the .c file (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056a0d.  Blit mode 0, the plain sprite and tile blit: decodes the four ops
    above into an 8bpp destination, writing every pixel it draws unchanged.
 
@@ -131,5 +141,7 @@ extern void fdps_rle_blit_mirrored_horizontal(unsigned char *rle_stream,
 extern void fdps_rle_blit_mirrored_vertical(unsigned char *rle_stream,
                                             unsigned char *dest_pixel);
 #pragma aux fdps_rle_blit_mirrored_vertical "*" parm caller [];
+
+#endif /* RLE_C_REFERENCE */
 
 #endif

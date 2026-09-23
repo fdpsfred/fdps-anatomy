@@ -21,6 +21,16 @@
 #ifndef RLECOLOR_H
 #define RLECOLOR_H
 
+/* ------------------------------------------------------------------------
+   The C prototypes of the kernels, REFERENCE ONLY.  In the linked build the
+   kernels are the assembly in src/rlepal.asm and have no C interface:
+   they are entered only from fdps_blit_dispatch, with their inputs in
+   registers and in the dispatcher's own stack frame, so nothing in C may
+   call them.  These declarations belong to the C translation kept under
+   the matching #if 0 in the .c file (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056a8d.  Blit mode 1: every pixel of the width x height rectangle ends up as
    palette_remap[pixel], the sprite's own pixels and the backdrop showing through
    its transparent runs alike.
@@ -113,5 +123,7 @@ extern void fdps_rle_blit_recolor(unsigned char *rle_stream,
                                   int dest_row_advance,
                                   unsigned int recolor_operands);
 #pragma aux fdps_rle_blit_recolor "*" parm caller [];
+
+#endif /* RLE_C_REFERENCE */
 
 #endif

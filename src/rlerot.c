@@ -61,6 +61,15 @@ unsigned short data_fdps_graphics_rle_rotate_sin_magnitude;
 
 /* End of global data. */
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The routines below are the C translation of
+   the original's hand-written assembly, kept for reading.  What is linked is
+   src/rleturn.asm, transcribed from FDPS.LE instruction for instruction
+   (ticket 22.3).  rebuild_info/code_layout.md says how to switch the
+   rebuild back to this C, and tools/rle_asm/switch_impl.py does it.
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* 00056e2a.  Blit mode 5.  Hand-written assembly, not compiler output: no
    prologue, ESI is the stream, EDI the destination, BX the width left in the
    row, CL the command byte and DX and BP the two within-row fractional
@@ -821,3 +830,5 @@ void fdps_rle_blit_rotated_scaled(unsigned char *rle_stream,
         data_fdps_graphics_rle_blit_dest_rows_remaining--;
     } while (data_fdps_graphics_rle_blit_dest_rows_remaining != 0);
 }
+
+#endif /* RLE_C_REFERENCE */

@@ -23,6 +23,16 @@
 #include "gamedata.h"
 #include "rlecolor.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The cases below call the C translation in
+   src/rlecolor.c directly, which is not what the rebuild links: the kernels
+   are the assembly in src/rlepal.asm, reachable only through
+   fdps_blit_dispatch, and tests/rlepal.c covers them that way.  These are kept
+   so that switching the rebuild back to the C translation brings its own
+   tests back with it (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 #define SENTINEL 0x5a
 
 static unsigned char dest_surface[80];
@@ -720,3 +730,5 @@ void run_rlecolor_tests(void)
     RUN_TEST(recolor_run_length_tops_out_at_64);
     RUN_TEST(recolor_second_row_starts_after_row_advance);
 }
+
+#endif /* RLE_C_REFERENCE */

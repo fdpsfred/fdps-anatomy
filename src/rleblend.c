@@ -24,6 +24,15 @@ short data_fdps_graphics_rle_blit_translucent_color_max;
 
 /* End of global data. */
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  Everything below is the C translation of
+   the original's hand-written assembly, kept for reading.  What is linked is
+   src/rlemix.asm, transcribed from FDPS.LE instruction for instruction
+   (ticket 22.3).  rebuild_info/code_layout.md says how to switch the
+   rebuild back to this C, and tools/rle_asm/switch_impl.py does it.
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 /* One row of the shade ramp is 256 dwords, and the two halves of the table are
    nine rows apart: SHL ECX,0xa at 00057648 scales a row index into 0x400 bytes
    and the 0x2400 of 0005762f is 9 * 0x100 entries, not 0x2400 of them.  Both
@@ -872,3 +881,5 @@ void fdps_rle_blit_translucent_color_range(unsigned char *rle_stream,
         data_fdps_graphics_rle_blit_remaining_rows--;
     } while (data_fdps_graphics_rle_blit_remaining_rows != 0);
 }
+
+#endif /* RLE_C_REFERENCE */

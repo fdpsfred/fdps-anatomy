@@ -19,6 +19,16 @@
 #include "gamedata.h"
 #include "rlerot.h"
 
+/* ------------------------------------------------------------------------
+   REFERENCE ONLY, NOT COMPILED.  The cases below call the C translation in
+   src/rlerot.c directly, which is not what the rebuild links: the kernels
+   are the assembly in src/rleturn.asm, reachable only through
+   fdps_blit_dispatch, and tests/rleturn.c covers them that way.  These are kept
+   so that switching the rebuild back to the C translation brings its own
+   tests back with it (rebuild_info/code_layout.md).
+   ------------------------------------------------------------------------ */
+#if 0 /* RLE_C_REFERENCE -- rebuild_info/code_layout.md */
+
 #define SENTINEL 0x5a
 #define SURFACE_PITCH 16
 /* Row 8, column 8: far enough from either edge that a rotated run stays inside
@@ -872,3 +882,5 @@ void run_rlerot_tests(void)
     RUN_TEST(rotscale_arm_dx_negative_dy_positive);
     RUN_TEST(rotscale_arm_dx_negative_dy_negative);
 }
+
+#endif /* RLE_C_REFERENCE */
