@@ -213,18 +213,51 @@ def name_report(found):
         for path, lineno, name in found)
 
 
+IF_RX = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
+
+
+def strip_if0(text):
+    """The text with every `#if 0` region blanked, line numbers kept.
+
+    A test unit whose tests are kept for reference under `#if 0` -- the C
+    translations of the RLE kernels are (rebuild_info/code_layout.md) -- still
+    carries the text of its runner, and registering that runner would call a
+    function the compiler never saw.  Only a literal `#if 0` is treated as
+    off; every other conditional is left alone, since the scan cannot evaluate
+    it, and an `#else` of an `#if 0` is on again.
+    """
+    out = []
+    stack = []                      # one bool per open conditional: "off here"
+    for line in text.splitlines():
+        m = IF_RX.match(line)
+        off_before = any(stack)
+        if m:
+            kind, rest = m.group(1), m.group(2).split("/*", 1)[0].strip()
+            if kind in ("if", "ifdef", "ifndef"):
+                stack.append(kind == "if" and rest == "0")
+            elif kind in ("else", "elif") and stack:
+                stack[-1] = False
+            elif kind == "endif" and stack:
+                stack.pop()
+            out.append("")
+            continue
+        out.append("" if off_before else line)
+    return "\n".join(out)
+
+
 def runners(test_files):
     """The `run_<stem>_tests` each test unit defines, in file order.
 
     A tests/ unit that defines none is a support unit -- the harness itself,
     shared fixtures, stub globals -- and is compiled but not called.  Requiring
     the definition to match the file's own stem keeps the mapping one to one:
-    a runner cannot be silently registered from the wrong file.
+    a runner cannot be silently registered from the wrong file.  A runner
+    inside `#if 0` is not a definition and is not registered (strip_if0).
     """
     found = []
     for path in test_files:
         stem = path.stem.lower()
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = strip_if0(path.read_text(encoding="utf-8", errors="replace"))
         if any(m.group(1).lower() == stem for m in RUNNER_RX.finditer(text)):
             found.append("run_%s_tests" % stem)
     return found
@@ -813,8 +846,18 @@ def _selftest_rows():
         # A support unit with no runner at all.
         (tmp / "testharn.c").write_text("int test_total = 0;\n",
                                         encoding="utf-8")
+        # Tests kept for reference under #if 0: the runner text is there but
+        # the compiler never sees it, so registering it breaks the link.
+        (tmp / "rle.c").write_text(
+            "#include \"testharn.h\"\n#if 0 /* reference */\n#ifdef X\n#endif\n"
+            "void run_rle_tests(void)\n{\n}\n#endif\n", encoding="utf-8")
+        # ...while the #else of an #if 0 is compiled.
+        (tmp / "rlebase.c").write_text(
+            "#if 0\nstatic int a;\n#else\nvoid run_rlebase_tests(void)\n{\n}\n"
+            "#endif\n", encoding="utf-8")
         found = runners(c_sources(tmp))
-        rows.append(("runner found", found == ["run_menu_tests"],
+        rows.append(("runner found", found == ["run_menu_tests",
+                                               "run_rlebase_tests"],
                      ", ".join(found) or "none"))
 
         main = gen_testmain(found)

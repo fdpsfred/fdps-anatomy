@@ -74,7 +74,7 @@ python tools/code_emit/emit_order.py
 
 ## 注意
 
-- **接線是推導出來的，不能手改。** 編譯清單就是 `src/` 與 `tests/` 現有的檔，測試進入點的 runner 清單就是各 `tests/<stem>.c` 真的定義了的 `run_<stem>_tests`。沒有需要維護的建置檔，新增測試檔就是新增測試的全部工作。
+- **接線是推導出來的，不能手改。** 編譯清單就是 `src/` 與 `tests/` 現有的檔，測試進入點的 runner 清單就是各 `tests/<stem>.c` 真的定義了的 `run_<stem>_tests`；寫在 `#if 0` 區塊裡的不算定義（RLE 的 C 譯本測試就是這樣保留的，見 [`rebuild_info/code_layout.md`](../../rebuild_info/code_layout.md)）。沒有需要維護的建置檔，新增測試檔就是新增測試的全部工作。
 - **`selftest` 要一起跑**，而且已經排進 gate 的測試套件。它證明「接線產生」與「紀錄解析」都會失敗——一個永遠註冊不到 runner 的產生器，或一個把失敗的執行讀成乾淨的解析器，會讓整個閘門在壞掉的程式碼上說 PASS。
 - **`build_emit.py` 一定要前景跑。** agent 一旦送出最終訊息就結束，背景建置沒有人接得到結果。
 - 原始碼暫存成兩個 guest 目錄 `C:\SRC` 與 `C:\TST`，物件檔分別落在 `OBJS\` 與 `OBJT\`。理由是測試檔與生產檔同名（`tests/menu.c` 對 `src/menu.c`），攤平在同一個目錄會互相覆蓋。
