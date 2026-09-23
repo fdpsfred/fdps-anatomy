@@ -782,6 +782,199 @@ static void skrow_zero_width_walks_a_full_row(void)
     skrow_check_mark_row(1);
 }
 
+/* --- fdps_rle_blit_mirrored_horizontal (00057551), blit mode 7 --------------
+ *
+ * Mode 7 consumes the stream exactly as mode 0 does, so every expected value
+ * is the pass-through case reflected: in a row w wide the byte mode 0 writes
+ * at column c lands here at column w - 1 - c.  The rest is read off the
+ * assembly: the row's first column is ADD EDI,EBX / DEC EDI at 00057564, the
+ * fill is STD / REP STOSB, the stretched op paints DEC EDI / store / DEC EDI
+ * at 0005759d, and the end-of-row step is POP EDI / ADD EDI,EDX at 000575dc
+ * with EDX the zero-extended full pitch loaded at 00057555.  Mode 7 gets no
+ * row advance from the dispatcher, so a C case's width, rows and pitch are
+ * the dispatch's src_width, src_rows and dest_pitch unchanged; the mode
+ * operand is not read and is passed 0.
+ *
+ * The destination is MIRH_BASE bytes into the surface so a sprite drawn one
+ * whole width too far left -- the mistake of starting at the incoming pointer
+ * and walking left -- overruns into bytes the checks look at.
+ */
+#define MIRH_MODE     7
+#define MIRH_SENTINEL 0x5a
+#define MIRH_BASE     8
+
+static unsigned char mirh_surface[80];
+
+static void mirh_clear(void)
+{
+    int byte_index;
+
+    for (byte_index = 0; byte_index < (int) sizeof mirh_surface; byte_index++) {
+        mirh_surface[byte_index] = MIRH_SENTINEL;
+    }
+}
+
+/* A four-byte literal run (0x83) into a four-wide row: read forwards, written
+   leftwards from column 3, so the bytes land reversed.  Nothing lands at
+   MIRH_BASE - 1: the kernel adds the width to the incoming pointer itself.
+   The row count is decremented to zero at 000575df. */
+static void mirh_literal_run_reverses_the_row(void)
+{
+    unsigned char stream[5];
+
+    stream[0] = 0x83;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0x33;
+    stream[4] = 0x44;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 4, 1, 4, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE - 1], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], 0x44);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], 0x33);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], 0x22);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], 0x11);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 4], MIRH_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The first op starts at the row's last column: a two-byte literal (0x81)
+   then a length-2 skip (0xc1, SUB EDI,ECX at 000575d2) paints the right-hand
+   half of a four-wide row and leaves the left-hand half alone. */
+static void mirh_first_op_paints_the_right_hand_end(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x81;
+    stream[1] = 0x11;
+    stream[2] = 0x22;
+    stream[3] = 0xc1;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 4, 1, 4, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], 0x22);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], 0x11);
+}
+
+/* Op 00 is STD / REP STOSB / CLD, so the fill walks left: a length-2 skip
+   steps over the two right-hand columns and the length-2 fill (0x01) lands on
+   the two left-hand ones. */
+static void mirh_fill_run_walks_left(void)
+{
+    unsigned char stream[3];
+
+    stream[0] = 0xc1;
+    stream[1] = 0x01;
+    stream[2] = 0x77;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 4, 1, 4, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], 0x77);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], 0x77);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 4], MIRH_SENTINEL);
+}
+
+/* Op 01 (0x41, length 2, charged twice by SUB BX,CX at 00057596 and
+   00057599): DEC EDI / store / DEC EDI, so from column 3 the stores go to
+   columns 2 and 0 -- the reflections of mode 0's columns 1 and 3.  A
+   store-then-step order would paint 3 and 1. */
+static void mirh_stretched_run_paints_the_reflected_columns(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x41;
+    stream[1] = 0x99;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 4, 1, 4, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE - 1], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], 0x99);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], 0x99);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 4], MIRH_SENTINEL);
+}
+
+/* The reflection as a whole, on the stream pass_all_four_ops_in_one_row
+   draws: fill, stretched, literal and skip at length 1 over a five-wide row.
+   Mode 0 puts 0xa1, hole, 0xb2, 0xc3, hole in columns 0 to 4; mode 7 puts
+   them in columns 4 to 0.  The widths 1, 2, 1 and 1 end the row exactly and
+   the row count comes back at zero. */
+static void mirh_all_four_ops_in_one_row(void)
+{
+    unsigned char stream[7];
+
+    stream[0] = 0x00;
+    stream[1] = 0xa1;
+    stream[2] = 0x40;
+    stream[3] = 0xb2;
+    stream[4] = 0x80;
+    stream[5] = 0xc3;
+    stream[6] = 0xc0;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 5, 1, 5, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE + 4], 0xa1);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], 0xb2);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], 0xc3);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 5], MIRH_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* The end-of-row step is the FULL pitch added to the saved row origin, not
+   the dispatcher's pitch - width: a two-wide sprite in a pitch of four starts
+   its second row four bytes on, where pitch - width would put it two bytes on,
+   over the first row's right-hand column.  The width is re-read per row (MOV
+   BX at 0005755c) and neither it nor the pitch is written by the kernel, so
+   both still hold what the dispatcher published. */
+static void mirh_second_row_steps_by_the_full_pitch(void)
+{
+    unsigned char stream[4];
+
+    stream[0] = 0x01;
+    stream[1] = 0xaa;
+    stream[2] = 0x01;
+    stream[3] = 0xbb;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 2, 2, 4, 0, MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], 0xaa);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 1], 0xaa);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 2], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 3], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 4], 0xbb);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 5], 0xbb);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 6], MIRH_SENTINEL);
+    CHECK_EQ(data_fdps_graphics_rle_blit_src_width, 2);
+    CHECK_EQ(data_fdps_graphics_rle_blit_dst_pitch, 4);
+    CHECK_EQ(data_fdps_graphics_rle_blit_remaining_rows, 0);
+}
+
+/* SHR CL,2 / INC CL makes 0x3f a length of 64, so one fill covers a 64-wide
+   row and the leftward run reaches back to the row origin exactly. */
+static void mirh_run_length_tops_out_at_64(void)
+{
+    unsigned char stream[2];
+
+    stream[0] = 0x3f;
+    stream[1] = 0xcc;
+    mirh_clear();
+    fdps_blit_dispatch(stream, mirh_surface + MIRH_BASE, 64, 1, 64, 0,
+                       MIRH_MODE);
+
+    CHECK_EQ(mirh_surface[MIRH_BASE - 1], MIRH_SENTINEL);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 0], 0xcc);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 63], 0xcc);
+    CHECK_EQ(mirh_surface[MIRH_BASE + 64], MIRH_SENTINEL);
+}
+
 void run_rlebase_tests(void)
 {
     RUN_TEST(pass_fill_run_writes_len_bytes);
@@ -812,4 +1005,11 @@ void run_rlebase_tests(void)
     RUN_TEST(skrow_leaves_the_blit_globals_alone);
     RUN_TEST(skrow_overshooting_run_wraps_the_width_counter);
     RUN_TEST(skrow_zero_width_walks_a_full_row);
+    RUN_TEST(mirh_literal_run_reverses_the_row);
+    RUN_TEST(mirh_first_op_paints_the_right_hand_end);
+    RUN_TEST(mirh_fill_run_walks_left);
+    RUN_TEST(mirh_stretched_run_paints_the_reflected_columns);
+    RUN_TEST(mirh_all_four_ops_in_one_row);
+    RUN_TEST(mirh_second_row_steps_by_the_full_pitch);
+    RUN_TEST(mirh_run_length_tops_out_at_64);
 }
