@@ -66,7 +66,7 @@
 
 鏈上的每個成員都必須帶初值、同屬一個 `.c`、照位址順序排；`gamedata.c` 的鏈是 AP 表→DEF 表→旗標，`indicat.c` 的鏈是三個 200 byte 陣列→游標。
 
-旗標的 `zero_pad_after: 3` 補的是鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用），而旗標是 `gamedata.c` 資料區塊中最後一個帶初值的物件，那三個 byte 於是落在下一個模組 `_DATA` 的開頭，模組之間 `_DATA` 起點的對齊 `layout_probe.py` 沒有量到。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己，閘門也驗得到。
+旗標的 `zero_pad_after: 3` 補的是鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用）。在重建版裡，照位址順序緊接在旗標後面的帶初值物件是 `data_fdps_ui_terrain_hud_user_enabled` 與 `data_fdps_ui_play_active_flag`，兩個都是 1 byte、初值 `0x01`；沒有這段 3 byte 的 `static` 0 陣列，它們會落在旗標後的 `+1`、`+2`，地形類別 6 的 DEF 讀取就讀出 `0x00010100` 而不是 0，防禦修正變成約 65536%。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己、恆為 0，閘門也驗得到。**這段尾端不能拿掉**，也不能因為「量過模組之間的對齊」而拿掉——擋住的是同一個檔裡後面的物件。
 
 **零值符號帶初值的代價是映像變大。** 六個內容全 0 的符號因為約束而落進 `_DATA`，其中 `indicat.c` 的四個（604 byte）與 `audio.c` 的表加守衛（36 byte）在原版是 BSS，執行檔裡連內容都沒有（[`pitfalls.md`](pitfalls.md)），重建版把這 640 byte 實際寫進映像。這不能省：tentative 定義進 `_BSS`、順序由工具鏈決定，相鄰關係就斷了。映像大小不在等價判準內（[ADR-0001](../docs/adr/0001-only-functional-equivalence.md)）。
 
