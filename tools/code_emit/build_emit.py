@@ -423,7 +423,24 @@ def gen_stub_bat():
     return "\r\n".join(out) + "\r\n"
 
 
-def stage_sources(test_files):
+def select_runners(names, only):
+    """The runners a filtered build calls: those of the named test units.
+
+    Everything is still compiled and linked -- a filter that dropped units from
+    the link would let a unit that no longer compiles pass -- only the calls in
+    TESTMAIN are narrowed.  A name that matches no runner is an error rather
+    than an empty suite that reports clean.
+    """
+    if not only:
+        return names
+    want = ["run_%s_tests" % s.lower() for s in only]
+    missing = [w for w in want if w not in names]
+    if missing:
+        raise ValueError("--only names no runner: %s" % ", ".join(missing))
+    return [n for n in names if n in want]
+
+
+def stage_sources(test_files, only=None):
     """Copy sources into the guest tree under their 8.3 upper-case names.
 
     The staging area is rebuilt from scratch each time.  Reusing it would let a
@@ -443,7 +460,7 @@ def stage_sources(test_files):
     shutil.copy2(AIL_HDR, STAGE / G_SRC / AIL_HDR.name.upper())
     for path in test_files + headers(TESTS):
         shutil.copy2(path, STAGE / G_TST / path.name.upper())
-    names = runners(test_files)
+    names = select_runners(runners(test_files), only)
     (STAGE / G_TST / "TESTMAIN.C").write_text(gen_testmain(names),
                                               encoding="latin-1")
     return names
@@ -465,7 +482,7 @@ def stage_ail_lib():
         shutil.copy2(AIL_LIB, dst)
 
 
-def do_build(dosbox, watcom, disc, timeout, quiet=False):
+def do_build(dosbox, watcom, disc, timeout, quiet=False, only=None):
     OBJ_SRC.mkdir(parents=True, exist_ok=True)
     OBJ_TST.mkdir(parents=True, exist_ok=True)
     OBJ_STB.mkdir(parents=True, exist_ok=True)
@@ -498,7 +515,12 @@ def do_build(dosbox, watcom, disc, timeout, quiet=False):
     stage_ail_lib()
 
     test_files = c_sources(TESTS)
-    names = stage_sources(test_files)
+    try:
+        names = stage_sources(test_files, only)
+    except ValueError as exc:
+        if not quiet:
+            print("[build] FAIL: %s" % exc)
+        return False
     src_c = [p.stem.upper() for p in c_sources(SRC)]
     src_asm = [p.stem.upper() for p in asm_sources(SRC)]
     tst_c = [p.stem.upper() for p in test_files] + ["TESTMAIN"]
@@ -860,6 +882,15 @@ def _selftest_rows():
                                                "run_rlebase_tests"],
                      ", ".join(found) or "none"))
 
+        picked = select_runners(found, ["rlebase"])
+        rows.append(("--only narrows the calls", picked == ["run_rlebase_tests"],
+                     ", ".join(picked)))
+        try:
+            select_runners(found, ["nosuch"])
+            rows.append(("--only with an unknown unit fails", False, "accepted"))
+        except ValueError as exc:
+            rows.append(("--only with an unknown unit fails", True, str(exc)))
+
         main = gen_testmain(found)
         rows.append(("generated main calls it", "run_menu_tests();" in main,
                      "yes" if "run_menu_tests();" in main else "no"))
@@ -1047,7 +1078,13 @@ def main():
                          "suite, which grows with every emitted function")
     ap.add_argument("--json", action="store_true",
                     help="print the structured verdict on stdout as well")
+    ap.add_argument("--only", default="",
+                    help="comma-separated test unit stems whose runners alone "
+                         "are called; everything is still compiled and linked. "
+                         "For a quick loop only -- the gate never passes it, "
+                         "and result.json records it")
     args = ap.parse_args()
+    only = [s.strip() for s in args.only.split(",") if s.strip()]
 
     watcom = Path(os.environ.get("FDPS_WATCOM") or bm.WATCOM_DEFAULT)
     disc = Path(os.environ.get("FDPS_DISC1") or bm.DISC_DEFAULT)
@@ -1065,10 +1102,11 @@ def main():
     # gate, which is the one thing a gate must never say.
     mount = disc if mountable_disc(disc) else None
 
-    result = {"build_ok": None, "run_ok": None, "tests": {}, "diagnostics": {}}
+    result = {"build_ok": None, "run_ok": None, "tests": {}, "diagnostics": {},
+              "only": only or None}
     ok = True
     if args.stage in ("build", "all"):
-        ok = do_build(dosbox, watcom, mount, args.timeout)
+        ok = do_build(dosbox, watcom, mount, args.timeout, only=only)
         result["build_ok"] = ok
     if ok and args.stage in ("run", "all"):
         ok, parsed = do_run(dosbox, watcom, mount, args.timeout)

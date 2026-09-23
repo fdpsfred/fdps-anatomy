@@ -42,6 +42,7 @@ python tools/code_emit/build_routing.py --check       # 路由表還成立嗎
 python tools/code_emit/gen_types.py --check           # fdpstype.h 還跟快照一致嗎
 python tools/code_emit/next_batch.py --stats          # 還剩多少
 python tools/code_emit/build_emit.py all              # emitter 用的快速迴圈
+python tools/code_emit/build_emit.py all --only rlebase   # 照樣全部編譯連結，只呼叫指定測試檔的 runner
 python tools/build_gate/gate.py check --target emittest   # 正式的 gate
 ```
 

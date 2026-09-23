@@ -234,6 +234,11 @@ def cmd_verify_tests(addr):
     else:
         if not r.get("gate_pass"):
             problems.append("the last build_emit run did not pass")
+        if r.get("only") and stem not in r["only"]:
+            problems.append("the last build_emit run was filtered to %s and did not "
+                            "run run_%s_tests" % (r["only"], stem))
+        if not (r.get("tests") or {}).get("total"):
+            problems.append("the last build_emit run ran no checks")
         if tpath.is_file() and EMIT_RESULT.stat().st_mtime < tpath.stat().st_mtime:
             problems.append("the build result is older than %s" % test_rel)
     if git_dirty(test_rel):
