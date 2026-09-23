@@ -1489,6 +1489,15 @@ extern unsigned char data_fdps_indicator_queue_cell_x_offset[200];
    other array in this header uses. */
 extern unsigned char data_fdps_battle_indicator_queue_unit_idx[200];
 
+/* 000642b0.  The glyph id the cell draws out of the Number.cel sheet, or 0xff
+   for a blank cell, which the player skips entirely -- that is how a short
+   number is right-aligned inside its four cells without moving the popup.
+
+   One of the battle indicator queue's three parallel arrays (indicat.h); its
+   200 cells are INDICATOR_QUEUE_CELLS there, spelled here as the literal every
+   other array in this header uses. */
+extern unsigned char data_fdps_indicator_queue_glyph_ids[200];
+
 /* 00064378.  How many cells of the battle indicator queue are filled, and
    equally the index the next cell is appended at: the cursor into the three
    parallel queue arrays.  Signed, and it is a count and not a

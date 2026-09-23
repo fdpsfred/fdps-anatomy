@@ -35,13 +35,6 @@
  * Initialised definitions come first and their order is the layout
  * (rebuild_info/data_emit.md); zero-filled ones follow. */
 
-/* 000642b0. Starts all zero; it is initialised only so it lands in _DATA
-   directly after data_fdps_battle_indicator_queue_unit_idx, because the
-   unbounded queue cursor lets a batch of more than 50 popups write unit
-   indices past that array into this one, and this array's own overrun into the
-   cursor. */
-unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS] = { 0 };
-
 /* End of global data. */
 
 /* One map tile is 24 pixels square, and the view origins are in pixels, so this

@@ -23,14 +23,10 @@
    to its own declaration, in gamedata.h. */
 #define INDICATOR_QUEUE_CELLS 200
 
-/* The first array, data_fdps_indicator_queue_cell_x_offset (00064120), and the
-   middle one, data_fdps_battle_indicator_queue_unit_idx (000641e8), are owned by
+/* The first array, data_fdps_indicator_queue_cell_x_offset (00064120), the
+   middle one, data_fdps_battle_indicator_queue_unit_idx (000641e8), and the
+   last one, data_fdps_indicator_queue_glyph_ids (000642b0), are owned by
    src/gamedata.c and declared in gamedata.h. */
-
-/* 000642b0.  The glyph id the cell draws out of the Number.cel sheet, or 0xff
-   for a blank cell, which the player skips entirely -- that is how a short
-   number is right-aligned inside its four cells without moving the popup. */
-extern unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS];
 
 /* The cursor, data_fdps_indicator_queue_count (00064378), is owned by
    src/gamedata.c and declared in gamedata.h. */

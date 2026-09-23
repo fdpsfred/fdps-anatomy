@@ -5244,7 +5244,7 @@
     },
     "000642b0": {
       "symbol": "data_fdps_indicator_queue_glyph_ids",
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "type": "/uchar[200]",
       "size": 200,
       "segment": "bss",
@@ -5253,7 +5253,7 @@
       "reader_files": [
         "indicat.c"
       ],
-      "reason": "read only from indicat.c",
+      "reason": "Layout neighbour: must follow data_fdps_battle_indicator_queue_unit_idx and precede data_fdps_indicator_queue_count inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the unbounded indicator-queue cursor overruns.",
       "status": "pending"
     },
     "00064378": {
