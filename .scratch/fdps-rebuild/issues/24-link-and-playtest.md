@@ -4,7 +4,7 @@
 
 整合驗證由開發者實際遊玩完成（見 ADR-0003）。發現的偏差需要能定位到具體的 function。
 
-**Blocked by:** 23
+**Blocked by:** 23、22.3（RLE sprite 繪製改回原版組語；做完之前實機驗的會是即將被換掉的 C 版）
 
 **Status:** ready-for-agent
 
