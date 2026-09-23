@@ -557,10 +557,10 @@ DATA_OVERRIDES = {
     "data_fdps_chapter_end_handler_table": ("chapter.c",
         "Same family. Read from main.c alone, but splitting it away from its "
         "three siblings would hide that they are one dispatch surface."),
-    "data_fdps_indicator_queue_count": ("indicat.c",
+    "data_fdps_indicator_queue_count": ("gamedata.c",
         "Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids "
-        "(indicat.c) contiguously so the unbounded glyph_ids overrun lands on "
-        "this cursor as in the original."),
+        "inside gamedata.c's contiguous initialised run 0x64120..0x653ef, "
+        "which the unbounded indicator-queue cursor overruns through itself."),
     "data_fdps_animation_baseani_entry_ptr": ("gamedata.c",
         "Layout neighbour: must sit at 0x643ec right after "
         "data_fdps_shared_quit_game_requested in gamedata.c's contiguous "

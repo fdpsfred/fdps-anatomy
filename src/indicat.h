@@ -9,9 +9,10 @@
  * in one pass rather than one after another.
  *
  * The queue is three parallel arrays plus a cursor, and a cell is the same
- * index into all three.  The cursor, data_fdps_indicator_queue_count, lives
- * here beside them because the arrays' overrun lands on it (see its
- * declaration); the item code, which also zeroes it, includes this header.
+ * index into all three.  The cursor, data_fdps_indicator_queue_count, is
+ * gamedata.c's and declared in gamedata.h, in the contiguous run the arrays'
+ * overrun writes through; the item code, which also zeroes it, reaches it
+ * there.
  */
 #ifndef INDICAT_H
 #define INDICAT_H
@@ -19,7 +20,7 @@
 /* How many cells the queue holds: 200, so 50 four-cell popups.  Nothing in the
    image checks the cursor against it -- the four producers each add their cells
    and advance it unconditionally.  Where the cursor is put back to zero belongs
-   to its own declaration, below. */
+   to its own declaration, in gamedata.h. */
 #define INDICATOR_QUEUE_CELLS 200
 
 /* The first array, data_fdps_indicator_queue_cell_x_offset (00064120), and the
@@ -31,18 +32,8 @@
    number is right-aligned inside its four cells without moving the popup. */
 extern unsigned char data_fdps_indicator_queue_glyph_ids[INDICATOR_QUEUE_CELLS];
 
-/* 00064378.  How many cells of the battle indicator queue are filled, and
-   equally the index the next cell is appended at: the cursor into the three
-   parallel queue arrays.  Signed, and it is a count and not a
-   ring -- nothing wraps it and nothing checks it against the arrays' 200 cells.
-
-   Every producer appends its popup's cells at the cursor and adds that many to
-   it.  Two places put it back to zero and a sweep of every reference to 00064378
-   finds no others: fdps_play_indicator_queue at 0001f4ff, after animating
-   everything queued, and fdps_apply_item_effect_to_targets at 000262ac, on entry
-   and before queueing a batch of its own, so popups left over from an
-   interrupted playback cannot leak into an item's. */
-extern int data_fdps_indicator_queue_count;
+/* The cursor, data_fdps_indicator_queue_count (00064378), is owned by
+   src/gamedata.c and declared in gamedata.h. */
 
 /* 0001f340.  Plays the queue back and empties it, and does not come back until
    it has finished.  Every cell the producers below appended is bounced over its

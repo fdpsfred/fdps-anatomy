@@ -5258,7 +5258,7 @@
     },
     "00064378": {
       "symbol": "data_fdps_indicator_queue_count",
-      "target": "indicat.c",
+      "target": "gamedata.c",
       "type": "/int",
       "size": 4,
       "segment": "bss",
@@ -5268,7 +5268,7 @@
         "indicat.c",
         "item.c"
       ],
-      "reason": "Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids (indicat.c) contiguously so the unbounded glyph_ids overrun lands on this cursor as in the original.",
+      "reason": "Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the unbounded indicator-queue cursor overruns through itself.",
       "status": "pending"
     },
     "0006437c": {

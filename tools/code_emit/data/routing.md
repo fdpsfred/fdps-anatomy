@@ -50,10 +50,10 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `deploy.c` | 3 | 502 | 1 | 1 | 503 |
 | `dpmi.c` | 6 | 363 | 0 | 0 | 363 |
 | `ending.c` | 1 | 314 | 0 | 0 | 314 |
-| `gamedata.c` | 0 | 0 | 138 | 138 | 138 |
+| `gamedata.c` | 0 | 0 | 139 | 139 | 139 |
 | `gauge.c` | 9 | 955 | 1 | 1 | 956 |
 | `icon.c` | 9 | 956 | 0 | 0 | 956 |
-| `indicat.c` | 6 | 664 | 2 | 2 | 666 |
+| `indicat.c` | 6 | 664 | 1 | 1 | 665 |
 | `item.c` | 4 | 737 | 0 | 0 | 737 |
 | `keybd.c` | 8 | 372 | 10 | 11 | 383 |
 | `main.c` | 5 | 641 | 0 | 0 | 641 |
@@ -1129,7 +1129,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | --- | --- | --- | --- |
 | `00060140` | data | `data_fdps_map_spawn_pos_table_ptr` | read only from deploy.c |
 
-### `gamedata.c` -- 138 globals
+### `gamedata.c` -- 139 globals
 
 | address | segment | symbol | why here |
 | --- | --- | --- | --- |
@@ -1194,6 +1194,7 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | `00064118` | bss | `data_fdps_map_player_slot_count` | read from 3 files: deploy.c, rsrc.c, savefile.c |
 | `00064120` | bss | `data_fdps_indicator_queue_cell_x_offset` | Layout neighbour: 4-aligned head of gamedata.c's contiguous initialised run 0x64120..0x653ef (29 globals, 25 already there), which the unbounded indicator-queue cursor overruns. |
 | `000641e8` | bss | `data_fdps_battle_indicator_queue_unit_idx` | Layout neighbour: must follow data_fdps_indicator_queue_cell_x_offset and precede data_fdps_indicator_queue_glyph_ids inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the unbounded indicator-queue cursor overruns. |
+| `00064378` | bss | `data_fdps_indicator_queue_count` | Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids inside gamedata.c's contiguous initialised run 0x64120..0x653ef, which the unbounded indicator-queue cursor overruns through itself. |
 | `0006437c` | bss | `data_fdps_battle_teleport_dest_tile_x` | read from 3 files: item.c, spell.c, spellmnu.c |
 | `00064380` | bss | `data_fdps_teleport_destination_tile_y` | read from 3 files: item.c, spell.c, spellmnu.c |
 | `000643a0` | bss | `data_fdps_audio_basewav_sfx_bank_buf_ptr` | read from 2 files: audio.c, main.c |
@@ -1278,12 +1279,11 @@ Line counts are Ghidra decompiled line counts, an estimate of how much C each fu
 | --- | --- | --- | --- |
 | `00064014` | bss | `data_fdps_battle_combat_gauge_pos_pairs` | read only from gauge.c |
 
-### `indicat.c` -- 2 globals
+### `indicat.c` -- 1 globals
 
 | address | segment | symbol | why here |
 | --- | --- | --- | --- |
 | `000642b0` | bss | `data_fdps_indicator_queue_glyph_ids` | read only from indicat.c |
-| `00064378` | bss | `data_fdps_indicator_queue_count` | Layout neighbour: must follow data_fdps_indicator_queue_glyph_ids (indicat.c) contiguously so the unbounded glyph_ids overrun lands on this cursor as in the original. |
 
 ### `keybd.c` -- 10 globals
 
