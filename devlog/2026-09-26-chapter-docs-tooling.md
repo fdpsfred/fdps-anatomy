@@ -65,6 +65,16 @@
 
 第二段 workflow `followup_ticket25_8.js` 寫好交主 session 代跑，本段先把 29 章重新落地（第 16 章被閘門擋下，保留原頁）、戰場圖、索引、第一段的 run record 與踩雷點列一起 commit。
 
+## 第二段 workflow 與收尾
+
+主 session 代跑 `followup_ticket25_8.js`（run record `runs/2026-09-26-chapters-t258-02.json`），沒有停止、未完成清單是空的：
+
+- 兩條被拒收的踩雷點照現在的 `pitfalls.md` 重判，都還是「補連結」，這次的舊列就是檔案裡的字，套用成功：第 28 章那列加連 `chapters/ch28.md`，攻略站失敗條件那列加連 `chapters/ch23.md`。
+- 第 12 章的毒死守護獸判為已涵蓋：第一段加的「中毒致死不跑死亡腳本」那列本來就點名第 12 章、也已連 `chapters/ch12.md`。判定同時回報了被封住的內容（神兵拿不到），交給 `cut_content/` 的擁有者補條目。
+- 30 章的敘述連結改指具體條目；第 16 章 `0x00` 判為永遠不顯示，頁面上那句更正拿掉。有幾章回報了 `cut_content/` 沒有條目涵蓋的東西（第 3、5、15 章的金錢與重繪格），那些連結照規則留在 `_index.md`，等擁有者補條目後由逐條驗證改連。
+
+收尾時再跑一次：`check_chapter.py --landed-all` 30 頁 0 錯、`index.py verify` 0 錯、`verify-maps` 32 張 0 問題、單元測試 37 項通過。`pitfalls.md` 工作目錄裡的差異只有這兩列，照原樣 commit。
+
 ## 產生器先看到的東西（給 workflow 的 agent 當線索，不是結論）
 
 - 事件處理表 slot 2 `fdps_chapter_event_set_game_over` 沒有任何一張地圖的資料呼叫它。

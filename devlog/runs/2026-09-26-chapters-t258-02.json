@@ -1,0 +1,377 @@
+{
+  "date": "2026-09-26",
+  "firstRun": "C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\devlog\\runs\\2026-09-26-chapters-t258-01.json",
+  "halted": false,
+  "haltReason": "",
+  "pitfallVerdicts": [
+    {
+      "id": "ch23-time-limit-is-a-walk",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "fdps_chapter_23_post_action (0x3b2e0) only checks whether units 3 and 0x1f have retired and never compares a turn counter; the time limit comes from an undead with MV 1 and AI behaviour 7 that fdps_map_actor_behavior_step (0x10010) retires when it reaches (24, 3). The existing pitfalls row on guide-listed loss conditions already covers this, so the verdict only adds chapters/ch23.md to that row's 正典 column, after its new ch07 link.",
+      "blocks_content": ""
+    },
+    {
+      "id": "ch28-reinforcement-wave-halving",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "The behaviour is confirmed at 0x39550: signed SAR/SUB/SAR computes turn/2 and passes it to fdps_deploy_wave, and src/chevt6.c matches; the chapter-28 row in pitfalls.md (which now also links known_bugs.md) covers it but still has no link to chapters/ch28.md, so the new_line adds only that link.",
+      "blocks_content": "Chapter 28 wave 4 (three enemy records #47-#49: 1 幽魂, 2 地獄犬) is never deployed, because no turn-event call ever evaluates turn/2 to 4."
+    },
+    {
+      "id": "poison-death-ch12-guardian-weapons",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra: the poison sweep in fdps_battle_tick_status_effects (0x1fa30) never runs death scripts, and MAP11.DAT records 0-2 carry the drops 58/59/5A. The existing pitfalls row 中毒致死不跑死亡腳本 already names the chapter-12 guardian case and links ../chapters/ch12.md, and no cut_content entry owns these swords.",
+      "blocks_content": "第 12 章被選中的守護獸若被毒死，該局拿不到那把神兵（58 修佩魯／59 雷德／5A 亞德尼恩），第 16 章的工匠交易也跟著做不成。能毒到守護獸的只有地圖上攻擊的淬毒武器，因為那條路只擋職業 0x19；全螢幕戰鬥與法術都會擋住職業 0x21。"
+    }
+  ],
+  "applyPitfalls": {
+    "errors": 0,
+    "ok": true,
+    "problems": ""
+  },
+  "blockedContent": [
+    {
+      "id": "ch28-reinforcement-wave-halving",
+      "what": "Chapter 28 wave 4 (three enemy records #47-#49: 1 幽魂, 2 地獄犬) is never deployed, because no turn-event call ever evaluates turn/2 to 4."
+    },
+    {
+      "id": "poison-death-ch12-guardian-weapons",
+      "what": "第 12 章被選中的守護獸若被毒死，該局拿不到那把神兵（58 修佩魯／59 雷德／5A 亞德尼恩），第 16 章的工匠交易也跟著做不成。能毒到守護獸的只有地圖上攻擊的淬毒武器，因為那條路只擋職業 0x19；全螢幕戰鬥與法術都會擋住職業 0x21。"
+    }
+  ],
+  "relinked": [
+    {
+      "chapter": 1,
+      "links": 1,
+      "note": "Prose had no ../cut_content/_index.md links. One AI-behaviour link (line 35) repointed from ../resource_info/map.md to ../program_info/map_ai.md#行為代碼 (link text updated to the new path). Meta now has \"relinked\": true; gate check_chapter.py --draft 1 reports clean; .bak files removed. Files: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch01.md, C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch01.meta.json"
+    },
+    {
+      "chapter": 2,
+      "links": 1,
+      "note": "The prose had no links to ../cut_content/_index.md. I changed one link: the AI behaviour definition link on line 25 of ch02.md now points to ../program_info/map_ai.md#行為代碼. I also changed that link's visible text, which named the old file, to name program_info/map_ai.md. The map.md link on line 23 is about death-script drop rules, so I left it alone. The meta now has \"relinked\": true, the gate reports clean, and the backup files are deleted."
+    },
+    {
+      "chapter": 3,
+      "links": 0,
+      "note": "The prose has one link to ../cut_content/_index.md, in the treasure section: the 22,000 gold carried by the 44 golems in wave 15 of MAP02.DAT. No cut_content entry and no exclusion-list row covers it, so the link is unchanged and an open_questions line records the gap. The prose has no links to resource_info/map.md about AI behaviour codes. The generated deployments block already links program_info/map_ai.md#行為代碼. The meta now has relinked: true and the gate reports clean. Draft: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch03.md. Meta: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch03.meta.json."
+    },
+    {
+      "chapter": 4,
+      "links": 1,
+      "note": "The prose had no links to ../cut_content/_index.md. I repointed one AI-behaviour link (the east-group paragraph) from ../resource_info/map.md to ../program_info/map_ai.md#行為代碼. Its link text was the old path, so I changed that label to `program_info/map_ai.md` as well. I left the death-script link to resource_info/map.md unchanged. I set relinked to true in the meta. The gate check_chapter.py --draft 4 is clean, and the .bak files are deleted."
+    },
+    {
+      "chapter": 5,
+      "links": 0,
+      "note": "Only one prose link went to ../cut_content/_index.md: the treasure section's sentence saying guard #32's B5 drop can't be obtained. No cut_content entry or exclusion covers that drop. U09 names MAP04 #32 only for the missing STAND animation. The link is left as it is, one open_questions line was added to the meta, and relinked is true. The prose has no links about AI behaviour codes that point to map.md; the map.md link at the Sol death-script line is about death scripts, so it stays. The gate is clean and the .bak files were deleted."
+    },
+    {
+      "chapter": 6,
+      "links": 0,
+      "note": "Chapter 6's prose had nothing to repoint: its only link goes to ../assets/characters.md#加入, and there are no links to ../cut_content/_index.md or to ../resource_info/map.md. The draft is unchanged. The only edit was adding \"relinked\": true to the meta. The gate check_chapter.py --draft 6 is clean, and the .bak copies are deleted."
+    },
+    {
+      "chapter": 7,
+      "links": 0,
+      "note": "The ch07.md prose had no links to ../cut_content/_index.md and none to resource_info/map.md about AI codes. The only cut_content links are inside the dialogue block the script generates, and those already point at their owning entries (S13a/S13b under 排除清單, S1 in story.md). The only change was adding \"relinked\": true to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch07.meta.json. The gate check_chapter.py --draft 7 is clean and the .bak files are deleted."
+    },
+    {
+      "chapter": 8,
+      "links": 0,
+      "note": "The prose of C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch08.md has no links to ../cut_content/_index.md or ../resource_info/map.md. Its only AI-related link already points to ../program_info/map_ai.md, so nothing needed repointing. The draft is unchanged. The meta now has \"relinked\": true. The gate reports clean, and both .bak files are deleted."
+    },
+    {
+      "chapter": 9,
+      "links": 0,
+      "note": "The ch09.md prose has no links to ../cut_content/_index.md or ../resource_info/map.md, so nothing needed repointing. The only change is \"relinked\": true in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch09.meta.json. check_chapter.py --draft 9 reports clean, and the .bak files are deleted."
+    },
+    {
+      "chapter": 10,
+      "links": 0,
+      "note": "I made no link changes to chapter 10. Its prose has no links to ../cut_content/_index.md and none to ../resource_info/map.md: the AI behaviour codes (行為 2 / 行為 0) are mentioned without a link. The only prose links go to assets/characters.md, assets/items.md, rebuild_info/pitfalls.md and ch11.md, and none of those were in scope. I set \"relinked\": true in ch10.meta.json, the gate (check_chapter.py --draft 10) reports clean, and I deleted the .bak files."
+    },
+    {
+      "chapter": 11,
+      "links": 1,
+      "note": "The ch11 prose had no links to ../cut_content/_index.md. I repointed one link about AI behaviour codes (line 29, 全場敵人都追布蘭多) from ../resource_info/map.md to ../program_info/map_ai.md#行為代碼. The link's visible path text now reads program_info/map_ai.md to match the new target; no other wording changed. Set \"relinked\": true in the meta. The check_chapter.py --draft 11 gate is clean, and the .bak copies are deleted."
+    },
+    {
+      "chapter": 12,
+      "links": 1,
+      "note": "The prose had no links to cut_content. I changed 1 link: the AI behaviour code 0B definition link on line 33 now points to ../program_info/map_ai.md#行為代碼, and its label now shows that path. The map.md link on line 24 is about the death-script item drop and a full backpack, not AI, so it stays. The meta now has \"relinked\": true, the gate is clean, and the .bak files are deleted."
+    },
+    {
+      "chapter": 13,
+      "links": 1,
+      "note": "The ch13 prose has no links to ../cut_content/_index.md. I changed one link. In the 勝敗條件 bullet about AI 行為 2, the definition was linked twice in a row: once to resource_info/map.md and once to program_info/map_ai.md. I merged the two into a single link, [`program_info/map_ai.md`](../program_info/map_ai.md#行為代碼), because the other choice was the same page linked twice. The two map.md links about the cell redraw rule and drop rules were left as they were. The meta now has \"relinked\": true, check_chapter.py --draft 13 reports clean, and the .bak files are deleted. Files: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch13.md and C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch13.meta.json."
+    },
+    {
+      "chapter": 14,
+      "links": 1,
+      "note": "The chapter 14 prose had no links to cut_content/_index.md. I repointed one link: the AI behaviour 0 definition under 敵人配置 now goes to ../program_info/map_ai.md#行為代碼. The resource_info/map.md link in the chest-thief bullet is about drop rules, so I left it. I set relinked: true in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch14.meta.json and the gate reports the chapter clean. The .bak files are deleted."
+    },
+    {
+      "chapter": 15,
+      "links": 0,
+      "note": "The prose in ch15.md has only two ../cut_content/_index.md links: the 19 MAP14 redraw cells with flag 15 that nothing sets, and the friendly infantry's 2000-gold drop that can never be paid. No cut_content entry and no exclusion covers either one (checked story/items/units/battle_assets/code and the exclusion list), so both links are unchanged and two open_questions lines were added to ch15.meta.json. The prose has no AI-behaviour links into map.md. Set relinked true; gate is clean; .bak files deleted."
+    },
+    {
+      "chapter": 16,
+      "links": 2,
+      "note": "Repointed the AI behaviour code link (resource_info/map.md -> program_info/map_ai.md#行為代碼) and the cut_content pointer in 對話 (-> cut_content/_index.md#排除清單, since FDETXT16 0x00 is S13a in the exclusion list). The map.md link about movement-report triggering stays. Confirmed in src/chevt3.c fdps_chapter_16_event_wandering_smith_forge that the reply draw is guarded by smith_reply_text_id != CH16_NO_SWORD_FOUND (0), so 0x00 is never drawn. Added 0x00 to never_shown, removed the correction sentence and its open_question (open_questions now empty, confidence stays high), set relinked true. Gate clean; .bak files deleted."
+    },
+    {
+      "chapter": 17,
+      "links": 1,
+      "note": "The prose had no links to cut_content/_index.md. One AI behaviour-code link (behaviour 8, in the hostage bullet) pointed at ../resource_info/map.md. It now points at ../program_info/map_ai.md#行為代碼, and its link text changed to match the new path. meta relinked=true, the gate reports clean, and the .bak files are deleted."
+    },
+    {
+      "chapter": 18,
+      "links": 0,
+      "note": "The ch18 draft prose had no links to ../cut_content/_index.md and none to ../resource_info/map.md, so no links needed repointing. Its only links go to ../assets/characters.md and the ch16/ch17/ch19 chapter pages. The only change was adding \"relinked\": true to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch18.meta.json. check_chapter.py --draft 18 reports clean, and the .bak copies are deleted."
+    },
+    {
+      "chapter": 19,
+      "links": 1,
+      "note": "Repointed the single prose cut_content link (FDETXT19 0x0b, Lancelot's join line) to ../cut_content/story.md#s4-寫好卻沒被顯示的對白, per the settled owner S4. No prose links to map.md about AI codes. Set relinked true in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch19.meta.json; gate clean; .bak files removed."
+    },
+    {
+      "chapter": 20,
+      "links": 0,
+      "note": "The prose in ch20.md has no links to ../cut_content/_index.md and none to ../resource_info/map.md. Its AI links already point to ../program_info/map_ai.md. No links were repointed. The only change was setting \"relinked\": true in ch20.meta.json. The check_chapter.py --draft 20 gate reports clean, and the .bak files were deleted."
+    },
+    {
+      "chapter": 21,
+      "links": 0,
+      "note": "No prose links needed repointing in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch21.md. The prose has no links to cut_content. The one map.md link (line 31) is about the tile-event rule, so it stays. The AI behaviour-code link on line 33 already points at ../program_info/map_ai.md, not map.md, so I left it alone. The only change: \"relinked\": true is now set in ch21.meta.json. The gate reports clean and the .bak files are deleted."
+    },
+    {
+      "chapter": 22,
+      "links": 0,
+      "note": "The ch22 draft prose had no links to ../cut_content/_index.md and none into ../resource_info/map.md. Its only AI-behaviour link already points to ../program_info/map_ai.md, so it was left unchanged. The only edit was adding \"relinked\": true to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch22.meta.json. check_chapter.py --draft 22 reports clean, and the .bak copies have been deleted."
+    },
+    {
+      "chapter": 23,
+      "links": 0,
+      "note": "Chapter 23 needed no link changes. Its prose has no links to ../cut_content/_index.md. It has one link into resource_info/map.md, and that one is about the map-unit index order (#地圖單位索引不是部署記錄索引), not the AI behaviour codes, so it stays. The only edit was setting \"relinked\": true in ch23.meta.json. The gate check_chapter.py --draft 23 reports clean, and the .bak copies are deleted. Files: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch23.md, C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch23.meta.json"
+    },
+    {
+      "chapter": 24,
+      "links": 0,
+      "note": "No prose in ch24.md links to ../cut_content/_index.md or ../resource_info/map.md, so no links needed repointing. The only change is \"relinked\": true in ch24.meta.json. The chapter check reports clean, and both .bak copies are deleted."
+    },
+    {
+      "chapter": 25,
+      "links": 0,
+      "note": "No links needed changing, so the only edit was setting \"relinked\": true in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch25.meta.json. The text of C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch25.md has no links to ../cut_content/_index.md. Its only link into ../resource_info/map.md (line 24) is about how the game reports events when several happen in one move, not about the AI behaviour codes, so it stays. The check passes with no problems and the backup copies are deleted."
+    },
+    {
+      "chapter": 26,
+      "links": 0,
+      "note": "The ch26 draft prose has no links to ../cut_content/_index.md or ../resource_info/map.md. Its only relative link is ../assets/characters.md#加入, which stays as it is. The only change was adding \"relinked\": true to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch26.meta.json. The gate reports clean and the .bak files are deleted."
+    },
+    {
+      "chapter": 27,
+      "links": 0,
+      "note": "Nothing to repoint: the prose outside the generated blocks has no links to ../cut_content/_index.md and none to resource_info/map.md. Its only links go to assets/characters.md, resource_info/cutscene_script.md, program_info/chapter.md and other chapter pages. I set \"relinked\": true in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch27.meta.json and left the draft ch27.md unchanged. The check_chapter.py check reports clean. I deleted the .bak copies."
+    },
+    {
+      "chapter": 28,
+      "links": 0,
+      "note": "The ch28 draft prose had no links to ../cut_content/_index.md and none to ../resource_info/map.md, so no links needed repointing. The only change: \"relinked\": true added to C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch28.meta.json. Gate reports clean. Backups deleted."
+    },
+    {
+      "chapter": 29,
+      "links": 1,
+      "note": "I changed one link. In the second trigger line's description, the behaviour-code link used to point at ../resource_info/map.md and now points at ../program_info/map_ai.md#行為代碼. I also changed its visible label to `program_info/map_ai.md` so the label matches the new target. The prose had no links to ../cut_content/_index.md, so there was nothing to repoint there. The only never-shown line (0x00) is covered by the marker blocks the landing script fills in. The meta now has relinked: true. The check_chapter.py --draft 29 gate reports clean. Both .bak files are deleted. Files: C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch29.md and C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch29.meta.json."
+    },
+    {
+      "chapter": 30,
+      "links": 0,
+      "note": "No links needed changing, so I left the prose in C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\ch30.md untouched. It has no links to ../cut_content/_index.md and none to ../resource_info/map.md. The only AI link already points to ../program_info/map_ai.md. I set \"relinked\": true in ch30.meta.json, the gate reports ch30 clean, and I deleted the .bak backups."
+    }
+  ],
+  "land": [
+    {
+      "round": 1,
+      "results": [
+        {
+          "chapter": 1,
+          "status": "updated"
+        },
+        {
+          "chapter": 2,
+          "status": "updated"
+        },
+        {
+          "chapter": 3,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 4,
+          "status": "updated"
+        },
+        {
+          "chapter": 5,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 6,
+          "status": "unchanged"
+        }
+      ],
+      "landed_gate_errors": 0,
+      "ok": true,
+      "problems": ""
+    },
+    {
+      "round": 2,
+      "results": [
+        {
+          "chapter": 7,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 8,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 9,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 10,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 11,
+          "status": "updated"
+        },
+        {
+          "chapter": 12,
+          "status": "updated"
+        }
+      ],
+      "landed_gate_errors": 0,
+      "ok": true,
+      "problems": ""
+    },
+    {
+      "round": 3,
+      "results": [
+        {
+          "chapter": 13,
+          "status": "updated"
+        },
+        {
+          "chapter": 14,
+          "status": "updated"
+        },
+        {
+          "chapter": 15,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 16,
+          "status": "updated"
+        },
+        {
+          "chapter": 17,
+          "status": "updated"
+        },
+        {
+          "chapter": 18,
+          "status": "unchanged"
+        }
+      ],
+      "landed_gate_errors": 0,
+      "ok": true,
+      "problems": ""
+    },
+    {
+      "round": 4,
+      "results": [
+        {
+          "chapter": 19,
+          "status": "updated",
+          "detail": ""
+        },
+        {
+          "chapter": 20,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 21,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 22,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 23,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 24,
+          "status": "unchanged",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "ok": true,
+      "problems": ""
+    },
+    {
+      "round": 5,
+      "results": [
+        {
+          "chapter": 25,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 26,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 27,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 28,
+          "status": "unchanged",
+          "detail": ""
+        },
+        {
+          "chapter": 29,
+          "status": "updated",
+          "detail": ""
+        },
+        {
+          "chapter": 30,
+          "status": "unchanged",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "ok": true,
+      "problems": ""
+    }
+  ],
+  "finalGate": {
+    "errors": 0,
+    "ok": true,
+    "failing": [],
+    "problems": ""
+  },
+  "unfinished": []
+}
