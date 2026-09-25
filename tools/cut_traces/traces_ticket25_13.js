@@ -255,7 +255,7 @@ const JUDGEMENT_SHAPE = `{
   "entry": "<existing entry id for absorbed/addendum, else empty>",
   "topic": "<battle_assets for new_entry/exclude, else empty>",
   "category": "residual" | "stub" | "sealed" | "predecessor_leftover" | "negative" | "excluded" | "none",
-  "route": "none" | "known_bugs" | "pitfalls" | "kb_fix" | "25.11" | "25.12" | "25.13" | "25.14",
+  "route": "none" | "known_bugs" | "pitfalls" | "kb_fix" | "25.11" | "25.12" | "25.14",
   "title": "<繁體中文。new_entry 的標題或 exclude 的內容欄；否則空字串>",
   "kb_text": "<繁體中文。addendum/new_entry/exclude 要落地的文字；否則空字串>",
   "route_note": "<繁體中文。route 時接手的人要做什麼；否則空字串>",
@@ -621,7 +621,8 @@ command cannot run at all, set ok false and say why in note.`,
 // partial set reads exactly like a complete one.
 
 phase('Report')
-const stopArg = stopped ? ` --stopped "${stopped.replace(/"/g, "'")}"` : ''
+// The reason may quote an agent's note; keep only characters no shell expands.
+const stopArg = stopped ? ` --stopped "${stopped.replace(/[^A-Za-z0-9 .,:;()_\-]/g, ' ')}"` : ''
 const report = await agent(
   `Write the ticket-25.13 trace closing report.  You decide nothing.
 

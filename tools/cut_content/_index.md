@@ -12,7 +12,7 @@
 | `test_cut_content.py` | 單元測試：`python -m unittest tools/cut_content/test_cut_content.py` |
 | `units_media.py` | `units` 主題（票 25.11）的素材產生器：頭像（`FACE.CEL`）、12 格棋子圖示排成一張（`ICON.CEL`）、戰鬥動畫 `STAND`／`ACT` 的逐格 PNG 與總覽圖、動畫內嵌音效的 WAV。頭像與圖示用 `FDE.PAL`，戰鬥動畫用 `FIGHT.PAL`；動畫每格照 `saf_decode.compose_frame` 合成在 320×200 的戰鬥畫面上，再裁到整段動畫共同的最小框 |
 | `test_units_media.py` | 單元測試：`python -m unittest tools/cut_content/test_units_media.py`（有原版遊戲檔時另跑一次完整產生，檢查檔名與兩次產生逐 byte 相同） |
-| `battle_assets_media.py` | `battle_assets` 主題（票 25.13）的素材產生器：戰鬥背景一張 320×200 PNG；永遠不載入的動畫每格一張 PNG、一張總覽圖與它帶的全部音效 WAV；會播的動畫只輸出不響的那幾段音效；容器裡的 WAV 原樣複製。一律用 `FIGHT.PAL`，每格照 `saf_decode.compose_frame` 合成在整個 320×200 畫面上、不裁切 |
+| `battle_assets_media.py` | `battle_assets` 主題（票 25.13）的素材產生器：戰鬥背景一張 320×200 PNG；永遠不載入的動畫每格一張 PNG、一張總覽圖與它帶的全部音效 WAV；會播的動畫只輸出不響的那幾段音效；容器裡的 WAV 原樣複製。一律用 `FIGHT.PAL`，每格照 `saf_decode.compose_frame` 合成在整個 320×200 畫面上、不裁切；總覽圖直接用 `saf_decode.write_filmstrip`（排版與寫檔一步完成，輸出同樣是決定性的）。哪個項目產出哪些檔只由 `plan()` 決定 |
 | `test_battle_assets_media.py` | 單元測試：`python -m unittest tools/cut_content/test_battle_assets_media.py`（有原版遊戲檔時另跑一次完整產生，檢查檔名、格數、取樣率與原樣複製） |
 
 ## 子命令

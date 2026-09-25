@@ -46,3 +46,15 @@
 - 25.15：`src/spell.c` 的 `fdps_play_spell_11_cutscene` 註解沒寫兩個階段都以旗標 0 畫、`MAG11` 內嵌音效因此不響；這只影響一支函式，依 `pitfalls.md` 的分界應該寫成該函式註解的 `Rebuild note`，本票不寫 `src/`。
 - 25.12：I06 的 `Bonus.wav` 那一半連到 `battle_assets.md` 的 B7。
 - 25.14：`M310.CEL`、地圖 33 的圖層、`ATTR151.DAT` 與 opcode `0x08` 都歸 `story.md`。
+
+## 審查後的修正
+
+第一段 commit 之後跑了兩軸審查（規範、票面），各由一個獨立的 agent 做。改掉的：
+
+- **workflow 的停止理由過濾退化了。** 其他幾支 cut_traces 腳本已經改成只保留英數與少數標點，本票抄的是更早的版本，只把雙引號換成單引號；agent 的備註若帶 `$` 或反引號，送進 `--stopped "..."` 時會被 shell 展開。改回與其他幾支一致的寫法。判定形狀裡的 route 列舉也拿掉 `25.13`（轉給自己沒有意義）。
+- **B7 重寫了 bug 的成因。** `_index.md` 規定被封住的內容只寫封住的是什麼，成因連到 `known_bugs.md`；初稿把判獎讀的堆疊槽、兩個位址與 `fdps_transition_zoom` 存下的 EDI 全寫了一遍，也與 `pitfalls.md` 那一列重複。改成一句結論，加上連到 `known_bugs.md` 第 18 條的連結（該檔屬 25.5，工作目錄已有、尚未 commit；`code.md` 的 C1 也是這樣連的）。
+- **B5 多了一句判定裡沒有的設計動機**（「所以不需要收尾的法術也要放一個檔」）。改成獨立的選檔邏輯段，動機照實寫「判斷不出來」。
+- 開頭說明裡的 `units.md` 已經在 HEAD，改成連結；`items.md`、`story.md` 仍是純文字。
+- **產生器的檔案清單寫了兩次。** `planned_names()`（給測試用）與 `generate()` 各自依項目種類分派，兩邊的 else 分支甚至代表不同種類，遲早會漂移。改成單一的 `plan()`，回傳（檔名、寫出函式）的清單，兩者都由它衍生。總覽圖直接用 `saf_decode.write_filmstrip`、不經 `write_png` 輔助函式，這件事寫進了工具索引。重生結果不變，`verify-media` 仍逐 byte 相同。
+
+沒改的：審查指出產生器的調色盤載入與逐格轉 RGBA 和 25.11 的 `units_media.py` 形狀重複。兩支是各票自己的產生器，抽共用函式要動 25.11 的檔案，先不動。

@@ -116,62 +116,72 @@ def _frame_rows(frame, decoded, header, palette):
     return rows
 
 
-def planned_names(game_dir):
-    """Every file generate() writes, derived from the spec and the game files."""
-    names = []
-    for item in SPEC:
-        if item.kind == "still":
-            names.append(media_name(item.entry, item.member, None, "png"))
-        elif item.kind == "clip":
-            _, decoded = _decode(game_dir, item)
-            names += [media_name(item.entry, item.member, frame_part(i), "png")
-                      for i in range(len(decoded["frames"]))]
-            names.append(media_name(item.entry, item.member, "sheet", "png"))
-            names += [media_name(item.entry, item.member, sound_part(i), "wav")
-                      for i in range(len(decoded["sounds"]))]
-        elif item.kind == "sounds":
-            names += [media_name(item.entry, item.member, sound_part(i), "wav")
-                      for i in item.sounds]
-        else:
-            names.append(media_name(item.entry, item.member, None, "wav"))
-    return names
+def plan(game_dir):
+    """Every file this topic writes, as (name, writer) pairs; writer(path) writes it.
 
-
-def generate(out_dir, game_dir):
+    This is the one place that decides what each kind of item produces, so the
+    list of names and the files actually written cannot drift apart.
+    """
     cc = _helpers()
-    out_dir, game_dir = Path(out_dir), Path(game_dir)
-    palette = _palette(game_dir)
+    game_dir = Path(game_dir)
     width, height = saf_decode.SCREEN_WIDTH, saf_decode.SCREEN_HEIGHT
+    palette = []
 
+    def colours():
+        if not palette:
+            palette.extend(_palette(game_dir))
+        return palette
+
+    def png(frame, decoded, header):
+        return lambda path: cc.write_png(path, width, height,
+                                         _frame_rows(frame, decoded, header, colours()))
+
+    def sheet(decoded, header):
+        # The sheet goes through saf_decode's own filmstrip writer, which lays
+        # the frames out and writes the PNG in one step; it is deterministic too.
+        return lambda path: saf_decode.write_filmstrip(path, decoded["frames"], decoded,
+                                                       header, colours())
+
+    def wav(sound):
+        return lambda path: cc.write_wav(path, sound)
+
+    def copy(data):
+        return lambda path: Path(path).write_bytes(data)
+
+    tasks = []
     for item in SPEC:
+        def name(part, ext, item=item):
+            return media_name(item.entry, item.member, part, ext)
+
         if item.kind == "wav":
             data = cc.read_vfs_member(game_dir, item.container, item.member)
-            (out_dir / media_name(item.entry, item.member, None, "wav")).write_bytes(data)
+            tasks.append((name(None, "wav"), copy(data)))
             continue
-
         header, decoded = _decode(game_dir, item)
         if item.kind == "still":
             if len(decoded["frames"]) != 1:
                 raise ValueError("%s: a still needs exactly one frame, it has %d"
                                  % (item.member, len(decoded["frames"])))
-            rows = _frame_rows(decoded["frames"][0], decoded, header, palette)
-            cc.write_png(out_dir / media_name(item.entry, item.member, None, "png"),
-                         width, height, rows)
+            tasks.append((name(None, "png"), png(decoded["frames"][0], decoded, header)))
         elif item.kind == "clip":
-            for frame in decoded["frames"]:
-                rows = _frame_rows(frame, decoded, header, palette)
-                cc.write_png(out_dir / media_name(item.entry, item.member,
-                                                  frame_part(frame["index"]), "png"),
-                             width, height, rows)
-            saf_decode.write_filmstrip(
-                out_dir / media_name(item.entry, item.member, "sheet", "png"),
-                decoded["frames"], decoded, header, palette)
-            for sound in decoded["sounds"]:
-                cc.write_wav(out_dir / media_name(item.entry, item.member,
-                                                  sound_part(sound["index"]), "wav"),
-                             sound)
+            tasks += [(name(frame_part(f["index"]), "png"), png(f, decoded, header))
+                      for f in decoded["frames"]]
+            tasks.append((name("sheet", "png"), sheet(decoded, header)))
+            tasks += [(name(sound_part(s["index"]), "wav"), wav(s))
+                      for s in decoded["sounds"]]
+        elif item.kind == "sounds":
+            tasks += [(name(sound_part(i), "wav"), wav(decoded["sounds"][i]))
+                      for i in item.sounds]
         else:
-            for index in item.sounds:
-                cc.write_wav(out_dir / media_name(item.entry, item.member,
-                                                  sound_part(index), "wav"),
-                             decoded["sounds"][index])
+            raise ValueError("%s: unknown kind %r" % (item.member, item.kind))
+    return tasks
+
+
+def planned_names(game_dir):
+    """Every file generate() writes."""
+    return [name for name, _ in plan(game_dir)]
+
+
+def generate(out_dir, game_dir):
+    for name, write in plan(game_dir):
+        write(Path(out_dir) / name)
