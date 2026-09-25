@@ -34,8 +34,11 @@ RUNS = REPO / "devlog" / "runs"
 sys.path.insert(0, str(REPO / "tools" / "cut_content"))
 import cut_content  # noqa: E402  (owner of the cut_content/ page structure)
 
+# The topic page a ticket's new entries and exclusions land on.  None means any
+# topic page: ticket 25.8's chapter traces (tools/cut_traces/chapters_25_8.json,
+# read with --summary) are about whatever the chapter showed.
 TOPIC_OF_TICKET = {"25.10": "code", "25.11": "units", "25.12": "items",
-                   "25.13": "battle_assets", "25.14": "story"}
+                   "25.13": "battle_assets", "25.14": "story", "25.8": None}
 VERDICTS = ("holds", "refuted", "needs_correction")
 DISPOSITIONS = ("absorbed", "addendum", "new_entry", "exclude", "route", "drop")
 CLASSES = ("residual", "stub", "sealed", "predecessor_leftover", "negative")
@@ -146,9 +149,13 @@ def check_judgement(j, trace, ticket, known):
     if d in ("addendum", "new_entry", "exclude") and not text:
         problems.append("%s without kb_text" % d)
     if d in ("new_entry", "exclude"):
-        if j["topic"] != TOPIC_OF_TICKET[ticket]:
+        allowed = TOPIC_OF_TICKET[ticket]
+        if allowed is None and j["topic"] not in cut_content.TOPICS:
+            problems.append("%s must name a topic page, one of %s, not %r"
+                            % (d, ", ".join(cut_content.TOPICS), j["topic"]))
+        elif allowed is not None and j["topic"] != allowed:
             problems.append("%s must land on this ticket's topic %s, not %r; a trace for "
-                            "another topic is a route" % (d, TOPIC_OF_TICKET[ticket], j["topic"]))
+                            "another topic is a route" % (d, allowed, j["topic"]))
         if not (j["title"] or "").strip():
             problems.append("%s without title" % d)
     if d == "new_entry" and j["category"] not in CLASSES:
@@ -295,7 +302,7 @@ def main():
             print("no trace %s" % args.id, file=sys.stderr)
             return 1
         print(json.dumps(dict(t, judgement_file=str(jdir / ("%s.json" % t["id"])),
-                              target_topic=TOPIC_OF_TICKET[ticket]),
+                              target_topic=TOPIC_OF_TICKET[ticket] or "any topic page"),
                          ensure_ascii=False, indent=1))
         return 0
 

@@ -1,0 +1,30 @@
+{
+ "_about": "Traces the chapter agents of ticket 25.8 noticed that no cut_content/ entry covers, handed over unverified. Same shape as the new_traces list of ticket 25.9's closing report so cuttrace.py reads it with --summary; ids are T8-01..T8-05 in this order. Do not reword a trace once judged: the judgement keys on its SHA-1.",
+ "new_traces": [
+  {
+   "from": "ch03",
+   "ticket": "25.8",
+   "trace": "第 3 章：MAP02.DAT 第 15 波的 44 隻魔像（golem）身上共帶 22,000 金，這些金錢拿不到（見 chapters/ch03.md 寶物一節、tools/chapter_docs/judgements/ch03.json）。"
+  },
+  {
+   "from": "ch05",
+   "ticket": "25.8",
+   "trace": "第 5 章：守衛 #32（MAP04 第 32 筆部署記錄）的死亡腳本掉落 B5 拿不到（見 chapters/ch05.md 寶物一節；U09 只提到 MAP04 #32 缺 STAND）。"
+  },
+  {
+   "from": "ch12",
+   "ticket": "25.8",
+   "trace": "第 12 章：被選中的守護獸若被毒死（fdps_battle_tick_status_effects 0x1fa30 的毒死不跑死亡腳本），該局拿不到神兵 58 修佩魯／59 雷德／5A 亞德尼恩，第 16 章工匠交易也做不成；能毒到守護獸的只有地圖攻擊的淬毒武器（那條路只擋職業 0x19，全螢幕戰鬥與法術會擋職業 0x21）。rebuild_info/pitfalls.md 已有「中毒致死不跑死亡腳本」一列，但 cut_content/ 沒有條目（候選：被封住的內容）。"
+  },
+  {
+   "from": "ch15",
+   "ticket": "25.8",
+   "trace": "第 15 章：MAP14 有 19 個重繪格用旗標 15，沒有任何程式設定這個旗標（見 chapters/ch15.md）。"
+  },
+  {
+   "from": "ch15",
+   "ticket": "25.8",
+   "trace": "第 15 章：友軍步兵身上的 2000 金掉落永遠不會發放（見 chapters/ch15.md）。"
+  }
+ ]
+}

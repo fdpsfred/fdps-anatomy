@@ -14,6 +14,8 @@
 | `traces_ticket25_12.js` | 票 25.12 的 workflow（19 條，落點是 `items.md`）：形狀同上，`cuttrace.py` 的每次呼叫都帶 `--ticket 25.12`；落點說明改成道具與取得途徑，屬於程式痕跡的一律以 `kb_fix` 交出、`route_note` 以「code.md:」開頭 |
 | `traces_ticket25_13.js` | 票 25.13 的 workflow：同一個形狀，判 `T13-01`…`T13-11`，主題檔是 `battle_assets.md`，所有 `cuttrace.py` 呼叫帶 `--ticket 25.13`。落點沒有 `code.md` 的 route 值，屬於程式痕跡的一律以 `kb_fix` 交出、`route_note` 以「code.md:」開頭 |
 | `traces_ticket25_14.js` | 票 25.14 的 workflow（23 條，落點是 `story.md`）：形狀同上，`cuttrace.py` 的每次呼叫都帶 `--ticket 25.14`；落點說明改成劇情與場景，並提示永遠不會顯示的文字由 `story.md` 擁有、目前的歸屬在 `tools/cut_content/story.py` 的 `OWNERS`，逐字或幾乎逐字的複本歸排除 |
+| `chapters_25_8.json` | 票 25.8 的章節 agent 轉交的 5 條痕跡（沒有任何 `cut_content/` 條目涵蓋、未經驗證）。形狀同 25.9 收尾報告的 `new_traces`，以 `--summary` 讀、`--ticket 25.8` 編成 `T8-01`…`T8-05`；判定後不要改措辭 |
+| `traces_chapters25_8.js` | 這 5 條的 workflow：形狀同 `traces_ticket25_10.js`，所有 `cuttrace.py` 呼叫帶 `--ticket 25.8 --summary`；新條目與排除可落在任何主題檔（`TOPIC_OF_TICKET` 為 `None`），收尾報告是 `devlog/runs/<date>-cut-traces-25.8-*.json` |
 | `test_cuttrace.py` | 單元測試：`python -m unittest tools/cut_traces/test_cuttrace.py` |
 
 ## 跑法

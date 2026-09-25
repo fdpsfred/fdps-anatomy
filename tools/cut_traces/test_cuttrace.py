@@ -107,6 +107,21 @@ class CheckTest(unittest.TestCase):
         self.assertTrue(self.check(route="elsewhere"))
 
 
+class AnyTopicTicketTest(unittest.TestCase):
+    """Ticket 25.8's chapter traces may land on any topic page."""
+
+    def test_new_entry_may_land_on_any_topic_but_a_real_one(self):
+        summary = {"new_traces": [{"from": "ch03", "ticket": "25.8", "trace": "t"}]}
+        t = cuttrace.traces_for(summary, "25.8")[0]
+        self.assertEqual(t["id"], "T8-01")
+        j = judgement(id=t["id"], trace_sha1=t["trace_sha1"], disposition="new_entry",
+                      route="none", route_note="", title="標題", kb_text="本文。",
+                      category="sealed")
+        self.assertEqual(cuttrace.check_judgement(dict(j, topic="items"), t, "25.8", KNOWN), [])
+        self.assertEqual(cuttrace.check_judgement(dict(j, topic="code"), t, "25.8", KNOWN), [])
+        self.assertTrue(cuttrace.check_judgement(dict(j, topic="nowhere"), t, "25.8", KNOWN))
+
+
 class FlowTest(unittest.TestCase):
     def test_states_rescan_and_summary(self):
         with tempfile.TemporaryDirectory() as d:
