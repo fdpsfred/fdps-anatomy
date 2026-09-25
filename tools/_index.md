@@ -40,4 +40,5 @@
 | [`pool_triage/`](pool_triage/_index.md) | 未辨識區塊逐一判定並建成 function，再逐一判定每個 function 的 pool 歸屬（票 14 專屬的 workflow，含 Watcom 執行期與 Miles AIL 的函式庫比對） |
 | [`rle_asm/`](rle_asm/_index.md) | RLE 繪製的 15 支改回原版組語：逐道指令與原版比對、片段接成 `src/*.asm`、C 譯本與組語之間的切換（票 22.3） |
 | [`saf_decode/`](saf_decode/_index.md) | 解出 `.SAF` 的四層結構、驗證自洽性，並算圖成 PNG 與 WAV |
+| [`save_format/`](save_format/_index.md) | `FDE.SAV` 的讀寫：解密、驗檢查碼、把欄位解成 JSON，以及把改過的明文映像封裝回存檔 |
 | [`vfs_dump/`](vfs_dump/_index.md) | 解開 `.VFS` 容器並驗證其自洽性 |

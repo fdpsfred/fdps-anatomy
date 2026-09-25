@@ -206,10 +206,7 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 **RLE 那 15 支在重建裡保留原版組語**，從 `FDPS.LE` 逐道轉錄成 `src/rledisp.asm`、`rlebase.asm`、`rlepal.asm`、`rleturn.asm`、`rlemix.asm`，指令序列與每道指令的長度都與原版相同。理由是速度：這一組是每畫一個 sprite、每塊地圖格、每個字形都會跑的逐像素熱路徑，原版一段同色像素是一道 `REP STOSB`／`REP MOVSB`，寫成 C 就成了每像素數道指令的迴圈。暫存器交接與對分派者 frame 的讀寫雖然封閉在分派者之內、改寫成 C 仍是功能等價，但速度不是，所以不採用。分派者必須跟著一起是組語，理由見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)；C 譯本以 `#if 0` 留在原檔作閱讀參考，切換方法見 [`rebuild_info/code_layout.md`](../rebuild_info/code_layout.md)。
 
-鍵盤 7 支與存檔 2 支不在熱路徑上，重建以一般 C 改寫，依 ADR-0001 功能等價。存檔的兩支，常數決定存檔相容性：
-
-- `fdps_xor_crypt_buffer`（`000568b7`）是 `FDE.SAV` 的 XOR 串流加解密，加密與解密共用同一支。密鑰狀態放在 DX：起始 `0xa5`，每個 byte 先 `DX += 0x9014` 再 `ROL DX,3`，取 DL 與資料 XOR，主體是 `LODSB`／`STOSB`／`LOOP`。
-- `00056898` 是存檔的加總 checksum，範圍是 `len - 4` 個 byte——尾端 4 byte 的 checksum 欄位本身不計入。
+鍵盤 7 支與存檔 2 支不在熱路徑上，重建以一般 C 改寫，依 ADR-0001 功能等價。存檔的兩支是 `FDE.SAV` 的 XOR 串流加解密 `fdps_xor_crypt_buffer`（`000568b7`，密鑰放在 DX，主體是 `LODSB`／`STOSB`／`LOOP`）與加總檢查碼 `fdps_compute_save_checksum`（`00056898`，`LODSB`／`ADD`／`LOOP`），常數決定存檔相容性；算法與常數見 [`resource_info/save.md`](../resource_info/save.md)。
 
 ### 一個會被「修掉」的 CRT 行為
 

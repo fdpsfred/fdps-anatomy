@@ -41,7 +41,7 @@ pool 分布是 `binary_artifact` 395、`fdps` 292、`crt` 196、`ail` 157。判�
 | `fdps_tile_attr_entry` | 4 | — | 地形屬性 |
 | `fdps_move_grid_cell` | 2 | — | 移動範圍格 |
 | `fdps_map_cell_code_layer` | 17 | `0x60148` `data_fdps_map_cell_event_code_layer_ptr` | 每格的事件碼平面 |
-| `fdps_save_slot` | 2600 | — | 一個存檔槽 |
+| `fdps_save_slot` | 2600 | — | 一個存檔槽（`FDE.SAV` 的佈局見 [`resource_info/save.md`](../resource_info/save.md)） |
 | `fdps_cel_header` | 15 | `0x643ac` 起數個 sprite sheet 指標 | CEL 檔頭 |
 | `fdps_cel_cache_slot` | 48 | — | sprite 快取槽 |
 | `fdps_palette_entry` | 3 | `0x643bc`、`0x643e4` | VGA 調色盤一格 |
