@@ -13,9 +13,10 @@
 | `cutscene_script/cutscene_script.py` | 過場腳本的解碼，以及每一步當下的地圖、文字區塊、單位身分 | 需要過場內容的工作（票 25.6、25.8、25.14 等） |
 | `map_decode/map_decode.py` | 地圖的全部檔：`MAPnn.DAT`／`.COD`（`parse_map_dat`、`parse_map_cod`）、圖層（`parse_dtl`、`parse_mpl`、`parse_attr`、`parse_dsc`）、整張地圖的載入與一格的判讀（`load_map`、`tile_info`、`classify_cell`、`searchable_cells`）、全圖算圖（`render_map`） | `data_tables`；需要地圖、部署記錄或寶物的工作（票 25.2 的 `cutscene_script` 待改、25.8、25.14 等） |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`、`data_tables`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
-| `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`） | 需要「哪段文字會顯示」的工作（票 25.14、25.16 等） |
+| `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`） | 需要「哪段文字會顯示」的工作（票 25.8、25.14、25.16 等） |
+| `chapter_docs/chapter_facts.py` | 每一章的機械事實（`facts`）：部署與波次、可搜尋格、事件 slot、本章的過場腳本、章節文字區塊每一條的讀取端（`text_readers`），以及章節頁的產生區塊（`render_block`） | 需要逐章事實的工作（票 25.14、25.16 等） |
 
-儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表、全域文字頁與額外場景文字頁寫到 `assets/text/`，`data_tables` 產生的表寫進 `assets/` 各正典檔裡標定的表格位置。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`。
+儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表、全域文字頁與額外場景文字頁寫到 `assets/text/`，`data_tables` 產生的表寫進 `assets/` 各正典檔裡標定的表格位置。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`，章節頁的逐章判定（波次會不會部署、文字條目的讀取端）寫到 `tools/chapter_docs/judgements/`。
 
 | 子資料夾 | 用途 |
 | --- | --- |
@@ -26,6 +27,7 @@
 | [`call_graph/`](call_graph/_index.md) | 建出呼叫圖（含函式指標表的間接邊）並算可達性、孤島分量與共用 helper 排名 |
 | [`cd_scope/`](cd_scope/_index.md) | 透過 DOSBox-X 把光碟映像的內容複製出來並清點 |
 | [`cel_decode/`](cel_decode/_index.md) | 解出 `.CEL` 的每個 sprite 並算圖成 PNG |
+| [`chapter_docs/`](chapter_docs/_index.md) | 30 份章節頁與 `chapters/_index.md`：從資料產生部署、寶物、事件、過場腳本與全文對白的區塊，逐章 agent 寫敘述與三種判定，閘門檢查結構、引用與判定，落地後可隨時重產比對（票 25.8 的 workflow） |
 | [`code_emit/`](code_emit/_index.md) | 把 function emit 成 C 的整條流程：emit／review／gate／記帳的 workflow、單元測試映像的建置與執行、檔案落點的路由表、工作清單與進度（票 21、21.5），以及全部落地後的疑慮總掃（票 22） |
 | [`crt_version/`](crt_version/_index.md) | 判定工具鏈的發行版：每個 `crt` function 對每個 Watcom 版本的程式庫逐 byte 比對，交集成單一版本，另以差分編譯量測編譯器（票 16 專屬的 workflow） |
 | [`cut_verify/`](cut_verify/_index.md) | 刪減與未用調查的 53 條發現逐條獨立驗證：一條一個 agent、一手證據的 gate、第二位 agent 回掃更正與分類有疑義者，收尾報告與判定彙整進 `devlog/runs/`（票 25.9 專屬的 workflow） |
