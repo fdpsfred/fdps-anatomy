@@ -332,6 +332,14 @@ def _battle_assets(out_dir, game_dir):
 GENERATORS["battle_assets"] = _battle_assets
 
 
+def _story(out_dir, game_dir):
+    from story import generate_media
+    generate_media(out_dir, game_dir)
+
+
+GENERATORS["story"] = _story
+
+
 # ------------------------------------------------------------------- main
 
 def cmd_index(_args):

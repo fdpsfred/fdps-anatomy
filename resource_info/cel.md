@@ -4,7 +4,7 @@
 
 硬碟安裝後有 99 個：`FACE.CEL`（人物頭像）與 `ICON.CEL`（棋子圖示）在根目錄，另外 97 個在 `.VFS` 容器內（`FIELD1.VFS` 69 個、`MISC.VFS` 28 個介面圖）。光碟上的 `FACE.CEL` 與 `ICON.CEL` 包在 `PACK.VFS` 裡，見 [`disc_images.md`](disc_images.md)。
 
-`FIELD1.VFS` 那 69 個裡只有 68 個是取得到的地圖圖磚表：程式的檔名是 `m%02d%d.cel`（地圖編號兩位加圖層一位），對到 64 個地圖的第 0 層與其中 4 個的第 1 層。剩下的 `M09.CEL` 只有兩位數字，這個格式產不出來，`FDPS.LE` 裡也沒有別的字串指向它，是一個開不到的殘留檔——數 `FIELD1.VFS` 的圖磚表時不能把它算進去。
+`FIELD1.VFS` 那 69 個裡只有 68 個是取得到的地圖圖磚表：程式的檔名是 `m%02d%d.cel`（地圖編號兩位加圖層一位），對到 64 個地圖的第 0 層與其中 4 個的第 1 層。剩下的 `M09.CEL` 只有兩位數字，這個格式產不出來，`FDPS.LE` 裡也沒有別的字串指向它，是一個開不到的殘留檔——數 `FIELD1.VFS` 的圖磚表時不能把它算進去。它與 `M090.CEL` 的逐格比對見 [`cut_content/story.md`](../cut_content/story.md)。
 
 像素是 8-bit 調色盤索引，調色盤不在 `.CEL` 內，由場景另外指定 `MISC.VFS` 的 5 個 `.PAL`（各 768 byte，256 × RGB 的 6-bit VGA DAC 值，還原成 8-bit 是 `c8 = c6 << 2 | c6 >> 4`）。同一個 `.CEL` 套錯調色盤會得到形狀正確但顏色全錯的圖。
 
@@ -58,7 +58,7 @@ stretch 寫的是每一對的**後面**那個像素：繪製器是 `INC EDI` 再
 
 192 個 sprite 全部在剛好 24 個列尾 byte 後串流用盡，解出來是一組室內場景的圖磚，所以這是一種真的格式而不是壞檔。
 
-`FDPS.LE` 裡沒有讀這種編碼的程式碼：`0x0D` 從來不被讀取，13 個 blit mode 讀的都是同一種串流。這不構成矛盾，因為原版從不載入 `M310.CEL`：它是地圖編號 31 的第 0 層，而地圖 31 沒有 `DSC31.DAT`，載入常式在讀圖磚表之前就先讀 `DSC`、讀不到就結束程式（見 [`terrain.md`](terrain.md)）；也沒有任何過場腳本切到地圖 31（見 [`cutscene_script.md`](cutscene_script.md)）。`M%02d%d.cel` 只有這一個載入點，所以這個檔在出貨的遊戲裡構不到。
+`FDPS.LE` 裡沒有讀這種編碼的程式碼：`0x0D` 從來不被讀取，13 個 blit mode 讀的都是同一種串流。這不構成矛盾，因為原版從不載入 `M310.CEL`：它是地圖編號 31 的第 0 層，而地圖 31 沒有 `DSC31.DAT`，載入常式在讀圖磚表之前就先讀 `DSC`、讀不到就結束程式（見 [`terrain.md`](terrain.md)）；也沒有任何過場腳本切到地圖 31（見 [`cutscene_script.md`](cutscene_script.md)）。`M%02d%d.cel` 只有這一個載入點，所以這個檔在出貨的遊戲裡構不到。地圖 31 本身見 [`cut_content/story.md`](../cut_content/story.md)。
 
 ## 自洽性
 

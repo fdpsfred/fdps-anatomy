@@ -10,6 +10,8 @@
 | --- | --- |
 | `cut_content.py` | 四個子命令（見下）；素材產生器的註冊表 `GENERATORS`；給產生器用的讀檔與寫檔函式 |
 | `test_cut_content.py` | 單元測試：`python -m unittest tools/cut_content/test_cut_content.py` |
+| `story.py` | `story` 主題（票 25.14）：`story.md` 產生區塊（對白全文、部署表、素材表、永遠不會顯示的文字總表）的 `build` 與閘門 `check`；永遠不會顯示的文字的歸屬表 `OWNERS`——每一條都要歸到一個條目或排除項，章節區塊以 `tools/chapter_docs/judgements/` 的逐章判定為準，`check --final` 不接受待判定；素材產生器（整張地圖、`ICON0032.SAF` 逐格與總覽及內嵌音效、`M09.CEL`／`M090.CEL` 總覽）；`cdda` 從光碟映像切出 CD 音軌 |
+| `test_story.py` | 單元測試：`python -m unittest tools/cut_content/test_story.py` |
 | `units_media.py` | `units` 主題（票 25.11）的素材產生器：頭像（`FACE.CEL`）、12 格棋子圖示排成一張（`ICON.CEL`）、戰鬥動畫 `STAND`／`ACT` 的逐格 PNG 與總覽圖、動畫內嵌音效的 WAV。頭像與圖示用 `FDE.PAL`，戰鬥動畫用 `FIGHT.PAL`；動畫每格照 `saf_decode.compose_frame` 合成在 320×200 的戰鬥畫面上，再裁到整段動畫共同的最小框 |
 | `test_units_media.py` | 單元測試：`python -m unittest tools/cut_content/test_units_media.py`（有原版遊戲檔時另跑一次完整產生，檢查檔名與兩次產生逐 byte 相同） |
 | `battle_assets_media.py` | `battle_assets` 主題（票 25.13）的素材產生器：戰鬥背景一張 320×200 PNG；永遠不載入的動畫每格一張 PNG、一張總覽圖與它帶的全部音效 WAV；會播的動畫只輸出不響的那幾段音效；容器裡的 WAV 原樣複製。一律用 `FIGHT.PAL`，每格照 `saf_decode.compose_frame` 合成在整個 320×200 畫面上、不裁切；總覽圖直接用 `saf_decode.write_filmstrip`（排版與寫檔一步完成，輸出同樣是決定性的）。哪個項目產出哪些檔只由 `plan()` 決定 |
@@ -38,4 +40,4 @@ python tools/cut_content/cut_content.py verify-media [<主題>...] [--game DIR]
 - 讀遊戲檔用 `read_game_file(game_dir, "FACE.CEL")` 與 `read_vfs_member(game_dir, "FIGACT.VFS", "STAND087.SAF")`，不要讀 `workspace/vfs_dump/`，那是可刪的中間產物。
 - 寫檔用 `write_png(path, width, height, rgba_rows)` 與 `write_wav(path, sound)`，分別轉交 `cel_decode` 與 `saf_decode` 的寫出函式；兩者的輸出是決定性的，重生才會逐 byte 相同。
 - 檔名照 [`cut_content/_index.md`](../../cut_content/_index.md)「素材」的規則，`check` 會擋下不合規的名稱。
-- CD 音軌的 WAV 寫到 `cut_content/media/cdda/`（`.gitignore` 排除），不經 `media` 子命令的整夾替換。
+- CD 音軌的 WAV 寫到 `cut_content/media/cdda/`（`.gitignore` 排除），不經 `media` 子命令的整夾替換：`python tools/cut_content/story.py cdda [--disc1 CUE] [--disc2 CUE]` 以 `cd_scope` 的 `.cue` 讀取器找音軌起訖，把 CD-DA 取樣原樣寫成 44.1 kHz、16 bit、立體聲的 WAV。
