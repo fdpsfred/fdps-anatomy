@@ -1,0 +1,10 @@
+{
+  "waves": [],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第廿九章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式與 `ICON28.DAT`／`WIN28.DAT` 都不畫這一條"
+    }
+  ]
+}

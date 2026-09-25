@@ -1,0 +1,144 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場：`fdps_chapter_30_init`（`0x21610`）播的 `ICON29.DAT` 在 `0x1b3` 先部署一次供演出用，`0xb78` 的 `SWITCH_MAP` 重設戰場後由 `0xb7a` 的 `DEPLOY_WAVE` 再部署，第一型態平衡之神放在錨點 (10, 3) 原位，這是戰鬥中留下的那一個"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第一型態平衡之神（記錄 0）被打倒時，死亡腳本 opcode 2 呼叫 slot 48 的 `fdps_chapter_30_event_deploy_wave_2`（`0x39840`），以原位放置部署在 (10, 3)"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "第二型態平衡之神（記錄 1）被打倒時，死亡腳本 opcode 2 呼叫 slot 49 的 `fdps_chapter_30_event_deploy_wave_3`（`0x398c0`），以原位放置部署在 (10, 3)"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "任一單位移動中走進 46 個事件碼 1 的格之一（平衡之神所在區塊外圍的 U 形一圈）時，slot 47 的 `fdps_chapter_30_event_deploy_wave_4`（`0x39770`）部署一次（旗標元素 `0x10` 擋住重複），找最近空格放在 (5, 12) 與 (15, 13)、(16, 13) 附近；之後由 `fdps_chapter_30_revive_wave_4_undead`（`0x10760`）反覆復活"
+    }
+  ],
+  "text_readers": [
+    {
+      "entry": "0x20",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）：章節索引 `0x1d` 時字幕取「`0x20` + 名冊索引」，名冊第 1 位蘭迪斯的後日談"
+    },
+    {
+      "entry": "0x21",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 2 位（尤利安）字幕"
+    },
+    {
+      "entry": "0x22",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 3 位（亞克）字幕"
+    },
+    {
+      "entry": "0x23",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 4 位（法蓮娜）字幕"
+    },
+    {
+      "entry": "0x24",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 5 位（裘娜）字幕"
+    },
+    {
+      "entry": "0x25",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 6 位（費塔加）字幕"
+    },
+    {
+      "entry": "0x26",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 7 位（布蘭多）字幕"
+    },
+    {
+      "entry": "0x27",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 8 位（蓋亞）字幕"
+    },
+    {
+      "entry": "0x28",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 9 位（琴琴）字幕"
+    },
+    {
+      "entry": "0x29",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 10 位（瑪麗安）字幕"
+    },
+    {
+      "entry": "0x2a",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 11 位（蘭斯洛特）字幕"
+    },
+    {
+      "entry": "0x2b",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）的名冊第 12 位（珊）字幕"
+    },
+    {
+      "entry": "0x2c",
+      "reader": "片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）在名冊之後多跑的一張（索引 = 名冊人數 12，固定用角色 `0C` 索爾的動畫），畫索爾王的後日談"
+    }
+  ],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `Chapter.saf` 的圖（`fdps_show_chapter_title_card`（`0x20c60`）），存檔面板讀 `0x01`，本章的處理函式與腳本都不畫 `0x00`"
+    },
+    {
+      "entry": "0x0d",
+      "why": "第二型態平衡之神（角色 61）的叫陣台詞；它的部署處理 `fdps_chapter_30_event_deploy_wave_3`（`0x398c0`）不畫任何文字，死亡腳本、過場與其他處理函式也不畫這一條"
+    },
+    {
+      "entry": "0x0e",
+      "why": "第三型態平衡之神（角色 62）喊出鬼動死靈陣的台詞；沒有任何處理函式、死亡腳本或過場畫這一條（第三型態的死亡腳本運算元是 `0xff`，不畫字）"
+    },
+    {
+      "entry": "0x13",
+      "why": "蘭迪斯邀法蓮娜同行的另一版道別對話；`WIN29.DAT` 切到地圖 63 後畫的是 `FDETXT64` 的 `0x11`，本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x14",
+      "why": "另一版蘭迪斯與法蓮娜的道別；`WIN29.DAT` 在地圖 63 畫 `FDETXT64` 的條目，沒有任何腳本在地圖 29 上畫這一條"
+    },
+    {
+      "entry": "0x15",
+      "why": "`GOODEND.DAT` 開頭就 `SWITCH_MAP` 到地圖 64，畫的是 `FDETXT65` 的 `0x09` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x16",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0a` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x17",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0b` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x18",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0c` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x19",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0d` 副本；片尾名單的字幕基底 `0x19` 只用在章節索引 `0x1a`（第 27 章，讀 `FDETXT27`），本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1a",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0e` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1b",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x0f` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1c",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x10` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1d",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x11` 副本；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1e",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x12`（那一版多一個換頁）；本區塊的這條沒有讀取端"
+    },
+    {
+      "entry": "0x1f",
+      "why": "`GOODEND.DAT` 在地圖 64 畫的是 `FDETXT65` 的 `0x13` 副本；本區塊的這條沒有讀取端"
+    }
+  ]
+}

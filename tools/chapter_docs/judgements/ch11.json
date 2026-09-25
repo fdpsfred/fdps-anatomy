@@ -1,0 +1,36 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON10.DAT` `0x081` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_11_init`（`0x21140`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON10.DAT` `0x08e` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_11_init`（`0x21140`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "開場過場 `ICON10.DAT` `0x09b` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_11_init`（`0x21140`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "第 7 回合敵方階段開始前，回合事件 slot 17 的 `fdps_chapter_11_event_deploy_wave_for_turn`（`0x378f0`）走「不是第 4 回合」的分支部署（找最近空格），游標再依序停在左上、右上兩群；在那之前清光敵人就不會出場"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 4 回合敵方階段開始前，回合事件 slot 17 的 `fdps_chapter_11_event_deploy_wave_for_turn`（`0x378f0`）走第 4 回合的分支部署（找最近空格）；在那之前清光開場的 14 名敵人就不會出場"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `Chapter.saf` 的圖（`fdps_show_chapter_title_card`（`0x20c60`）），存檔面板只畫 `0x01`；本章的處理函式、`ICON10.DAT`／`WIN10.DAT` 都不畫條目 0"
+    }
+  ]
+}

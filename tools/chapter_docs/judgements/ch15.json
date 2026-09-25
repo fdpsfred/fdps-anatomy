@@ -1,0 +1,21 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON14.DAT` `0x11a` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_15_init`（`0x21240`）執行，在放下索橋之前、戰鬥開始前一定出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "光束砲座（第 27 筆）被擊倒時，死亡腳本呼叫的 `fdps_chapter_15_event_boss_defeat`（`0x37b70`）在回合數 ≤ 25 且裘娜（單位 4）未退場時部署（找最近空格），接著才問玩家接不接受決鬥；超過第 25 回合或裘娜已退場就不會出場"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `Chapter.saf` 的圖（`fdps_show_chapter_title_card`（`0x20c60`）），存檔面板只畫 `0x01`；本章的處理函式、死亡腳本與 `ICON14.DAT`／`WIN14.DAT` 都不畫條目 0"
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 3 回合敵方階段前，回合事件（slot 15）呼叫 `fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`），在右上門 (13, 2) 附近以找最近空格的方式部署，接著顯示 `0x12`"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 6 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門 (3, 9)／(15, 9) 各一"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "第 7 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "第 8 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 9 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 6,
+      "deployed": true,
+      "when": "第 10 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 7,
+      "deployed": true,
+      "when": "第 11 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 8,
+      "deployed": true,
+      "when": "第 12 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 9,
+      "deployed": true,
+      "when": "第 13 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）以「回合數 − 4」部署，中段左右門各一"
+    },
+    {
+      "wave": 10,
+      "deployed": true,
+      "when": "第一名隊員走進第 15 列（格子事件碼 1、slot 16）時，行動結束後由 `fdps_chapter_10_event_deploy_wave_10`（`0x378a0`）部署在下方階梯底 (6–13, 20–21) 附近，只觸發一次"
+    },
+    {
+      "wave": 11,
+      "deployed": true,
+      "when": "第 19 回合敵方階段前，`fdps_chapter_10_event_deploy_wave_for_turn`（`0x37780`）走「回合數超過 13」那一支部署在左上階梯 (3–5, 1–2) 附近，接著顯示 `0x13`；在此之前全員脫離就不會出現"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `MISC.VFS` 的 `CHAPTER.SAF` 圖（`fdps_show_chapter_title_card`（`0x20c60`）），沒有任何程式或腳本畫本章的 0x00"
+    },
+    {
+      "entry": "0x09",
+      "why": "開場過場 `ICON09.DAT` 在地圖 37 畫的是 `FDETXT38` 的 0x09 副本；沒有腳本在地圖 9 上畫文字，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0a",
+      "why": "開場過場在地圖 37 畫的是 `FDETXT38` 的 0x0a 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0b",
+      "why": "開場過場在地圖 37 畫的是 `FDETXT38` 的 0x0b 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0c",
+      "why": "開場過場在地圖 38 畫的是 `FDETXT39` 的 0x09 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0d",
+      "why": "開場過場在地圖 38 畫的是 `FDETXT39` 的 0x0a 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0e",
+      "why": "開場過場在地圖 38 畫的是 `FDETXT39` 的 0x0b 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0f",
+      "why": "開場過場在地圖 38 畫的是 `FDETXT39` 的 0x0c 副本（頭像是大祭司，這份複本標成角色 4），本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x10",
+      "why": "開場過場在地圖 38 畫的是 `FDETXT39` 的 0x0d 副本，本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x11",
+      "why": "勝利過場 `WIN09.DAT` 先切到地圖 37 才畫文字，畫的是 `FDETXT38` 的 0x0c 副本，本章區塊的這一條沒有讀取端"
+    }
+  ]
+}

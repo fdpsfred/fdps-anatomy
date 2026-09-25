@@ -1,0 +1,59 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON23.DAT` `0x105` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_24_init`（`0x21490`）執行；黑暗祭司唸完咒召喚出來，戰鬥開始時就在場上"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 5 回合敵方階段前，回合事件 slot 36 呼叫 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`），先畫文字 `0x10` 再部署（找最近空格）"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "第 13 回合敵方階段前，回合事件 slot 36 呼叫 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`），先畫文字 `0x13` 再部署（找最近空格）"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "第 10 回合敵方階段前，回合事件 slot 36 呼叫 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`），先部署（找最近空格）再畫文字 `0x12`"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 15 回合敵方階段前，回合事件 slot 36 呼叫 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`），先畫文字 `0x14` 再部署（找最近空格）"
+    },
+    {
+      "wave": 6,
+      "deployed": true,
+      "when": "回合計數 7 的我方階段前，回合事件 slot 36 呼叫 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`），先部署珊（找最近空格）再畫文字 `0x0e`"
+    },
+    {
+      "wave": 7,
+      "deployed": true,
+      "when": "第 25 回合（含）以前清完敵人、裘娜（單位 4）未退場且背包裡有 `A6` 妖刀村正時，`fdps_chapter_24_post_action`（`0x3b3d0`）在清場的那次行動後部署（找最近空格），只發生一次"
+    },
+    {
+      "wave": 255,
+      "deployed": false,
+      "why": "沒有任何呼叫以 255 部署：回合事件處理函式只部署 2、6、4、3、5，行動後檢查只部署 7，`ICON23.DAT` 只部署 1，`WIN23.DAT` 沒有 `DEPLOY_WAVE`"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第廿四章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON23.DAT`／`WIN23.DAT` 都不畫這一條"
+    },
+    {
+      "entry": "0x0d",
+      "why": "珊的「哎～呀呀呀！來遲一步了！」：到場事件畫的是 `0x0e`，本章的處理函式、死亡腳本與 `ICON23.DAT`／`WIN23.DAT` 都不畫這一條"
+    },
+    {
+      "entry": "0x0f",
+      "why": "蘭迪斯的「﹒﹒﹒﹒﹒﹒」：本章的處理函式、死亡腳本與 `ICON23.DAT`／`WIN23.DAT` 都不畫這一條"
+    }
+  ]
+}

@@ -80,6 +80,28 @@ class Generator(unittest.TestCase):
         self.assertFalse(any("fdps_run_weapon_shop" in x
                              for v in facts.text_readers(1).values() for x in v))
 
+    def test_a_draw_guarded_against_the_initial_value_does_not_read_it(self):
+        text = ("void f(void)\n{\n    int id;\n    id = A;\n    if (x) { id = B; }\n"
+                "    if (id != A) {\n        draw(id);\n    }\n    draw2(id);\n}\n")
+        at = text.index("draw(id)")
+        self.assertEqual(facts.guarded_out_values(text, at, "id", {"A": "0", "B": "13"}, {}), {0})
+        self.assertEqual(facts.guarded_out_values(text, text.index("draw2"), "id",
+                                                  {"A": "0", "B": "13"}, {}), set())
+
+    def test_the_smith_is_not_a_reader_of_entry_zero(self):
+        self.assertNotIn(0x00, facts.text_readers(16))
+        self.assertIn(0x0d, facts.text_readers(16))
+
+    def test_cut_links_point_at_the_owning_entry(self):
+        self.assertIn("../cut_content/story.md#s11-", facts.cut_wave_link(4, 0xFF))
+        self.assertIn("../cut_content/story.md#s10-", facts.cut_wave_link(28, 4))
+        self.assertIn("_index.md#排除清單", facts.cut_link("S13a"))
+        self.assertIn("../cut_content/items.md#i04-", facts.cut_link(facts.CUT_UNREFERENCED_RECORDS))
+
+    def test_the_header_embeds_the_battlefield(self):
+        self.assertIn("](maps/ch03.png)", facts.block_header(3, None))
+        self.assertIn("](maps/ch30_L1.png)", facts.block_header(30, None))
+
     def test_transcript_marks_speakers_breaks_and_pages(self):
         lines = facts.transcript(3, 0x09)
         self.assertEqual(lines[0], "【蘭迪斯】（角色 0）")
@@ -238,8 +260,8 @@ class Gate(unittest.TestCase):
 class Index(unittest.TestCase):
     def test_every_chain_must_cite_a_function(self):
         import index
-        text = index.build_text("## 跨章機制鏈\n\n### 甲\n\n沒有引用。\n\n### 乙\n\n"
-                                "由 `fdps_chapter_03_init`（`0x20f30`）決定。\n")
+        text = index.build_text(None, "## 跨章機制鏈\n\n### 甲\n\n沒有引用。\n\n### 乙\n\n"
+                                "由 `fdps_chapter_03_init`（`0x20f30`）決定。")
         found = [f for f in index.check(text) if f[1] == "uncited-chain"]
         self.assertEqual(len(found), 1)
         self.assertIn("甲", found[0][3])

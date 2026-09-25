@@ -59,6 +59,7 @@ WS = ROOT / "workspace" / "chapter_docs"
 FACTS = WS / "facts"
 DRAFTS = WS / "drafts"
 JUDGEMENTS = Path(__file__).resolve().parent / "judgements"
+MAPS_DIR = ROOT / "chapters" / "maps"          # the annotated battlefields the pages embed
 SRC = ROOT / "src"
 
 CHAPTERS = range(1, 31)
@@ -185,6 +186,55 @@ def parse_entry(value):
 KIND_LABEL = cs.KIND_LABEL
 
 
+# ---------------------------------------------------------------------------
+# Links into cut_content/ (owned by tools/cut_content)
+# ---------------------------------------------------------------------------
+
+# Unreachable deployment waves and the cut_content/ entry that owns them:
+# every wave-0xFF record is S11; chapter 28's wave 4 is S10 (story.md).
+CUT_WAVE_ENTRY = {(None, 0xFF): "S11", (28, 4): "S10"}
+# Search records no cell references (items.md).
+CUT_UNREFERENCED_RECORDS = "I04"
+EXCLUSIONS_ANCHOR = "排除清單"
+
+
+@lru_cache(maxsize=None)
+def _cut_entries():
+    """({entry id: (page, anchor)}, {exclusion ids}) out of cut_content/."""
+    sys.path.insert(0, str(TOOLS / "cut_content"))
+    import cut_content as cutc
+    import story
+    entries, _ = cutc.collect(cutc.CUT_DIR)
+    pages = {e.id: (cutc.TOPICS[e.topic][0], story.slug(f"{e.id} {e.title}")) for e in entries}
+    index = (cutc.CUT_DIR / "_index.md").read_text(encoding="utf-8")
+    return pages, set(cutc.exclusion_ids(index))
+
+
+def cut_link(entry_id, text=None):
+    """A Markdown link to a cut_content/ entry, or to the exclusion list, or,
+    for an id cut_content/ does not know, to its index."""
+    pages, exclusions = _cut_entries()
+    if entry_id in pages:
+        page, anchor = pages[entry_id]
+        return f"[{text or entry_id}](../cut_content/{page}#{anchor})"
+    if entry_id in exclusions:
+        return f"[{text or entry_id}（排除清單）](../cut_content/_index.md#{EXCLUSIONS_ANCHOR})"
+    return f"[{text or '刪減與未用'}]({CUT})"
+
+
+def cut_wave_link(n, wave):
+    entry = CUT_WAVE_ENTRY.get((n, wave)) or CUT_WAVE_ENTRY.get((None, wave))
+    return cut_link(entry) if entry else f"[刪減與未用]({CUT})"
+
+
+@lru_cache(maxsize=None)
+def text_owners():
+    """{(block, entry): cut_content id} for text nothing shows (story.OWNERS)."""
+    sys.path.insert(0, str(TOOLS / "cut_content"))
+    import story
+    return dict(story.OWNERS)
+
+
 @lru_cache(maxsize=None)
 def game():
     return data_tables.load(DUMP)
@@ -231,9 +281,53 @@ def chapter_text_draws():
             resolved = global_text._resolve(expression, per_file[name], shared,
                                             global_text._function_body(text, pos))
             ids = resolved[0] if resolved and resolved[0] is not None else None
+            if ids is not None and re.fullmatch(r"[A-Za-z_]\w*", expression):
+                excluded = guarded_out_values(text, pos, expression, per_file[name], shared)
+                ids = tuple(i for i in ids if i not in excluded)
             out.append({"file": name, "line": text.count("\n", 0, pos) + 1,
                         "function": global_text._function_at(text, pos),
                         "ids": ids, "expression": expression})
+    return out
+
+
+def _block_end(text, brace):
+    """Index just past the } matching the { at `brace`, or len(text)."""
+    depth = 0
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(text)
+
+
+def guarded_out_values(text, pos, var, local, shared):
+    """Values a local id cannot hold at the draw at `pos`, because the draw sits
+    inside an `if (var != VALUE) {` or `if (var) {` block of the same function.
+
+    global_text's scan folds a local to every value assigned to it, the
+    initializer included; a guard that skips the draw for the initializer
+    (the chapter-16 smith: the reply id starts at 0 and is drawn only when it
+    is not 0) makes that value no reader at all."""
+    body_start = text.rfind("\n", 0, pos)
+    for m in global_text._FUNCTION.finditer(text, 0, pos):
+        body_start = m.start()
+    out = set()
+    guard = re.compile(r"\bif\s*\(\s*" + re.escape(var)
+                       + r"\s*(?:!=\s*(\w+)\s*)?\)\s*\{")
+    for m in guard.finditer(text, body_start, pos):
+        if _block_end(text, m.end() - 1) <= pos:
+            continue
+        if m.group(1) is None:
+            out.add(0)
+            continue
+        value = global_text._macro_value(m.group(1), local, shared)
+        if value is None and re.fullmatch(r"\d+|0[xX][0-9a-fA-F]+", m.group(1)):
+            value = int(m.group(1), 0)
+        if value is not None:
+            out.add(value)
     return out
 
 
@@ -443,6 +537,7 @@ def facts(n):
                                         if i not in readers and entry_line(n, i)],
         "unresolved_draws": unresolved_draws(n),
         "village_before": village_before(n),
+        "map_images": [str(MAPS_DIR / name) for name in map_image_names(n)],
         "_note": "generated by tools/chapter_docs/chapter_facts.py; a lead list, not the page",
     }
 
@@ -567,6 +662,14 @@ def block_header(n, judgement):
     village = village_before(n)
     lines.append("| 本章之前的村莊 | " + (f"`SHOP{village[0]:02d}.DAT`" if village else "無") + " |")
     lines.append(f"| 光碟 | 第 {disc_of(map_no)} 片（音軌見 [CD 音軌](../program_info/cd_audio.md)） |")
+    names = map_image_names(n)
+    lines += ["", f"![第 {n} 章戰場](maps/{names[0]})", "",
+              "戰場全圖（第 0 層與同步捲動的圖層）。框線：黃 `C` 寶箱、橘 `B` 埋藏格、青 `R` 重繪格、"
+              "洋紅 `E` 有處理函式的格子事件格，字母後的數字是事件碼；綠 `P` 是我方 slot 的起始格。"]
+    for name in names[1:]:
+        lines += ["", f"視差圖層另存一張：![第 {n} 章視差圖層](maps/{name})"]
+    lines += ["", "圖由 `python tools/chapter_docs/chapter_facts.py render-maps` 從遊戲檔重畫到 "
+              "`chapters/maps/`，`verify-maps` 逐 byte 比對版控中的圖。"]
     return "\n".join(lines)
 
 
@@ -626,8 +729,8 @@ def block_deployments(n, judgement):
     dat, cod = m["dat"], m["cod"]
     anchors = cod[:dat["spawn_count"]] if cod else []
     party = cod[dat["spawn_count"]:dat["spawn_count"] + dat["player_slots"]] if cod else []
-    lines = ["欄位的意義見 [`resource_info/map.md`](../resource_info/map.md)：陣營、AI 行為"
-             "（低 4 bit）、死亡腳本；錨點是 `MAPnn.COD` 的座標，開場波次放在錨點上，其餘波次依部署"
+    lines = ["陣營與死亡腳本的意義見 [`resource_info/map.md`](../resource_info/map.md)，"
+             "AI 行為（低 4 bit）見 [`program_info/map_ai.md`](../program_info/map_ai.md#行為代碼)；錨點是 `MAPnn.COD` 的座標，開場波次放在錨點上，其餘波次依部署"
              "方式放在錨點或最近的空格。單位名是全域文字的「角色編號 + 1」條；角色編號 `3C` 以上的敵兵，"
              "數值（`ENEMYDAT.DAT`）與種族、職業見 [`assets/enemies.md`](../assets/enemies.md)，"
              "以下的見 [`assets/characters.md`](../assets/characters.md)。", ""]
@@ -659,8 +762,10 @@ def block_deployments(n, judgement):
             continue
         if not verdict["deployed"]:
             why = f"：{verdict['why']}" if verdict.get("why") else ""
-            lines.append(f"{len(records)} 筆記錄（#{records[0]['index']}–#{records[-1]['index']}）"
-                         f"永遠不會部署{why}，見 [刪減與未用]({CUT})。")
+            span = (f"#{records[0]['index']}" if len(records) == 1
+                    else f"#{records[0]['index']}–#{records[-1]['index']}")
+            lines.append(f"{len(records)} 筆記錄（{span}）"
+                         f"永遠不會部署{why}，見 {cut_wave_link(n, w)}。")
             continue
         lines.append(f"出場：{verdict['when']}")
         lines += ["", "| # | 陣營 | 單位 | 等級 | AI 行為 | 錨點 | 死亡腳本 |",
@@ -711,7 +816,7 @@ def block_treasure(n, judgement):
     if unref:
         lines += ["", "沒有任何格引用、拿不到的記錄：" + "、".join(
             f"記錄 {i}（種類 {r['kind']}、內容 `{r['payload'] & 0xFFFF:X}`）" for i, r in unref)
-            + f"，見 [刪減與未用]({CUT})。"]
+            + f"，見 {cut_link(CUT_UNREFERENCED_RECORDS)}。"]
     drops = [s for s in m["dat"]["spawns"] if s["death_op"] in (0, 1)
              and wave_deploys(judgement, s["wave"])]
     lines += [""]
@@ -727,7 +832,8 @@ def block_treasure(n, judgement):
             and not wave_deploys(judgement, s["wave"])]
     if lost:
         lines += ["", f"另有 {len(lost)} 筆掉落在永遠不會部署的波次裡（"
-                  + "、".join(f"#{s['index']}" for s in lost) + f"），拿不到，見 [刪減與未用]({CUT})。"]
+                  + "、".join(f"#{s['index']}" for s in lost) + "），拿不到，見 "
+                  + "、".join(dict.fromkeys(cut_wave_link(n, s["wave"]) for s in lost)) + "。"]
     return "\n".join(lines)
 
 
@@ -900,7 +1006,9 @@ def block_dialogue(n, judgement):
         if not found:
             if i in never:
                 why = f"：{never[i]}" if never[i] else ""
-                lines.append(f"{NEVER_SHOWN_TEXT}{why}，全文見 [刪減與未用]({CUT})。")
+                owner = text_owners().get((n, i))
+                lines.append(f"{NEVER_SHOWN_TEXT}{why}，見 "
+                             f"{cut_link(owner) if owner else f'[刪減與未用]({CUT})'}。")
             else:
                 lines.append("（讀取端未判定）")
             continue
@@ -947,14 +1055,49 @@ def cmd_facts(arg):
     return 0
 
 
-def cmd_render_maps():
-    out = WS / "maps"
+def parallax_layers(m):
+    """Layer numbers render_map writes to a PNG of their own (not in lockstep
+    with the map), in the order it writes them."""
+    return [k for k in map_decode.draw_order(m)
+            if m["layers"][k]["mpl"] is not None and m["layers"][k]["cel_path"].is_file()
+            and not map_decode.lockstep(m["layers"][k])]
+
+
+def map_image_names(n):
+    """The PNG file names of chapter n's battlefield, main image first."""
+    return [f"ch{n:02d}.png"] + [f"ch{n:02d}_L{k}.png" for k in parallax_layers(battle_map(n - 1))]
+
+
+def render_maps(out):
+    """Render all thirty annotated battlefields into `out`; returns the paths."""
     palette = map_decode.load_palette(DUMP)
+    written = []
     for n in CHAPTERS:
-        paths = map_decode.render_map(battle_map(n - 1), palette, out / f"ch{n:02d}.png",
-                                      annotate=True)
-        print(" ".join(str(p) for p in paths))
+        written += map_decode.render_map(battle_map(n - 1), palette, Path(out) / f"ch{n:02d}.png",
+                                         annotate=True)
+    return written
+
+
+def cmd_render_maps(out):
+    for path in render_maps(out):
+        print(path)
     return 0
+
+
+def cmd_verify_maps():
+    """Re-render into a temporary folder and compare byte for byte with
+    chapters/maps/: extra, missing and differing files are reported."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = {p.name: p.read_bytes() for p in map(Path, render_maps(tmp))}
+    kept = {p.name: p.read_bytes() for p in MAPS_DIR.glob("*.png")} if MAPS_DIR.exists() else {}
+    problems = ([f"missing {n}" for n in sorted(set(fresh) - set(kept))]
+                + [f"extra {n}" for n in sorted(set(kept) - set(fresh))]
+                + [f"differs {n}" for n in sorted(set(fresh) & set(kept)) if fresh[n] != kept[n]])
+    for line in problems:
+        print(line)
+    print(f"verify-maps: {len(fresh)} rendered, {len(problems)} problem(s)")
+    return 1 if problems else 0
 
 
 def main(argv=None):
@@ -967,7 +1110,9 @@ def main(argv=None):
     p.add_argument("chapter", type=int)
     p.add_argument("key", choices=sorted(BLOCKS))
     p.add_argument("--draft", action="store_true", help="apply the draft's meta judgement")
-    sub.add_parser("render-maps")
+    p = sub.add_parser("render-maps")
+    p.add_argument("--out", default=str(MAPS_DIR))
+    sub.add_parser("verify-maps")
     a = ap.parse_args(argv)
     if a.cmd == "facts":
         return cmd_facts(a.chapter)
@@ -975,7 +1120,9 @@ def main(argv=None):
         judgement = load_judgement(a.chapter, draft=a.draft)
         print(render_block(a.chapter, a.key, judgement))
         return 0
-    return cmd_render_maps()
+    if a.cmd == "verify-maps":
+        return cmd_verify_maps()
+    return cmd_render_maps(a.out)
 
 
 if __name__ == "__main__":

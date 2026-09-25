@@ -41,7 +41,9 @@ INTRO = """# chapters — 關卡視角
 
 本索引是**跨章事實的唯一擁有者**：四張章節處理表的逐章總表與共用處理函式、跨章機制鏈、章號與資源檔的對照、額外場景地圖的歸屬、村莊與連戰區段都只寫在這裡，章節檔不重複。處理表怎麼被呼叫、回合事件與格子事件怎麼觸發是機制，屬於 `program_info/`；各章頁與本索引只寫內容。
 
-每章頁裡夾在 `<!-- chapter_docs:… -->` 標記之間的區塊與本頁的表，由 [`tools/chapter_docs/`](../tools/chapter_docs/_index.md) 從出貨資料與 `src/` 產生，不直接編輯。"""
+章節裡到不了的內容——永遠不部署的波次、永遠不顯示的對白、額外場景裡的殘留——由 [`cut_content/story.md`](../cut_content/story.md) 擁有，各章頁只寫一行連過去；沒有格子引用的寶物記錄由 [`cut_content/items.md`](../cut_content/items.md) 擁有。
+
+每章頁裡夾在 `<!-- chapter_docs:… -->` 標記之間的區塊（含 `maps/` 的戰場全圖）與本頁的表，由 [`tools/chapter_docs/`](../tools/chapter_docs/_index.md) 從出貨資料與 `src/` 產生，不直接編輯。"""
 
 
 def _mark(key, body):
@@ -198,11 +200,12 @@ def chains_section(current):
     return text
 
 
-def build_text(current):
+def build_text(current, chains=None):
+    """The whole page; chains, when given, is used instead of chains_section."""
     parts = [INTRO]
     for heading, key, fn in TABLES:
         parts.append(f"## {heading}\n\n{_mark(key, fn())}")
-    chains = chains_section(current)
+    chains = chains if chains is not None else chains_section(current)
     if chains:
         parts.append(chains)
     return "\n\n".join(parts) + "\n"

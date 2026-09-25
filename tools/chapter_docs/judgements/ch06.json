@@ -1,0 +1,29 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON05.DAT` `0x053` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_06_init`（`0x20ff0`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 7 筆記錄（右側錨點 (23, 8) 的 `58` 騎兵）被攻擊、法術或道具打倒時，死亡腳本呼叫事件 slot 8 的 `fdps_chapter_06_event_deploy_wave_2`（`0x37170`），以找最近空格的方式部署在左下；他若中毒而死則不會出場"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `MISC.VFS` 的 `CHAPTER.SAF` 圖（`fdps_show_chapter_title_card`（`0x20c60`）），沒有任何程式或腳本畫本章的 0x00"
+    },
+    {
+      "entry": "0x0b",
+      "why": "勝利腳本 `WIN05.DAT` 先 `SWITCH_MAP` 到地圖 46 才畫文字，畫的是 `FDETXT47` 的 0x09 副本；本章區塊的 0x0b 沒有讀取端"
+    },
+    {
+      "entry": "0x0c",
+      "why": "勝利腳本畫的是 `FDETXT47` 的 0x0a 副本，本章區塊的 0x0c 沒有讀取端"
+    }
+  ]
+}

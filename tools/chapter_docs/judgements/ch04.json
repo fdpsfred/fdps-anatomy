@@ -1,0 +1,41 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON03.DAT` `0x0f6` 在最後一段對話前部署在錨點上（`fdps_chapter_04_init`（`0x20f70`）播放），戰鬥開始時就在場，佔單位索引 11–25"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON03.DAT` `0x014` 部署在崖上（錨點第 0 列）追趕法蓮娜，同一支腳本在 `0x051`–`0x059` 讓五人退場，只在過場中出現、不參戰；第 25 章勝利過場 `WIN24.DAT` `0x18b` 重演時再部署一次"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "開場過場 `ICON03.DAT` `0x00c` 部署法蓮娜（單位索引 4），`0x027` 墜崖退場，`0x0bf` 復歸並在 `0x0c1` 放到 (4, 14)，戰鬥中由玩家操作；`WIN24.DAT` `0x183` 重演時再部署一次"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "開場過場 `ICON03.DAT` `0x06e` 部署在 (4, 14) 當法蓮娜的替身，`0x0bd` 退場後法蓮娜被放到同一格，只在過場中出現"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 5 回合敵方階段開始時由 `fdps_chapter_04_event_for_turn`（`0x36f70`）部署在錨點最近的空格（左下角）；在那之前清光波次 1 就已過關，不會出場"
+    },
+    {
+      "wave": 255,
+      "deployed": false,
+      "why": "地圖 3 上唯一的部署處理函式只要波次 5，腳本的 DEPLOY_WAVE 只寫 1–4（腳本的 `0xFF` 表示取選擇分支 0–2，不是 255），沒有任何呼叫以 255 部署"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `Chapter.saf` 的圖（`fdps_show_chapter_title_card`（`0x20c60`）），存檔畫面讀 `0x01`；讀章節區塊 `0x00` 的只有第 16 章的事件，本區塊沒有讀取端"
+    }
+  ]
+}

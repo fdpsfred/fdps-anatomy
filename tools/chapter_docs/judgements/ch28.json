@@ -1,0 +1,61 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 2 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 1 部署（找最近空格），接著畫面捲到上緣停留 12 幀"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 4 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 2 部署（找最近空格）"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "第 6 回合與第 7 回合敵方階段前各一次：回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），6 ÷ 2 與 7 ÷ 2（向零截斷）都是 3，所以這三隻會出場兩組（找最近空格）"
+    },
+    {
+      "wave": 4,
+      "deployed": false,
+      "why": "`fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`）以回合 ÷ 2 取波次，而 `MAP27` 的回合事件排在 2、4、6、7、10…，沒有第 8、9 回合，第 7 回合截斷成 3，沒有任何呼叫得到 4"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 10 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 5 部署（找最近空格）"
+    },
+    {
+      "wave": 6,
+      "deployed": true,
+      "when": "第 12 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 6 部署（找最近空格）"
+    },
+    {
+      "wave": 7,
+      "deployed": true,
+      "when": "第 14 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 7 部署（找最近空格）"
+    },
+    {
+      "wave": 8,
+      "deployed": true,
+      "when": "第 16 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 8 部署（找最近空格）"
+    },
+    {
+      "wave": 9,
+      "deployed": true,
+      "when": "第 18 回合敵方階段前，回合事件 slot 44 呼叫 `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`），以回合 ÷ 2 = 9 部署（找最近空格）"
+    },
+    {
+      "wave": 255,
+      "deployed": false,
+      "why": "沒有任何呼叫以 255 部署：回合事件處理函式的回合 ÷ 2 最大是 9，`ICON27.DAT`／`WIN27.DAT` 沒有 `DEPLOY_WAVE`"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第廿八章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式與 `ICON27.DAT`／`WIN27.DAT` 都不畫這一條"
+    }
+  ]
+}

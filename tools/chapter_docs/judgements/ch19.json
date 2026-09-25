@@ -1,0 +1,39 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 6 回合我方階段開始前，回合表唯一的一筆（第 6 回合、slot 26、陣營階段 2）呼叫 `fdps_chapter_19_event_lancelot_joins`（`0x38180`）部署（找最近空格）；第 6 回合之前就過關則不出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "清場的那一次行動之後，`fdps_chapter_19_post_action`（`0x3ae80`）在結束碼已是 2、回合數 ≤ 20、格子事件旗標元素 `0x11` 未設、裘娜（單位 4）未退場且帶著 `A5` 妖刀村雨時部署（找最近空格），接著詢問是否接受決鬥；任一條件不成立就不出場"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "開場過場 `ICON18.DAT` `0x0c4` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_19_init`（`0x21350`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 6,
+      "deployed": true,
+      "when": "陣營不是 0 的單位走進第 12 列 (0–31, 12) 任一格（格子事件碼 1、slot 27）時，`fdps_chapter_19_event_deploy_wave_6`（`0x381d0`）部署（找最近空格），以格子事件旗標元素 `0x10` 閂住只發生一次"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `Chapter.saf` 的圖（`fdps_show_chapter_title_card`（`0x20c60`）），存檔面板只畫 `0x01`；本章的處理函式與 `ICON18.DAT`／`WIN18.DAT` 都不畫條目 0"
+    },
+    {
+      "entry": "0x0b",
+      "why": "蘭斯洛特的入隊台詞；本章處理函式只畫 `0x0a`、`0x0d`–`0x13`，`ICON18.DAT` 只畫 `0x09`，`WIN18.DAT` 在唯一的 `DRAW_TEXT` 之前已切到地圖 44（改讀 `FDETXT45`），也沒有其他腳本切回地圖 18"
+    },
+    {
+      "entry": "0x0c",
+      "why": "`WIN18.DAT` 切到地圖 44 後畫的是 `FDETXT45` 的 `0x09`（同一段對話，只少一次換頁）；本區塊的這一份沒有任何處理函式或腳本讀取"
+    }
+  ]
+}

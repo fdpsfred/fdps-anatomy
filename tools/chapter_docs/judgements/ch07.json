@@ -1,0 +1,37 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON06.DAT` `0x0e4` 的 `DEPLOY_WAVE`（找最近空格，錨點在上方大門口），由 `fdps_chapter_07_init`（`0x21030`）執行，戰鬥開始前一定出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON06.DAT` `0x112` 的 `DEPLOY_WAVE`（找最近空格，錨點 (12, 4)），由 `fdps_chapter_07_init`（`0x21030`）執行，戰鬥開始前一定出場；第 2 回合敵方階段前 `fdps_chapter_07_event_enemies_advance`（`0x37250`）讓她改為進攻"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `CHAPTER.SAF` 圖（`fdps_show_chapter_title_card`（`0x20c60`）），沒有任何程式或腳本畫本章的 0x00"
+    },
+    {
+      "entry": "0x09",
+      "why": "開場過場 `ICON06.DAT` 先 `SWITCH_MAP` 到地圖 47 才畫撕榜單對話，畫的是 `FDETXT48` 的 0x0b 副本；本章區塊的 0x09 沒有讀取端"
+    },
+    {
+      "entry": "0x0a",
+      "why": "開場過場畫的是 `FDETXT48` 的 0x0c 副本，本章區塊的 0x0a 沒有讀取端"
+    },
+    {
+      "entry": "0x0e",
+      "why": "索爾被假索爾擒住的台詞；那一段在沒有任何腳本切過去的地圖 49，本章的處理函式與腳本也都不畫這一條"
+    },
+    {
+      "entry": "0x0f",
+      "why": "同 0x0e，索爾被擒場景的後半，沒有任何讀取端"
+    }
+  ]
+}

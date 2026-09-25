@@ -1,0 +1,97 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "四名魔戰將軍（地圖單位 13–16）全部退場時，由他們共用的死亡腳本（opcode 2、slot 43）執行 `fdps_chapter_27_event_deploy_wave_1`（`0x39440`）：畫 `0x14` 後以找最近空格的方式部署，只觸發一次"
+    }
+  ],
+  "text_readers": [
+    {
+      "entry": "0x19",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 0 位蘭迪斯的卡片（`0x19` + 名冊索引）"
+    },
+    {
+      "entry": "0x1a",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 1 位尤利安的卡片"
+    },
+    {
+      "entry": "0x1b",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 2 位亞克的卡片"
+    },
+    {
+      "entry": "0x1d",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 4 位裘娜的卡片"
+    },
+    {
+      "entry": "0x1e",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 5 位費塔加的卡片"
+    },
+    {
+      "entry": "0x1f",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 6 位布蘭多的卡片"
+    },
+    {
+      "entry": "0x20",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 7 位蓋亞的卡片"
+    },
+    {
+      "entry": "0x21",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 8 位琴琴的卡片"
+    },
+    {
+      "entry": "0x22",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 9 位瑪麗安的卡片"
+    },
+    {
+      "entry": "0x23",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 10 位蘭斯洛特的卡片"
+    },
+    {
+      "entry": "0x24",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`），名冊第 11 位珊的卡片"
+    },
+    {
+      "entry": "0x25",
+      "reader": "一般結局的片尾字幕 `fdps_play_ending_credit_roll`（`0x1ba40`）越過名冊尾端的最後一張卡片（索引 = 名冊人數 12，固定用 12 號造型），索爾王的後日談"
+    }
+  ],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `fdps_show_chapter_title_card`（`0x20c60`）畫的 `Chapter.saf` 圖，存檔面板只畫 `0x01`；本章的處理函式、死亡腳本與三支過場都不畫條目 0"
+    },
+    {
+      "entry": "0x0c",
+      "why": "逃出崩塌神殿、要裘娜把蘭迪斯敲昏的對話；`WIN26.DAT` 只畫 `0x0a`、`0x0b`，之後切到地圖 62 再切回 26 都不畫字，沒有其他讀取端"
+    },
+    {
+      "entry": "0x0d",
+      "why": "接在 `0x0c` 之後「對不起，得罪你了」；同樣沒有任何腳本或處理函式畫它"
+    },
+    {
+      "entry": "0x13",
+      "why": "法蓮娜說異界入口已開的台詞；`WINGA26.DAT` 在切到地圖 61 之後畫的是 `FDETXT62` 的 `0x09`，本區塊這一版沒有讀取端"
+    },
+    {
+      "entry": "0x15",
+      "why": "塞克斯的臨死台詞；他的死亡腳本是 opcode 2（slot 43）而不是畫字的 opcode 3，那支處理函式只畫 `0x14`"
+    },
+    {
+      "entry": "0x16",
+      "why": "布魯森的臨死台詞；死亡腳本是 opcode 2（slot 43），不畫這一條"
+    },
+    {
+      "entry": "0x17",
+      "why": "汎拉沛的臨死台詞；死亡腳本是 opcode 2（slot 43），不畫這一條"
+    },
+    {
+      "entry": "0x18",
+      "why": "凱因巴的臨死台詞；死亡腳本是 opcode 2（slot 43），不畫這一條"
+    },
+    {
+      "entry": "0x1c",
+      "why": "法蓮娜的後日談；`fdps_play_ending_credit_roll`（`0x1ba40`）在章節索引 `0x1a` 時跳過名冊第 3 格，隱藏路線又不播字幕"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON15.DAT` `0x256` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_16_init`（`0x21290`）執行，戰鬥開始前一定出場；AI 行為 2 原地，第 15 回合敵方階段前由 `fdps_chapter_16_event_enemies_advance_for_turn`（`0x38020`）改成主動"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON15.DAT` `0x261` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_16_init`（`0x21290`）執行，戰鬥開始前一定出場；AI 行為 2 原地，第 5 回合敵方階段前由 `fdps_chapter_16_event_enemies_advance_for_turn`（`0x38020`）改成主動"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "開場過場 `ICON15.DAT` `0x274` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_16_init`（`0x21290`）執行，戰鬥開始前一定出場；AI 行為 2 原地，第 5 回合敵方階段前由 `fdps_chapter_16_event_enemies_advance_for_turn`（`0x38020`）改成主動"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "開場過場 `ICON15.DAT` `0x27c` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_16_init`（`0x21290`）執行，戰鬥開始前一定出場；AI 行為 2 原地，第 5 回合敵方階段前由 `fdps_chapter_16_event_enemies_advance_for_turn`（`0x38020`）改成主動"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": []
+}

@@ -1,0 +1,21 @@
+{
+  "waves": [
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "我方單位第一次走進第 24 列（(0, 24)–(18, 24) 任一格）的那次行動結束後，格子事件 slot 41 呼叫 `fdps_chapter_26_event_deploy_waves_2_and_3`（`0x39230`），第一步就部署（找最近空格，錨點是我方出發地 (6–12, 36)），接著畫文字 `0x0a`；只發生一次"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "同一次 `fdps_chapter_26_event_deploy_waves_2_and_3`（`0x39230`）裡，波次 2 出場、視野移到地圖底部停 12 幀、畫完 `0x0b` 之後部署（找最近空格），接著畫 `0x0c`"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第廿六章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON25.DAT`／`WIN25.DAT` 都不畫這一條"
+    }
+  ]
+}

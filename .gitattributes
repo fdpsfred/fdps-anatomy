@@ -26,5 +26,9 @@ tools/**/*.js text eol=lf
 cut_content/**/*.png binary
 cut_content/**/*.wav binary
 
+# The chapter pages' annotated battlefields, regenerated from the game files by
+# tools/chapter_docs/chapter_facts.py render-maps.
+chapters/maps/*.png binary
+
 # The ETen font files are raw bitmaps; any line-ending conversion corrupts them.
 tools/glyph/ET3_fonts/*.15 binary

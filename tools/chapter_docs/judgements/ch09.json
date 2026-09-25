@@ -1,0 +1,69 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 15 回合我方行動結束、敵方階段開始前，`MAP08.DAT` 的回合事件呼叫事件 slot 14 的 `fdps_chapter_09_event_deploy_wave_1`（`0x37730`），以找最近空格的方式部署在右側平台（布蘭多與蓋亞的起始區）；在那之前敵人已全滅就不會出場"
+    },
+    {
+      "wave": 255,
+      "deployed": false,
+      "why": "本章唯一的部署處理函式 `fdps_chapter_09_event_deploy_wave_1`（`0x37730`）只要波次 1，`ICON08.DAT` 在地圖 8 上沒有 `DEPLOY_WAVE`，沒有任何呼叫以 255 部署地圖 8"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章名卡是 `CHAPTER.SAF` 圖（`fdps_show_chapter_title_card`（`0x20c60`）），沒有任何程式或腳本畫本章區塊的 0x00"
+    },
+    {
+      "entry": "0x09",
+      "why": "`ICON08.DAT` 在地圖 54 畫的是 `FDETXT55` 的 0x09 副本，本章區塊的 0x09 沒有讀取端"
+    },
+    {
+      "entry": "0x0a",
+      "why": "`ICON08.DAT` 在地圖 54 畫的是 `FDETXT55` 的 0x0a 副本，本章區塊的 0x0a 沒有讀取端"
+    },
+    {
+      "entry": "0x0b",
+      "why": "`ICON08.DAT` 在地圖 54 畫的是 `FDETXT55` 的 0x0b 副本，本章區塊的 0x0b 沒有讀取端"
+    },
+    {
+      "entry": "0x0c",
+      "why": "`ICON08.DAT` 在地圖 54 畫的是 `FDETXT55` 的 0x0c 副本，本章區塊的 0x0c 沒有讀取端"
+    },
+    {
+      "entry": "0x0d",
+      "why": "`ICON08.DAT` 在地圖 55 畫的是 `FDETXT56` 的 0x09 副本，本章區塊的 0x0d 沒有讀取端"
+    },
+    {
+      "entry": "0x0e",
+      "why": "`ICON08.DAT` 在地圖 55 畫的是 `FDETXT56` 的 0x0a 副本，本章區塊的 0x0e 沒有讀取端"
+    },
+    {
+      "entry": "0x0f",
+      "why": "`ICON08.DAT` 在地圖 55 畫的是 `FDETXT56` 的 0x0b 副本，本章區塊的 0x0f 沒有讀取端"
+    },
+    {
+      "entry": "0x10",
+      "why": "`ICON08.DAT` 在地圖 55 畫的是 `FDETXT56` 的 0x0c 副本，本章區塊的 0x10 沒有讀取端"
+    },
+    {
+      "entry": "0x11",
+      "why": "布蘭多命令蓋亞一起出去的對話；它在 `FDETXT56` 的副本 0x0d 也沒有腳本畫，兩個區塊都沒有讀取端"
+    },
+    {
+      "entry": "0x14",
+      "why": "勝利腳本 `WIN08.DAT` 先切到地圖 57，畫的是 `FDETXT58` 的 0x09，本章區塊的 0x14 沒有讀取端"
+    },
+    {
+      "entry": "0x15",
+      "why": "勝利腳本畫的是 `FDETXT58` 的 0x0a 副本，本章區塊的 0x15 沒有讀取端"
+    },
+    {
+      "entry": "0x16",
+      "why": "勝利腳本畫的是 `FDETXT58` 的 0x0b 副本，本章區塊的 0x16 沒有讀取端"
+    }
+  ]
+}

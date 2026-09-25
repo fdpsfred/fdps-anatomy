@@ -1,0 +1,40 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 1 回合我方行動結束、敵方階段開始前，`fdps_battle_run_turn_events`（`0x2e0c0`）執行 `MAP21.DAT` 回合事件第 0 筆（回合 1、slot 31），`fdps_chapter_22_event_for_turn`（`0x384e0`）先畫 `0x0c` 再以波次 1 呼叫 `fdps_deploy_wave`（`0x23830`），放在錨點最近的空格"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 3 回合敵方階段開始前，`fdps_chapter_22_event_for_turn`（`0x384e0`）先畫 `0x0d` 再部署波次 2，放在錨點最近的空格"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "第 5 回合敵方階段開始前，`fdps_chapter_22_event_for_turn`（`0x384e0`）先畫 `0x0e` 再部署波次 3，放在錨點最近的空格，接著鏡頭掃過地圖左上與右上"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "第 8 回合敵方階段開始前，`fdps_chapter_22_event_for_turn`（`0x384e0`）先畫 `0x11` 再部署波次 4，放在錨點最近的空格；波次 4 在波次 5 之後才出場，幽魂與骷顱兵到第 9 回合才由同一支函式改成行為 0"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 5 回合敵方階段開始前，與波次 3 同一次呼叫：`fdps_chapter_22_event_for_turn`（`0x384e0`）部署波次 3、掃鏡頭、畫 `0x0f` 後部署波次 5，放在錨點最近的空格"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第廿二章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON21.DAT`／`WIN21.DAT` 都不畫這一條"
+    },
+    {
+      "entry": "0x0b",
+      "why": "眾人服下失魂藥前的對話；勝利過場 `WIN21.DAT` 只畫 `0x0a`，沒有任何處理函式、死亡腳本或其他地圖的腳本畫 `FDETXT22` 的這一條"
+    }
+  ]
+}

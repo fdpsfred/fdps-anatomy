@@ -1,0 +1,52 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON00.DAT` `0x565`（切回地圖 0 之後、找最近空格）部署索爾，成為單位 2；`0x591` 放到 (14, 14)、`0x596` 復歸；由 `fdps_chapter_01_init`（`0x20e90`）播放"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON00.DAT` `0x553` 部署追索爾的野武士（找最近空格），成為單位 1；由 `fdps_chapter_01_init`（`0x20e90`）播放"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "開場過場 `ICON00.DAT` `0x5a6`，野武士喊出同夥（`0x0c`）之後部署（找最近空格）；由 `fdps_chapter_01_init`（`0x20e90`）播放"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "開場過場 `ICON00.DAT` `0x5ae`，緊接波次 3 部署（找最近空格）；由 `fdps_chapter_01_init`（`0x20e90`）播放"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "開場過場 `ICON00.DAT` `0x5b6`，緊接波次 4 部署（找最近空格）；由 `fdps_chapter_01_init`（`0x20e90`）播放"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "章節標題是 `fdps_show_chapter_title_card`（`0x20c60`）依章節索引畫的 `Chapter.saf` 圖，沒有任何程式或腳本讀本區塊的 `0x00`"
+    },
+    {
+      "entry": "0x04",
+      "why": "店員台詞只由村莊階段讀，而村莊載入的是「章節索引 + 1」的文字區塊（`fdps_load_field_chapter_resources`（`0x31540`））；章節索引 0 的村莊不存在，所以沒有村莊會讀 `FDETXT01`"
+    },
+    {
+      "entry": "0x05",
+      "why": "同 `0x04`：武器店台詞只在村莊讀，而沒有任何村莊載入 `FDETXT01`（`fdps_load_field_chapter_resources`（`0x31540`））"
+    },
+    {
+      "entry": "0x06",
+      "why": "同 `0x04`：酒館台詞只在村莊讀，而沒有任何村莊載入 `FDETXT01`（`fdps_load_field_chapter_resources`（`0x31540`））"
+    },
+    {
+      "entry": "0x0e",
+      "why": "索爾硬撐後倒下、蘭迪斯帶他回家治療的過關台詞；`fdps_chapter_01_end`（`0x3a410`）不畫字，`WIN00.DAT` 第一步就切到地圖 36，沒有任何處理函式、死亡腳本或過場讀它"
+    }
+  ]
+}

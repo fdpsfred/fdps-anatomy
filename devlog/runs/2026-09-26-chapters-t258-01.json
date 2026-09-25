@@ -1,0 +1,1229 @@
+{
+  "date": "2026-09-26",
+  "halted": false,
+  "haltReason": "",
+  "chaptersRequested": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30
+  ],
+  "drafted": [
+    {
+      "chapter": 1,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 2,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 3,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 4,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 5,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 6,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 7,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 8,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 9,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 10,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 11,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 12,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 13,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 14,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 15,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 16,
+      "confidence": "high",
+      "open": 1
+    },
+    {
+      "chapter": 17,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 18,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 19,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 20,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 21,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 22,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 23,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 24,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 25,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 26,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 27,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 28,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 29,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 30,
+      "confidence": "high",
+      "open": 0
+    }
+  ],
+  "landed": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30
+  ],
+  "rescanned": [
+    {
+      "chapter": 3,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 16,
+      "confidence": "high",
+      "open": 1
+    },
+    {
+      "chapter": 23,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 24,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 29,
+      "confidence": "high",
+      "open": 0
+    },
+    {
+      "chapter": 30,
+      "confidence": "high",
+      "open": 0
+    }
+  ],
+  "land": [
+    {
+      "label": "land-r1",
+      "results": [
+        {
+          "chapter": 1,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 2,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 3,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 4,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 5,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 6,
+          "status": "new",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 3,
+      "ok": true,
+      "problems": "None. Pending-link warnings (not errors): ch04 line 264 -> ch25.md; ch06 line 33 -> ch26.md; ch06 line 184 -> ch07.md."
+    },
+    {
+      "label": "land-r2",
+      "results": [
+        {
+          "chapter": 7,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 8,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 9,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 10,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 11,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 12,
+          "status": "new",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 2,
+      "ok": true,
+      "problems": "None. ch12 has 2 pending-chapter warnings (links to ch16.md line 42 and ch13.md line 139, not landed yet)."
+    },
+    {
+      "label": "land-r3",
+      "results": [
+        {
+          "chapter": 13,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 14,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 15,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 16,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 17,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 18,
+          "status": "new",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 1,
+      "ok": true,
+      "problems": "None. One pending-link warning: ch18 line 313 links to ch19.md, which has not landed yet."
+    },
+    {
+      "label": "land-r4",
+      "results": [
+        {
+          "chapter": 19,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 20,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 21,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 22,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 23,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 24,
+          "status": "new",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 4,
+      "ok": true,
+      "problems": "None. Pending-chapter warnings: ch20 line 54 -> ch25; ch23 line 49 -> ch27; ch24 line 214 -> ch27; ch24 line 289 -> ch25."
+    },
+    {
+      "label": "land-r5",
+      "results": [
+        {
+          "chapter": 25,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 26,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 27,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 28,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 29,
+          "status": "new",
+          "detail": ""
+        },
+        {
+          "chapter": 30,
+          "status": "new",
+          "detail": ""
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 0,
+      "ok": true,
+      "problems": ""
+    },
+    {
+      "label": "land-rescan",
+      "results": [
+        {
+          "chapter": 3,
+          "status": "updated"
+        },
+        {
+          "chapter": 16,
+          "status": "unchanged"
+        },
+        {
+          "chapter": 23,
+          "status": "updated"
+        },
+        {
+          "chapter": 24,
+          "status": "updated"
+        },
+        {
+          "chapter": 29,
+          "status": "updated"
+        },
+        {
+          "chapter": 30,
+          "status": "updated"
+        }
+      ],
+      "landed_gate_errors": 0,
+      "pending_links": 0,
+      "ok": true,
+      "problems": ""
+    }
+  ],
+  "index": {
+    "chains": {
+      "wrote_file": true,
+      "build_errors": 0,
+      "verify_errors": 0,
+      "ok": true,
+      "problems": "All 30 chapter pages had landed. I wrote C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\chapter_docs\\drafts\\_index_chains.md. `index.py verify` reports one error, \"stale\", which only means chapters/_index.md has not been rebuilt yet; there are 0 other errors. I checked the key cross-chapter links against src/ before citing them: the roster adds are all unconditional in the init handlers, fdps_chapter_27_end and fdps_chapter_30_end, the chapter-index branch in fdps_play_ending_credit_roll, fdps_chapter_18_end (seal to hero badge), fdps_chapter_state_reset clearing the flags, fdps_village_select_member locking roster slot 3 from index 0x17, fdps_church_promote_loop's hero-badge route, the metal ore to cannon trade in fdps_apply_item_effect_to_targets, the slot-4/slot-8 MP regen in fdps_battle_advance_turn, and the roster write-back matching by character id. The remaining per-chapter details (turn limits, wave numbers, ch8/ch10 rewards) come from the drafters' cross_chapter notes and link to the chapter pages."
+    },
+    "build": {
+      "wrote_file": true,
+      "build_errors": 0,
+      "verify_errors": 0,
+      "ok": true,
+      "problems": ""
+    }
+  },
+  "pitfallVerdicts": [
+    {
+      "id": "ch28-reinforcement-wave-halving",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x39550, where the turn counter is halved as a signed value that rounds toward zero before the call to fdps_deploy_wave, and in src/chevt6.c. The existing chapter 28 reinforcements row in pitfalls.md already covers this, but its canonical column did not link chapters/ch28.md."
+    },
+    {
+      "id": "ch01-sol-death-line-twice",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a3b0 and in src/chpost1.c. The unit-2 retired test is the only guard on both the text draw and the store of end code 1, and the poison tick never calls the death-script runner. No pitfalls row or earlier verdict covers this, so a new row goes under 不能修的原版 bug and links chapters/ch01.md."
+    },
+    {
+      "id": "ch01-sol-poison-set-after-cutscene",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x20e90 (unit-2 poison byte and 16-bit HP stores after the Icon00.dat run) and src/chinit1.c; no existing pitfalls row or earlier verdict covers these stores or their ordering, so one row was proposed for the section on data that must not be read literally (不能照字面理解的資料), linking program_info/chapter.md and chapters/ch01.md."
+    },
+    {
+      "id": "ch01-end-spell-before-writeback",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a410 (fdps_set_flag_bit(0,0) called before fdps_roster_write_back_battle_units) and in src/chend1.c, whose comment already cites pitfalls.md, but no existing row covers it, so a new row goes under 不能換的型別與寫法 linking program_info/chapter.md and chapters/ch01.md."
+    },
+    {
+      "id": "ch02-julian-joins-at-init-not-at-victory",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x20ef0 (PUSH 6 / CALL fdps_roster_add_character before CALL fdps_chapter_state_reset) and in src/chinit1.c; the existing chapter-init row already covers the add having to come before the reset, where a late add leaves the joiner's slot as a zeroed retired spare, but that row's 正典 column did not link assets/characters.md, so the verdict adds that link and chapters/ch02.md."
+    },
+    {
+      "id": "ch02-advance-event-leaves-six-guards",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra at 0x36d00 and src/chevt1.c both show the event releasing only seven hardcoded unit indices, and those indices are map-unit indices, not deployment record numbers; no existing row or earlier verdict covers this, so one new row goes under 不能照字面理解的資料."
+    },
+    {
+      "id": "turn-wave-reads-pre-increment-counter",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Verified at 0x36bb0 (counter minus 1 into fdps_deploy_wave) and at 0x1e3f0 (side-1 and side-0 turn events run before the increment); the one natural rebuild error, moving the increment ahead of event dispatch, is already stated in the chapter-28 row of pitfalls.md, which links program_info/chapter.md."
+    },
+    {
+      "id": "ch04-unit-indices-count-cutscene-units",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x36f70 (literal index loops 0xf..0x12 and 0xd, cursor 0x1f) against chapters/ch04.md's unit-index table, where ICON03's retired cutscene units keep their slots so the release hits the mode-2 east group; no pitfalls row or earlier verdict covers cutscene-retired units occupying indices, so a new row was drafted for 不能照字面理解的資料."
+    },
+    {
+      "id": "ch05-sol-defeat-is-death-script",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a5d0 (only fdps_unit_is_retired(3) after the shared test) and 0x1d990 (death-script opcode 5 sets defeat), but adding a test to match the displayed lose text is already covered by the chapter-14/chapter-20 rows (conditions follow handlers and MAP%02d.DAT) and the ch01-sol-death-line-twice verdict."
+    },
+    {
+      "id": "tile-event-trigger-any-side",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra that fdps_map_set_pending_tile_event (0x2e030) has no side test, that the enemy turn phase dispatches the pending handler with the acting enemy's index, and that fdps_chapter_05_event_enemies_advance ignores who triggered it, while the guide says \"己方一通過\"; no existing row or verdict covers it, so a new row went under 不能加的檢查."
+    },
+    {
+      "id": "poison-death-skips-death-scripts",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that fdps_battle_tick_status_effects (0x1fa30) and 0x1d6c0 never collect or run death scripts, and no existing pitfalls row or earlier verdict warns against routing poison deaths through a shared on-death hook, so a new row was added under 不能修的原版 bug."
+    },
+    {
+      "id": "ch06-ambush-ai-range-includes-guest",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x37170 and in src/chevt1.c that the literal inclusive range 4..0x22 sweeps NPC Sol into the advance; no existing pitfalls row or earlier verdict covers this, so a new row goes under 不能照字面理解的資料 linking ../chapters/ch06.md."
+    },
+    {
+      "id": "ch07-promised-prize-not-paid",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a6d0 (only sweep, writeback, WIN06 script, revive, chapter store; no gold write) and src/chend1.c, with no money opcode in the cut-scene set; no existing row or earlier verdict covers a dialogue/guide-promised reward that is never paid, so a new row goes under 不能照字面理解的資料."
+    },
+    {
+      "id": "ch07-post-action-no-farlena-test",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed that 0x3a6b0 only calls the shared check at 0x3a2e0, with no slot-3 test, but the existing chapter-14 row already names the error of copying the chapter 4/5/6 slot-3 defeat test and its canon column lacks chapters/ch07.md."
+    },
+    {
+      "id": "ch08-clear-needs-one-escape-not-four",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a710: the handler never calls the shared end check at 0x3a2e0, and the villager test only records a clear when all four are gone and the escape tally at [0x640e9] is not zero; no existing pitfalls row or earlier verdict covers this victory rule, so one row was added under 不能照字面理解的資料 linking ../chapters/ch08.md."
+    },
+    {
+      "id": "ch08-escape-reward-tested-before-retire",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x37600 and in src/chevt2.c: the handler counts retired villagers and checks for 3 before it marks the current villager retired (00037724), pays only when the escape tally is > 1, and gives the item to unit 0x13 while ignoring what fdps_unit_add_item returns; no existing row or earlier verdict covers this, so one new row goes under 不能修的原版 bug."
+    },
+    {
+      "id": "ch09-guest-add-order",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed: Ghidra shows 0x210b0 adding character 8 and then character 9, and src/chinit1.c matches, but a natural rebuild keeps that order and adding by ascending id also gives 8 before 9; the real ordering hazard is already in pitfalls.md's chapter-init row."
+    },
+    {
+      "id": "ch10-escape-count-includes-retired",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3a8c0: it never calls 0x3a2e0 and counts units 0-7 that are on row 0x17 or retired, winning only on exactly 8. src/chpost1.c matches; no pitfalls row or earlier verdict covers chapter 10's escape rule."
+    },
+    {
+      "id": "ch10-door-wave-signed-no-lower-bound",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed a signed JG on turn <= 13 at 0x37780, matched by src/chevt2b.c. The turn counter never goes negative and MAP09.DAT calls the handler only on turns 3, 6-13 and 19, so an unsigned rebuild behaves the same on every reachable value and gets nothing wrong."
+    },
+    {
+      "id": "ch11-turn-waves-crossed",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x378f0 (turn==4 deploys wave 5, else wave 4 with cursor pans on literal units 0x34/0x2c) and in src/chevt2b.c; no existing pitfalls row or earlier verdict covers chapter 11's crossed turn-to-wave mapping, so a new row was added under 不能照字面理解的資料."
+    },
+    {
+      "id": "three-way-choice-cancel-is-no",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "The behaviour checks out in Ghidra at 0x22600 (the answer starts at 3, then two tests of the answer against 0, with no loop), in src/icon.c and in the cutscene docs, but a straight rebuild of that code already gets it right; the mistakes the candidate describes are redesigns a rebuild would not make by default."
+    },
+    {
+      "id": "ch13-advance-range-literal",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x379d0 (literal 9..0x2c inclusive vs MAP12.DAT units 9..0x2d), but the pattern of a literal advance range that must not be widened to unit_count or have its upper bound fixed is already the earlier ch06-ambush-ai-range-includes-guest verdict's row, and the ch13 specifics already live in the src/chevt2b.h and plate comments."
+    },
+    {
+      "id": "ch13-advance-lost-on-poison-death",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x1fa30 that a poison death gets no death-script collection, but the earlier poison-death-skips-death-scripts verdict already covers the same mechanism and the same shared-on-death-hook mistake, linking program_info/battle.md."
+    },
+    {
+      "id": "win-test-ignores-pending-waves",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that 0x3aad0 only calls the shared end test 0x3a2e0, and that test sweeps only the units already in the array, but a straight transcription reproduces this and the two errors the candidate describes need deliberate new code, so they are redesigns rather than natural mistakes."
+    },
+    {
+      "id": "chest-thief-escape-loses-item",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x10010 and in src/mapai.c: when a behaviour-7 unit arrives, the game only stores flags = 1 and never runs the death script, and map.md shows retired units are never collected for death scripts, so the stolen item is lost; no existing pitfalls row or verdict covers this, so a new row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch15-duel-post-action-skips-default-test",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that at 0x3ab30 the shared end test (0x3a2e0) is called only when flag 0x640e8 is clear, and chapter 19 (0x3ae80) has the same shape; no existing pitfalls row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法 linking program_info/chapter.md and chapters/ch15.md."
+    },
+    {
+      "id": "ch15-murasame-bag-full-equality",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3ab30: after the win text, CMP EAX,8 / JZ skips both the reward text and fdps_unit_add_item and goes straight to the cleared end code, so a full bag gets no swap prompt and no message. src/chpost1.c matches, and no existing pitfalls row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch15-duel-turn-limit-inclusive",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x37b70 (CMP [0x69ce8],0x19 / JG) and in src/chevt3.c (turn <= CH15_DUEL_LAST_TURN), but a single literal compare in one function transcribes naturally as <= 25 and the page wording is already inclusive, so it belongs in the function's own comment rather than the cross-function pitfalls table."
+    },
+    {
+      "id": "ch16-smith-latch-before-sword-check",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the latch is stored at 0x37d37 after the greeting and before the first bag search at 0x37d42, while other reward handlers (ch15 duel, ch23 ring) latch only when the exchange happens, so a rebuild written the natural way would give an extra chance; no existing row covers this, so a new row goes under 不能修的原版 bug."
+    },
+    {
+      "id": "ch16-advance-ranges-are-array-indices",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x38020: two inclusive loops, 0x19..0x22 on turn 5 and 0x0a..0x19 otherwise, overlapping at 0x19. Checked against chapters/ch16.md, where MAP15.DAT's wave 0 records (0-8 and 15-18) are interleaved with other waves, so the 'record index + player slots' rule from the ch02 verdict fails here, and no existing row or verdict covers this (the src/chevt3.c comment itself states the wrong +10 mapping)."
+    },
+    {
+      "id": "shared-end-test-watches-unit-3-in-ch17",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and in src/btlend.c: for chapter id 0x10 or 0x15, the shared end test at 0x3a2e0 checks unit 3 instead of unit 0; no existing row or earlier verdict covers why chapter 17 depends on this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch18-promotion-sweep-nine-units",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3ada0: the loop has a literal bound of 9 and compares rec+0x07 with rec+0x08, and src/chend2.c does the same. No existing pitfalls row or earlier verdict covers this sweep, which checks the unpromotable 蓋亞 but skips the promotable 瑪麗安, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch18-badge-trade-before-writeback",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra at 0x3ada0 shows the chapter-18 seal-for-badge trade on unit 0 happening before the call to fdps_roster_write_back_battle_units, and src/chend2.c matches; no existing pitfalls row or earlier verdict covers this ordering, so a new row for the section 不能換的型別與寫法 is in the verdict file."
+    },
+    {
+      "id": "ch19-duel-challenger-hardcoded-index",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the literal 0x4d settle test and the 0..0x4c retire sweep, and pitfalls.md already has a chapter 19/24 duel row that covers both and links ../program_info/known_bugs.md in its 正典 column."
+    },
+    {
+      "id": "ch19-end-recovery-gate-is-offer-not-fight",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the check: fdps_chapter_19_end gates its roster recovery only on the duel latch, and fdps_chapter_19_post_action sets that latch on both answers; no existing pitfalls row covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch19-end-recovery-before-writeback",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: the gated recovery sweep in fdps_chapter_19_end (0x3b0b0), and the identical one in fdps_chapter_24_end (0x3b600), runs before the call to fdps_roster_write_back_battle_units, and no existing row or earlier verdict covers where it sits, so a new row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch20-farena-defeat-string-not-enforced",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and src: at 0x3b150, while the turn is 0x11 or lower, the chapter 20 post-action handler releases three held enemies through 0x36b60, then always calls the shared end test at 0x3a2e0 and never checks unit 3; src/chpost2.c matches. The existing chapter 20 row in pitfalls.md already warns against adding a slot-3 defeat from the on-screen text but does not link chapters/ch20.md, so the verdict adds that link."
+    },
+    {
+      "id": "ch20-release-schedule-skips-units",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3b150: the handler releases three units per turn at turn+12, turn+29 and turn+46 while the turn is 17 or less (checked with a signed compare), and src/chpost2.c matches. Earlier verdict rows already cover the same pattern: release events rewrite fixed unit-index ranges, those indices are array positions rather than deployment-record numbers, and \"fixing\" the constants releases units the original keeps parked (ch02/ch06/ch16, with the ch13 precedent)."
+    },
+    {
+      "id": "ch20-sword-swap-unequips",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x382f0: the event removes the sword with fdps_unit_remove_item and then adds 0xa1 with fdps_unit_add_item, which writes 0 over the flag byte, so the new sword is unequipped; the only existing row about this is the village-transfer row, which does not cover a chapter-event upgrade."
+    },
+    {
+      "id": "ch21-advance-range-past-unit-count",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x38400: the loop runs over the literal range 0xb..0x50 with an inclusive (JLE) bound, as in src/chevt4.c, and chapters/ch21.md records the write past the array when wave 2 comes first; the literal-range shape is already in the ch06/ch16 rows and the past-the-array heap write in the existing heap-neighbour row, so the verdict only adds a chapters/ch21.md link to that row's source column."
+    },
+    {
+      "id": "ch22-victory-only-from-boss-event",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: 0x3b270 only tests unit 3 and never calls 0x3a2e0, and at 0x388b0 both gates jump to the end-code-2 store. No pitfalls row or earlier verdict covers adding the shared-test forward or moving the clear into the gift branch, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch22-turn-to-wave-order",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x384e0 and in src/chevt4.c. The same wrong assumption, that wave number equals appearance order, is already in the row from the earlier ch11-turn-waves-crossed verdict, and this one-function detail is already written in the src/chevt4.h comment, which is where pitfalls.md says one-function details belong."
+    },
+    {
+      "id": "ch22-boss-flags-cleared-before-dying-line",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: 0x388b0 clears unit 0x0b's +5 byte before drawing the line, and 0x38950 does the same in chapter 23; no existing row or verdict covers this, so a row was added with the consequence corrected per program_info/dialog.md: dropping the clear changes how the window opens and removes a second death animation, and the speaker's portrait still shows."
+    },
+    {
+      "id": "ch23-turn3-deploys-two-waves",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x38a30 and in src/chevt4.c that turn 3 deploys wave 7 then wave 3, but it is a single-function detail already stated as a rebuild warning in the src/chevt4.h comment and the Ghidra plate comment, which is where pitfalls.md says such details belong (same as the ch22-turn-to-wave-order precedent)."
+    },
+    {
+      "id": "ch23-arrival-wave-is-turn-plus-four",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x38a30 (turn <= 5 pushes turn+4 to fdps_deploy_wave) and in src/chevt4.c, but the wave-is-not-turn misconception is already the ch11-turn-waves-crossed verdict's row and this single-function detail sits in the src/chevt4.h comment, matching the ch22/ch23 precedents."
+    },
+    {
+      "id": "ch23-reaper-index-depends-on-opening-deploy-order",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed literal unit index 0x20 in 0x38950 and 0x38a30 and the ICON22.DAT wave-2-before-wave-1 order, but a literal rebuild with the shipped script is correct and the remaining error (re-deriving hard-coded unit indices from wave order instead of the cutscene's deployment history) is already covered by the earlier ch04-unit-indices-count-cutscene-units verdict's row."
+    },
+    {
+      "id": "ch23-ring-latch-set-last",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and src/chevt4.c at 0x38b60: three short-circuit gates (latch, char 7, item_count != 8) guard the whole body and the latch is set only after fdps_unit_add_item; no existing row or earlier verdict covers this late-latch ordering, so a new row went into 不能換的型別與寫法."
+    },
+    {
+      "id": "ch23-second-loss-is-map-unit-31",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3b2e0 (unit 3 test, else fdps_unit_is_retired(0x1f) with entry 0x14, no shared-test call), but the only natural error of rewriting the loss from the displayed text as party slot 0 is already covered by the chapter-14/20 text-vs-handler rows and the earlier ch17 shared-end-test verdict, per the ch05 precedent; note the src/chpost2.c/.h comments still call 0x1f's identity unestablished although chapters/ch23.md settles it."
+    },
+    {
+      "id": "ch23-time-limit-is-a-walk",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed that 0x3b2e0 has no turn check (only unit 3 and unit 0x1f retirement tests) and that behaviour 7 at 0x10010 retires the walker when it arrives; the natural error of adding the guide's twenty-turn loss is already covered by the existing pitfalls row on guide-listed loss conditions, but that row's canon column does not yet link chapters/ch23.md."
+    },
+    {
+      "id": "ch24-duel-skips-default-end-check",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Ghidra at 0x3b3d0 and chapters/ch24.md confirm the candidate, but an earlier verdict (ch15-duel-post-action-skips-default-test) already adds a row that covers chapters 15, 19 and 24: once the duel flag is set, the shared end check is skipped and either duel result counts as a clear."
+    },
+    {
+      "id": "ch24-end-recovery-gated-on-offer-not-acceptance",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and src/chend2.c that fdps_chapter_24_end gates its free recovery only on the duel flag that fdps_chapter_24_post_action raises on both answers; the earlier ch19 gate verdict covers only chapter 19's separate handler and no existing row covers chapter 24's gate."
+    },
+    {
+      "id": "ch24-duel-refusal-line-destination",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x3b3d0: the panel is closed at 0003b557, then the acceptance line 0x17 is drawn to 0xa0000 (0003b570) and the refusal line 0x18 to 0xaa44a (0003b5d9); src/chpost2.c matches, fdps_chapter_19_post_action has the same shape, and no existing row or earlier verdict covers it, so a row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch24-masamune-added-outside-branch",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3b3d0 and in src/chpost2.c: JZ 0x3b466 skips only the Muramasa removal, and the Masamune is added on every win. Juna can discard the Muramasa mid-duel through the battle item menu, so the difference shows up in play. No existing pitfalls row or earlier verdict covers it, so a new row goes under 不能加的檢查."
+    },
+    {
+      "id": "ch26-sol-defeat-watches-last-guard",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Verified at 0x3b760: the second loss check fires only when the byte at 0x640e8 equals 1 and unit 0x5b is retired, and 0x39230 sets that byte to 1 as its last step; copying this code as written is already correct, and changing the loss to Sol's slot to match the on-screen text is the error the chapter-14 and chapter-20 rows already cover, the same call as the ch23/ch05 verdicts."
+    },
+    {
+      "id": "ch26-ambush-release-sweep-literal-bound",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "I confirmed the literal inclusive sweep over 0x0c through 0x4f at 0x39230 and in src/chevt5b.c, but the earlier ch06-ambush-ai-range-includes-guest verdict row already covers this pattern: a literal index range that must not be bounded by data_fdps_map_unit_count or unified with a sibling chapter."
+    },
+    {
+      "id": "ch27-credit-roll-slot-skip-and-extra-card",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra (0x1ba40) and src/ending.c: the credit-roll loop runs up to and including the roster count, which adds a fixed-sprite card with King Sol's epilogue, and on chapter 0x1a it skips fixed roster slot 3; a natural rebuild would get both wrong, and no existing row or earlier verdict covers this, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch27-hidden-route-reads-retired-unit-bag",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra shows fdps_chapter_27_end calling fdps_unit_find_item_slot on unit 3 for 0xdc, and that function never checks the retired bit; no existing pitfalls row or earlier verdict covers this, so a new row is proposed under 不能加的檢查."
+    },
+    {
+      "id": "ch27-post-action-defeat-written-last",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x3b8a0 (unit 12 retired -> store 2, then unconditional unit 0 retired -> store 1, no shared-test call) matching src/chpost3.c and chapters/ch27.md; the existing unguarded-defeat row covers only the shared end test, so a new row covering the chapter 25/26/27 handlers' last-writer-wins shape was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ch29-guardian-dragons-get-behavior-10",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x39670 (literal loops 0x0c..0x59 mode 0 and 0x5a..0x5b mode 0x0a with the high nibble kept) and in src/chevt6.c, but the 'general attack is a literal index range, not all enemies' pattern is already the ch06 verdict's row, behaviour 10 semantics already have a row, and the second loop's distinct mode is a one-function detail documented in the src/chevt6.c comment."
+    },
+    {
+      "id": "ch29-first-trigger-skips-upper-room",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x395d0 (literal inclusive range 0x24..0x59, low-nibble set to 0) and in src/chevt6.c and chapters/ch29.md, but the pattern of a chapter release event sweeping a literal unit-index range instead of every held enemy is already the earlier ch06-ambush-ai-range-includes-guest verdict's row, as the ch13/ch20/ch26/ch29-dragons verdicts judged."
+    },
+    {
+      "id": "nearest-free-tile-last-tie",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Verified the JLE tie acceptance at 000108b3 in the row-major scan, but an existing pitfalls.md row already states the <= comparison (last tied cell wins) for fdps_deploy_unit and the chapter 30 revive handler and links program_info/chapter.md."
+    },
+    {
+      "id": "ch30-revive-type-anchor",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and src/chevt6.c: the chapter 30 revive at 0x10760 hard-codes one anchor per portrait type and never reads the unit's placement record. So a rebuild that swaps the literals for the record anchor would move the 0x6a unit whose record anchor differs, and no existing row or earlier verdict covers this; new row added under 不能換的型別與寫法."
+    }
+  ],
+  "applyPitfalls": {
+    "errors": 2,
+    "link_errors": 0,
+    "ok": false,
+    "problems": "apply_pitfalls.py exited 1 with errors=2, link_errors=0 (link_findings empty). Refused, both with status \"error\" and detail \"the row changed since it was read\": (1) ch23-time-limit-is-a-walk, (2) ch28-reinforcement-wave-halving. Other items applied: 34 inserted, 4 relinked (ch02-julian-joins-at-init-not-at-victory, ch07-post-action-no-farlena-test, ch20-farena-defeat-string-not-enforced, ch21-advance-range-past-unit-count), the rest no_change (already_covered or rejected_below_threshold). Nothing was fixed by hand."
+  },
+  "finalGate": {
+    "pages": 30,
+    "errors": 0,
+    "failing": [],
+    "index_errors": 0,
+    "ok": true,
+    "problems": ""
+  },
+  "cutContentCandidates": [
+    {
+      "what": "FDETXT01 0x0e：索爾「看見沒有？這就是武士的精神……」、蘭迪斯「我帶他回家治療吧！」的過關台詞",
+      "why": "沒有任何處理函式、死亡腳本或過場讀它；WIN00.DAT 改在地圖 36 以另一段相近的台詞演出",
+      "chapter": 1
+    },
+    {
+      "what": "FDETXT01 0x04–0x06：道具店、武器店、酒店的店員台詞",
+      "why": "村莊載入章節索引 + 1 的文字區塊，章節索引 0 的村莊不存在",
+      "chapter": 1
+    },
+    {
+      "what": "FDETXT01 0x00：「第一章」",
+      "why": "章節標題是 Chapter.saf 的圖，沒有讀取端",
+      "chapter": 1
+    },
+    {
+      "what": "FDETXT01 0x01：章名「英雄之出發」",
+      "why": "唯一的讀取端存檔欄位面板讀 slot 章節索引 + 1 的區塊，而正常流程寫入的 slot 章節索引至少是 1",
+      "chapter": 1
+    },
+    {
+      "what": "FDETXT02.TXT 條目 0x00「第二章」",
+      "why": "標題卡是圖像，本章沒有任何讀取端畫這一條",
+      "chapter": 2
+    },
+    {
+      "what": "`FDETXT03` 條目 `0x0f`：蘭迪斯「太好了！歡迎之至！亞克！」與尤利安「我們又多一個生力軍！」",
+      "why": "勝利腳本 `WIN02.DAT` 只畫到亞克請求加入的 `0x0e`，沒有任何讀取端畫這段回應",
+      "chapter": 3
+    },
+    {
+      "what": "`MAP02.DAT` 波次 15 的 44 隻石巨神（記錄 26–69）與各自 500 金的死亡掉落，共 22,000 金",
+      "why": "只在第 22 回合的敗北處理 `fdps_chapter_03_event_turn_limit_game_over`（`0x36f10`）裡部署，同一支處理函式接著判負，玩家無法與它們交戰",
+      "chapter": 3
+    },
+    {
+      "what": "MAP03.DAT 波次 FF 的 3 筆部署記錄（#27、#28 騎兵，#32 魔導士）",
+      "why": "沒有任何呼叫以波次 255 部署地圖 3",
+      "chapter": 4
+    },
+    {
+      "what": "FDETXT04.TXT 條目 0x00「第四章」",
+      "why": "章名卡是圖片，本章沒有任何讀取端畫條目 0x00",
+      "chapter": 4
+    },
+    {
+      "what": "`MAP04.DAT` 記錄 #32 侍衛（波次 2）的死亡掉落 `B5` 回復劑",
+      "why": "開場過場 `ICON04.DAT` `0x04e` 讓他退場，戰鬥中不在場，沒有人能擊倒他",
+      "chapter": 5
+    },
+    {
+      "what": "`MAP04.DAT` 波次 FF 的記錄 #10–#12（騎兵 2、弓兵 1）",
+      "why": "沒有任何處理函式或腳本以 255 呼叫 `fdps_deploy_wave`（`0x23830`）部署地圖 4",
+      "chapter": 5
+    },
+    {
+      "what": "`FDETXT05.TXT` 條目 `0x00`「第五章」",
+      "why": "章題卡是圖，存檔欄讀 `0x01`，沒有讀取端畫本章的 `0x00`",
+      "chapter": 5
+    },
+    {
+      "what": "`FDETXT06.TXT` 0x0b、0x0c：索爾告別與隊伍回應的勝利對話複本；0x0c 把「每個人的一生中…」那段交給角色 1（法蓮娜），實際顯示的 `FDETXT47` 0x0a 交給角色 6（尤利安）",
+      "why": "勝利腳本 `WIN05.DAT` 切到地圖 46 後才畫文字，讀的是 `FDETXT47`，本章區塊的兩條沒有讀取端",
+      "chapter": 6
+    },
+    {
+      "what": "`FDETXT06.TXT` 0x00「第六章」",
+      "why": "章名卡用 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 6
+    },
+    {
+      "what": "`FDETXT07.TXT` 0x09、0x0a：開場撕榜單對話的複本；0x0a 把「打就打嘛！」交給角色 6（尤利安），實際顯示的 `FDETXT48` 0x0c 交給角色 4（亞克）",
+      "why": "開場過場切到地圖 47 後才畫文字，讀的是 `FDETXT48`，本章區塊的兩條沒有讀取端",
+      "chapter": 7
+    },
+    {
+      "what": "`FDETXT07.TXT` 0x0e、0x0f：索爾被假索爾擒住的另一版台詞",
+      "why": "那一段屬於沒有任何腳本切過去的地圖 49，本章也沒有讀取端",
+      "chapter": 7
+    },
+    {
+      "what": "`FDETXT07.TXT` 0x00「第七章」",
+      "why": "章名卡用 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 7
+    },
+    {
+      "what": "`MAP06.DAT` 可搜尋格記錄 1–4（魔法水、回復劑、魔法水、3000 金）",
+      "why": "沒有任何格引用",
+      "chapter": 7
+    },
+    {
+      "what": "`MAP07.DAT` 波次 FF：第 6 筆 `66` 魔導士 LV13、第 10 筆 `5D` 弓兵 LV12",
+      "why": "沒有任何處理函式或腳本在地圖 7 以 255 部署",
+      "chapter": 8
+    },
+    {
+      "what": "`FDETXT08` 條目 `0x09`：開場對話的另一版（蘭迪斯問「為什麼要擋住我們？」，實際畫出的是 `FDETXT49` 的「為何要引我們到這裡？」）",
+      "why": "開場過場在地圖 48 畫 `FDETXT49` 的版本，本章區塊的 0x09 沒有讀取端",
+      "chapter": 8
+    },
+    {
+      "what": "`FDETXT08` 條目 `0x00`「第八章」",
+      "why": "章名卡用 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 8
+    },
+    {
+      "what": "`MAP08.DAT` 第 1 筆記錄：波次 FF 的 `5D` 弓兵 LV13（行為 0）",
+      "why": "本章沒有任何呼叫以 255 部署地圖 8",
+      "chapter": 9
+    },
+    {
+      "what": "`FDETXT09.TXT` 0x11 與 `FDETXT56.TXT` 0x0d：蓋亞聽從布蘭多命令、兩人一起出去的對話",
+      "why": "`ICON08.DAT` 在地圖 55 只畫 `FDETXT56` 的 0x09–0x0c，兩個區塊的這一條都沒有讀取端",
+      "chapter": 9
+    },
+    {
+      "what": "`FDETXT09.TXT` 0x09–0x10、0x14–0x16：開場與勝利過場對話的複本；0x14 把「哎～呀呀呀！這個話該怎麼講呢？」交給角色 1（法蓮娜），實際顯示的 `FDETXT58` 0x09 交給角色 8（布蘭多）",
+      "why": "過場先切到場景地圖才畫文字，讀的是場景地圖的區塊",
+      "chapter": 9
+    },
+    {
+      "what": "`FDETXT09.TXT` 0x00「第九章」",
+      "why": "章名卡用 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 9
+    },
+    {
+      "what": "`FDETXT10.TXT` 0x09–0x11：城門、法庭與勝利對話的複本；0x0f 把大祭司「本庭姑念你們……」那段的頭像標成角色 4（亞克），實際顯示的 `FDETXT39` 0x0c 是角色 `7C`",
+      "why": "開場與勝利過場都先切到場景地圖 37／38 才畫文字，讀的是 `FDETXT38`／`FDETXT39`，本章區塊的九條沒有讀取端",
+      "chapter": 10
+    },
+    {
+      "what": "`FDETXT10.TXT` 0x00「第十章」",
+      "why": "章名卡用 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 10
+    },
+    {
+      "what": "`FDETXT11.TXT` 0x00「第十一章」",
+      "why": "章名卡用 `Chapter.saf` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 11
+    },
+    {
+      "what": "`FDETXT12.TXT` 0x00「第十二章」",
+      "why": "章名卡是 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 12
+    },
+    {
+      "what": "`FDETXT12.TXT` 0x09：絲卡蒂亞帶蘭迪斯去找武器的開場台詞複本",
+      "why": "`ICON11.DAT` 切到地圖 52 後才畫字，實際顯示的是 `FDETXT53` 0x09",
+      "chapter": 12
+    },
+    {
+      "what": "`FDETXT12.TXT` 0x0a、0x0b：絲卡蒂亞告別與「這不是夢」的勝利台詞複本",
+      "why": "`WIN11.DAT` 切到地圖 53 後才畫字，實際顯示的是 `FDETXT54` 0x09、0x0a",
+      "chapter": 12
+    },
+    {
+      "what": "`FDETXT13.TXT` 0x00「第十三章」",
+      "why": "章名卡是 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 13
+    },
+    {
+      "what": "`MAP12.DAT` 可搜尋格記錄 6（`08` 邪神劍）與 7（`1A` 閃光指環）",
+      "why": "地圖上沒有任何格的事件碼指到 6 或 7，玩家搜不到",
+      "chapter": 13
+    },
+    {
+      "what": "`MAP12.DAT` (13, 6) 的事件碼 7",
+      "why": "格子事件表第 7 筆的處理函式 slot 是 `0xff`，這一格不觸發任何事件",
+      "chapter": 13
+    },
+    {
+      "what": "`FDETXT14.TXT` 0x00「第十四章」",
+      "why": "章名卡是 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 14
+    },
+    {
+      "what": "`MAP14` 重繪旗標 15 的 19 格（砲座平台 (14–18, 9–12)）",
+      "why": "本章沒有任何腳本、處理函式或寶箱設旗標 15，這些格的換圖永遠不會發生",
+      "chapter": 15
+    },
+    {
+      "what": "`MAP14` 第 1 筆（友軍步兵）的死亡腳本「掉落 2000 金」",
+      "why": "步兵在開場過場中就被光束砲座打倒，擊殺者是敵方，掉落不付；之後他不在場上",
+      "chapter": 15
+    },
+    {
+      "what": "`FDETXT15.TXT` 條目 `0x00`「第十五章」",
+      "why": "章名卡是 `Chapter.saf` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 15
+    },
+    {
+      "what": "FDETXT16 條目 0x00「第十六章」",
+      "why": "沒有任何處理函式、腳本或死亡腳本畫它；章名卡是 CHAPTER.SAF 的圖，工匠事件只畫 0x0c–0x16",
+      "chapter": 16
+    },
+    {
+      "what": "`FDETXT17.TXT` 0x00「第十七章」",
+      "why": "章名卡是 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 17
+    },
+    {
+      "what": "`MAP16.DAT` 可搜尋格記錄 0（2000 金）",
+      "why": "沒有任何寶箱或埋藏格引用事件碼 0，程式讀不到",
+      "chapter": 17
+    },
+    {
+      "what": "`FDETXT18` `0x0f`：索爾勝利台詞的舊版（沒有「很遺憾，還是沒能追到他」開頭，也沒有勇者徽章那段）",
+      "why": "勝利過場切到地圖 45 後畫的是 `FDETXT46` 的版本，本章區塊的這一條沒有任何讀取端",
+      "chapter": 18
+    },
+    {
+      "what": "`FDETXT19.TXT` 條目 `0x0b`（蘭斯洛特「原來你是索爾的朋友」的入隊台詞）",
+      "why": "沒有任何處理函式或腳本畫本章區塊的 `0x0b`；到場事件只畫 `0x0a`",
+      "chapter": 19
+    },
+    {
+      "what": "`FDETXT19.TXT` 條目 `0x0c`（吉歐與凱因巴的對話）",
+      "why": "`WIN18.DAT` 切到地圖 44 後畫的是 `FDETXT45` 的同一段（少一次換頁），本區塊的這份沒有讀取端",
+      "chapter": 19
+    },
+    {
+      "what": "`FDETXT19.TXT` 條目 `0x00`「第十九章」",
+      "why": "章名卡是 `Chapter.saf` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 19
+    },
+    {
+      "what": "`MAP18` 搜尋記錄 4（`D9` 耐力藥水）",
+      "why": "沒有任何格子引用事件碼 4",
+      "chapter": 19
+    },
+    {
+      "what": "`FDETXT20` `0x09`–`0x0d`：開場過場台詞的複本，其中 `0x0c` 是凱倫諾特那段字句略異的另一個版本",
+      "why": "開場過場切到地圖 58 後畫的是 `FDETXT59` 的同號條目，本章區塊的這五條沒有任何讀取端",
+      "chapter": 20
+    },
+    {
+      "what": "`FDETXT21` `0x09`：亞克與蘭迪斯談神殿祭祀的神與葛斯洛喀教相同、決定調查的對話",
+      "why": "沒有任何腳本或處理函式畫這一條",
+      "chapter": 21
+    },
+    {
+      "what": "`FDETXT21` `0x0b`–`0x13`：勝利過場台詞的舊版副本",
+      "why": "`WIN20.DAT` 在地圖 51 上畫的是 `FDETXT52` 的同號條目；兩處說話者不同（`0x0f`、`0x13`）",
+      "chapter": 21
+    },
+    {
+      "what": "`FDETXT22.TXT` 0x00「第廿二章」",
+      "why": "章名卡是 `CHAPTER.SAF` 圖，沒有讀取端畫本章區塊的 0x00",
+      "chapter": 22
+    },
+    {
+      "what": "`FDETXT22.TXT` 0x0b 眾人服下失魂藥前的對話",
+      "why": "`WIN21.DAT` 只畫 0x0a，沒有任何處理函式或腳本畫 0x0b",
+      "chapter": 22
+    },
+    {
+      "what": "`FDETXT23` `0x0e`–`0x13`：勝利過場在地圖 50 的法蓮娜道別台詞的本章副本（`0x13` 的「快把他抬進去！」說話者是蘭迪斯）",
+      "why": "`WIN22.DAT` 切到地圖 50 後畫的是 `FDETXT51` 的 `0x09`–`0x0e`，本章區塊的這六條沒有讀取端",
+      "chapter": 23
+    },
+    {
+      "what": "`MAP22.DAT` 可搜尋格記錄 5（`D9` 耐力藥水）、6（`CE` 雷之水晶）、7（`D6` 生命之實）",
+      "why": "沒有任何格的事件碼指到這三筆",
+      "chapter": 23
+    },
+    {
+      "what": "`MAP22.DAT` 格子事件碼 5 的格 (3, 1)",
+      "why": "格子事件表第 5 筆沒有處理函式（slot `FF`），走進或停在這格什麼都不發生",
+      "chapter": 23
+    },
+    {
+      "what": "`MAP23` 波次 FF：8 名 LV15 `50` 野蠻戰士",
+      "why": "本章沒有任何呼叫以 255 部署",
+      "chapter": 24
+    },
+    {
+      "what": "`FDETXT24` `0x0d`：珊的「哎～呀呀呀！來遲一步了！」",
+      "why": "到場事件畫的是 `0x0e`，沒有任何讀取端畫這一條",
+      "chapter": 24
+    },
+    {
+      "what": "`FDETXT24` `0x0f`：蘭迪斯的「﹒﹒﹒﹒﹒﹒」",
+      "why": "沒有任何讀取端畫這一條",
+      "chapter": 24
+    },
+    {
+      "what": "`FDETXT25` `0x09`、`0x0b`–`0x11`：凱因巴帶回法蓮娜、塞克斯撤退、「窮寇莫追」、艾芙羅拉對話的舊稿",
+      "why": "過場在別的地圖上畫改寫過或逐字相同的版本，沒有任何讀取端讀本章區塊的這幾條",
+      "chapter": 25
+    },
+    {
+      "what": "`MAP25` 可搜尋記錄 4（種類 0、`D7` 魔力水晶）",
+      "why": "沒有任何寶箱或埋藏格引用這筆記錄",
+      "chapter": 26
+    },
+    {
+      "what": "`FDETXT27` `0x13`：法蓮娜說異界入口已開、要在魔神降臨前擊敗牠的台詞，結尾是蘭迪斯「法蓮娜﹒﹒﹒﹒」與布蘭多「快！我們趕快行動吧！」",
+      "why": "`WINGA26.DAT` 在地圖 61 畫的是改寫過的 `FDETXT62` `0x09`／`0x0a`，這一版沒有讀取端",
+      "chapter": 27
+    },
+    {
+      "what": "`MAP27` 波次 4：LV25 幽魂 1、地獄犬 2（記錄 47–49）",
+      "why": "回合 ÷ 2 在排定的回合上算不出 4，第 7 回合改部署波次 3",
+      "chapter": 28
+    },
+    {
+      "what": "`MAP27` 波次 FF：LV25 骷顱兵 1（記錄 4）",
+      "why": "沒有任何呼叫以 255 部署",
+      "chapter": 28
+    },
+    {
+      "what": "`FDETXT28` `0x00`：「第廿八章」",
+      "why": "章名卡畫的是圖，沒有讀取端畫這一條",
+      "chapter": 28
+    },
+    {
+      "what": "`MAP28` 可搜尋格記錄 0–5：`B6` 再生藥、`BA` 死神契約、`BC` 邪神戰斧、`C2` 神聖之水、`0D` 天空之劍、`11F`",
+      "why": "地圖上沒有任何格引用這幾筆記錄",
+      "chapter": 29
+    },
+    {
+      "what": "`FDETXT30` 的 `0x0d`、`0x0e`：第二、第三型態平衡之神施放魔法與鬼動死靈陣時的叫陣台詞",
+      "why": "兩個型態的部署處理與死亡腳本都不畫字，沒有任何讀取端",
+      "chapter": 30
+    },
+    {
+      "what": "`FDETXT30` 的 `0x13`、`0x14`：蘭迪斯與法蓮娜另一版的道別對話",
+      "why": "`WIN29.DAT` 在地圖 63 改畫 `FDETXT64` 的版本，本區塊這兩條沒有讀取端",
+      "chapter": 30
+    },
+    {
+      "what": "`FDETXT30` 的 `0x15`–`0x1f`：`GOODEND.DAT` 對話的副本",
+      "why": "`GOODEND.DAT` 先切到地圖 64 才畫字，畫的是 `FDETXT65` 的那一份",
+      "chapter": 30
+    }
+  ],
+  "crossChapter": 121,
+  "unfinished": [
+    "pitfall:poison-death-skips-death-scripts: a second description from chapter 12 was not judged separately: A unit killed by poison in fdps_battle_tick_status_effects (0x1fa30) is retired without collecting death scripts. In chapter 12 a guardian that dies of poison still ends the battle as a win, but its sword (death-script opcode 0: 58/59/5A) is never dropped and cannot be obtained any other way.",
+    "apply pitfalls: apply_pitfalls.py exited 1 with errors=2, link_errors=0 (link_findings empty). Refused, both with status \"error\" and detail \"the row changed since it was read\": (1) ch23-time-limit-is-a-walk, (2) ch28-reinforcement-wave-halving. Other items applied: 34 inserted, 4 relinked (ch02-julian-joins-at-init-not-at-victory, ch07-post-action-no-farlena-test, ch20-farena-defeat-string-not-enforced, ch21-advance-range-past-unit-count), the rest no_change (already_covered or rejected_below_threshold). Nothing was fixed by hand."
+  ]
+}

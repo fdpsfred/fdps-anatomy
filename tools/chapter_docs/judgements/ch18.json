@@ -1,0 +1,70 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON17.DAT` `0x2f1` 的 `DEPLOY_WAVE`（找最近空格），由 `fdps_chapter_18_init`（`0x21310`）執行；戰鬥開始時就在場上"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON17.DAT` `0x18a` 的 `DEPLOY_WAVE`（錨點原位），由 `fdps_chapter_18_init`（`0x21310`）執行；假索爾現出凱因巴的原形，同一腳本在 `0x2a4` 讓他退場逃走，不參戰"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "第 4 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 5,
+      "deployed": true,
+      "when": "第 5 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 6,
+      "deployed": true,
+      "when": "第 6 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 7,
+      "deployed": true,
+      "when": "第 7 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 8,
+      "deployed": true,
+      "when": "第 8 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 9,
+      "deployed": true,
+      "when": "第 9 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 10,
+      "deployed": true,
+      "when": "第 10 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 11,
+      "deployed": true,
+      "when": "第 11 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    },
+    {
+      "wave": 13,
+      "deployed": true,
+      "when": "第 13 回合敵方階段前，回合事件 slot 25 呼叫 `fdps_chapter_18_event_deploy_wave_for_turn`（`0x38150`），以回合數當波次、找最近空格"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第十八章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON17.DAT`／`WIN17.DAT`／`WIN17-1.DAT` 都不畫這一條"
+    },
+    {
+      "entry": "0x0f",
+      "why": "索爾勝利台詞的舊版：`WIN17.DAT`／`WIN17-1.DAT` 都先 `SWITCH_MAP` 到地圖 45 才畫字，畫的是 `FDETXT46` 的 `0x09`／`0x0a`；本章的處理函式與腳本都不畫本章區塊的這一條"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON11.DAT` `0x2c4` 的三選一中，第一題（左邊房間）答「是」時，`fdps_icon_script_prompt_three_way_choice`（`0x22600`）回傳 1，`0x322` 的 `DEPLOY_WAVE 0xff` 就部署本波次（找最近空格，落在錨點 (7, 6)），由 `fdps_chapter_12_init`（`0x21180`）執行，戰鬥開始前；選了另外兩間則這一局不會出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON11.DAT` `0x2c4` 的三選一中，第一題答「否」或取消、第二題（中間房間）答「是」時，`fdps_icon_script_prompt_three_way_choice`（`0x22600`）回傳 2，`0x322` 的 `DEPLOY_WAVE 0xff` 就部署本波次（找最近空格，落在錨點 (7, 6)），由 `fdps_chapter_12_init`（`0x21180`）執行，戰鬥開始前；選了另外兩間則這一局不會出場"
+    },
+    {
+      "wave": 3,
+      "deployed": true,
+      "when": "開場過場 `ICON11.DAT` `0x2c4` 的三選一中，兩題都答「否」或取消時，`fdps_icon_script_prompt_three_way_choice`（`0x22600`）回傳預設的 3，`0x322` 的 `DEPLOY_WAVE 0xff` 就部署本波次（找最近空格，落在錨點 (7, 6)），由 `fdps_chapter_12_init`（`0x21180`）執行，戰鬥開始前；選了另外兩間則這一局不會出場"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第十二章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON11.DAT`／`WIN11.DAT` 都不畫這一條"
+    },
+    {
+      "entry": "0x09",
+      "why": "開場台詞的複本：`ICON11.DAT` 在 `0x004` 先切到地圖 52 才於 `0x0a1` 畫字，畫的是 `FDETXT53` 的 0x09；沒有任何腳本在地圖 11 載入時畫本章區塊的這一條"
+    },
+    {
+      "entry": "0x0a",
+      "why": "勝利台詞的複本：`WIN11.DAT` 在 `0x020` 先切到地圖 53 才畫字，畫的是 `FDETXT54` 的 0x09；本章區塊的這一條沒有讀取端"
+    },
+    {
+      "entry": "0x0b",
+      "why": "勝利台詞的複本：`WIN11.DAT` 畫的是切到地圖 53 後 `FDETXT54` 的 0x0a；本章區塊的這一條沒有讀取端"
+    }
+  ]
+}

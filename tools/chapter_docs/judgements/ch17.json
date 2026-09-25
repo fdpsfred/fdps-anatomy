@@ -1,0 +1,21 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "第 8 回合我方行動結束、敵方階段開始前，`fdps_battle_run_turn_events`（`0x2e0c0`）執行 `MAP16.DAT` 回合事件第 0 筆（回合 8、slot 24、陣營階段 0），`fdps_chapter_17_event_deploy_wave_for_turn`（`0x38110`）以回合計數器 − 7 = 1 呼叫 `fdps_deploy_wave`（`0x23830`），放在錨點 (2–4, 22–23) 最近的空格；開場敵人在那之前全滅就已過關，本波次不會出場"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "第 9 回合我方行動結束、敵方階段開始前，`MAP16.DAT` 回合事件第 1 筆（回合 9、slot 24、陣營階段 0）呼叫 `fdps_chapter_17_event_deploy_wave_for_turn`（`0x38110`），回合計數器 − 7 = 2，放在錨點 (3, 24) 最近的空格；在那之前敵人全滅則不會出場"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第十七章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式、死亡腳本與 `ICON16.DAT`／`WIN16.DAT` 都不畫這一條"
+    }
+  ]
+}

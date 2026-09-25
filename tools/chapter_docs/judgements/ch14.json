@@ -1,0 +1,26 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "deployed": true,
+      "when": "開場過場 `ICON13.DAT` `0x297` 的 `DEPLOY_WAVE`（找最近空格，錨點在上方 y = 0–4），由 `fdps_chapter_14_init`（`0x21200`）經 `fdps_icon_script_run`（`0x21650`）執行，戰鬥開始前"
+    },
+    {
+      "wave": 2,
+      "deployed": true,
+      "when": "開場過場 `ICON13.DAT` `0x233` 的 `DEPLOY_WAVE`（找最近空格），之後 `0x288`、`0x28d` 把兩人放到 (8, 4)、(7, 5)；由 `fdps_chapter_14_init`（`0x21200`）執行，戰鬥開始前"
+    },
+    {
+      "wave": 4,
+      "deployed": true,
+      "when": "回合事件（回合 6、陣營階段 2）在第 6 回合我方階段開始前呼叫 `fdps_chapter_14_event_deploy_wave_4`（`0x37a50`），以找最近空格部署；開場 20 名若在那之前全滅，戰鬥已判定勝利，本波次不會出現"
+    }
+  ],
+  "text_readers": [],
+  "never_shown": [
+    {
+      "entry": "0x00",
+      "why": "「第十四章」沒有讀取端：章名卡由 `fdps_show_chapter_title_card`（`0x20c60`）畫 `CHAPTER.SAF` 的圖，本章的處理函式與 `ICON13.DAT`／`WIN13.DAT` 都不畫這一條"
+    }
+  ]
+}
