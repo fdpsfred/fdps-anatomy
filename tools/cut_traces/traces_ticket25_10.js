@@ -155,12 +155,17 @@ ${CUT}\\_index.md (read both once).  A trace belongs to exactly one:
                                   put in it.  Residual lacks a path; a stub lacks content
   sealed                被封住的內容  content AND the path to it both exist, but an original
                                   bug keeps the player from getting or seeing it
-  predecessor_leftover  前作遺留  code or data inherited from FD2 that does nothing in
-                                  FDPS; needs an FD2-side comparison to claim
+  predecessor_leftover  前作遺留  code or data inherited UNCHANGED from FD2 that does
+                                  nothing in FDPS; needs an FD2-side comparison.  If
+                                  FDPS rewrote it and still never enabled it, it is
+                                  residual, not predecessor_leftover
   negative              否定性結論  a verified statement that something does NOT exist
   excluded              排除      real, but belongs to no class: compiler output, unused
-                                  API of a general library, unreachable defensive
-                                  branches, a data-entry error, a feature in use
+                                  API of a THIRD-PARTY library (Watcom CRT, Miles AIL),
+                                  unreachable defensive branches, a data-entry error, a
+                                  feature in use.  Finished but uncalled members of the
+                                  game's own modules (transitions, audio wrapper, MSCDEX
+                                  layer, VFS reader, blitter...) are residual, not excluded
   none                  not a cut-content matter at all (a bug's mechanism, a
                         documentation error, a plain fact about how the game works)`
 
@@ -595,7 +600,8 @@ command cannot run at all, set ok false and say why in note.`,
 // partial set reads exactly like a complete one.
 
 phase('Report')
-const stopArg = stopped ? ` --stopped "${stopped.replace(/"/g, "'")}"` : ''
+// The reason may quote an agent's note; keep only characters no shell expands.
+const stopArg = stopped ? ` --stopped "${stopped.replace(/[^A-Za-z0-9 .,:;()_\-]/g, ' ')}"` : ''
 const report = await agent(
   `Write the ticket-25.10 trace closing report.  You decide nothing.
 

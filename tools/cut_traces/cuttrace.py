@@ -91,7 +91,7 @@ def check_evidence(evidence):
         if src == "src" and not re.search(r":\d+", loc):
             problems.append("evidence[%d] src location needs file:line, got %r" % (i, loc))
             continue
-        if src == "ghidra" and not re.search(r"[0-9a-fA-F]{5,8}", loc):
+        if src == "ghidra" and not GHIDRA_ADDRESS.search(loc):
             problems.append("evidence[%d] ghidra location needs an address, got %r" % (i, loc))
             continue
         if src == "data" and "@" not in loc:
@@ -105,8 +105,20 @@ def check_evidence(evidence):
     return problems
 
 
+TEXT_FIELDS = ("id", "trace_sha1", "from", "verdict", "disposition", "entry", "topic",
+               "category", "route", "title", "kb_text", "route_note", "confidence",
+               "conclusion", "corrected_trace", "pitfall_candidate", "open_question")
+# A Ghidra address: 5 to 8 hex digits, at least one of them a decimal digit, so an
+# English word such as "facade" does not pass for one.
+GHIDRA_ADDRESS = re.compile(r"(?<![0-9A-Za-z])(?:0x)?(?=[0-9a-fA-F]{0,7}[0-9])[0-9a-fA-F]{5,8}(?![0-9A-Za-z])")
+
+
 def check_judgement(j, trace, ticket, known):
+    if not isinstance(j, dict):
+        return ["the judgement file is not a JSON object"]
     problems = ["missing field %s" % k for k in REQUIRED if k not in j]
+    problems += ["%s must be a string, got %s" % (k, type(j[k]).__name__)
+                 for k in TEXT_FIELDS if k in j and not isinstance(j[k], str)]
     if problems:
         return problems
     if j["id"] != trace["id"]:

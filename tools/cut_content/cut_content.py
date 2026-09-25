@@ -272,6 +272,13 @@ def verify_media(topic, base, game_dir, generators=None):
 
 # Helpers for generators.  They go through the owners of each format.
 
+def _use_owner(tool):
+    """Make tools/<tool>/ importable, once."""
+    path = str(TOOLS_DIR / tool)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+
 def read_game_file(game_dir, name):
     """A top-level game file (FACE.CEL, ICON.CEL, ...), matched case-insensitively."""
     for path in Path(game_dir).iterdir():
@@ -282,7 +289,7 @@ def read_game_file(game_dir, name):
 
 def read_vfs_member(game_dir, container, member):
     """One member of a .VFS container, matched case-insensitively."""
-    sys.path.insert(0, str(TOOLS_DIR / "vfs_dump"))
+    _use_owner("vfs_dump")
     from vfs_dump import parse_container  # the container's owner
     data = read_game_file(game_dir, container)
     _, entries = parse_container(data, container)
@@ -294,14 +301,14 @@ def read_vfs_member(game_dir, container, member):
 
 def write_png(path, width, height, rows):
     """RGBA rows -> PNG, through tools/cel_decode (deterministic output)."""
-    sys.path.insert(0, str(TOOLS_DIR / "cel_decode"))
+    _use_owner("cel_decode")
     from cel_decode import write_png as owner
     owner(Path(path), width, height, rows)
 
 
 def write_wav(path, sound):
     """A decoded SAF sound -> RIFF/WAVE, through tools/saf_decode."""
-    sys.path.insert(0, str(TOOLS_DIR / "saf_decode"))
+    _use_owner("saf_decode")
     from saf_decode import write_wav as owner
     owner(Path(path), sound)
 
@@ -361,6 +368,10 @@ def cmd_media(args):
 
 
 def cmd_verify_media(args):
+    unknown = [t for t in args.topics if t not in TOPICS]
+    if unknown:
+        print(f"unknown topic {', '.join(unknown)}; one of {', '.join(TOPICS)}")
+        return 1
     problems = []
     for topic in args.topics or list(TOPICS):
         problems += verify_media(topic, CUT_DIR, args.game)

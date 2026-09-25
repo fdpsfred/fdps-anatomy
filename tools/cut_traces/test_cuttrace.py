@@ -90,6 +90,17 @@ class CheckTest(unittest.TestCase):
         self.assertTrue(self.check(category="residual", title="內容", kb_text="理由", **base))
         self.assertTrue(self.check(category="excluded", title="", kb_text="理由", **base))
 
+    def test_a_null_field_fails_the_gate_instead_of_crashing_it(self):
+        self.assertTrue(any("corrected_trace" in p for p in self.check(corrected_trace=None)))
+        self.assertTrue(cuttrace.check_judgement([], traces()[0], "25.10", KNOWN))
+
+    def test_an_english_word_is_not_a_ghidra_address(self):
+        problems = self.check(evidence=[{"source": "ghidra", "location": "facade",
+                                         "observation": "x"}])
+        self.assertTrue(any("address" in p for p in problems))
+        self.assertEqual(self.check(evidence=[{"source": "ghidra", "location": "0x357a0",
+                                               "observation": "x"}]), [])
+
     def test_route_needs_a_target_and_a_note(self):
         self.assertTrue(self.check(route="none"))
         self.assertTrue(self.check(route_note=""))

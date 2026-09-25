@@ -1,0 +1,1219 @@
+[
+ {
+  "id": "T10-01",
+  "trace_sha1": "f4a814f2b930b022f56387c6d8f4ed95d6fcc221",
+  "from": "C1",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "成立：`data_fdps_secret_code_match_pos`（`0x601c0`）的讀寫全在 `fdps_check_secret_code_key`（`0x357a0`）內，只在比對失敗時歸 0（或重開為 1），進出村莊、換章與暗號完成時都不歸 0，所以殘留的位置會帶進下一次、下一章的比對。這是暗號比對機制本身的行為，不是刪減或未用的內容；`program_info/village.md` 的暗號表一節與 `src/village.h` 的全域註解都已寫明，不需落地到 cut_content。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/village.c:1152",
+    "observation": "以 chapter_codes[chapter_id - 1][data_fdps_secret_code_match_pos] 比對；相符則 ++，下一 byte 為 0 或到 8 即回 1 且不歸 0；不符則設 0，若按鍵等於該列第 0 byte 則設 1（village.c:1152-1169）"
+   },
+   {
+    "source": "src",
+    "location": "src/village.c:73",
+    "observation": "int data_fdps_secret_code_match_pos; 零初值，src 內沒有其他寫入者"
+   },
+   {
+    "source": "src",
+    "location": "src/village.h:46",
+    "observation": "註解明言它是唯一讀寫者，進出村莊不歸 0，跨村莊、跨章節保留，只由比對失敗的按鍵清除"
+   },
+   {
+    "source": "ghidra",
+    "location": "000601c0",
+    "observation": "get_xrefs_to 只有 6 筆，全在 fdps_check_secret_code_key：000357ca/000357f3/00035803 讀、000357e1 INC、00035817 MOV 0、0003583e MOV 1；search_instructions 對 601c0 運算元全映像也只命中這 6 條"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/village.md:78",
+    "observation": "知識庫已記「比對位置是跨呼叫、跨村莊、跨章節保留的全域，只有比對失敗才歸 0；完成之後不歸 0，下一個按鍵必定失敗而重來」"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "村莊暗號的比對位置 `data_fdps_secret_code_match_pos`（`0x601c0`）不能在進入村莊、換章或暗號完成時歸 0：原版只在比對失敗時清除，上一座村莊留下的位置會讓下一座村莊的第一鍵拿去比對該列的中段（例如殘留位置 3 時，按下新列第 3 個鍵而其後為 0 就一鍵完成）；照直覺補上歸 0 會改變這些情況下的結果。",
+  "open_question": "",
+  "trace": "data_fdps_secret_code_match_pos 在進入村莊或換章時沒有歸零，上一章輸入到一半的比對位置會帶進下一章的暗號比對。"
+ },
+ {
+  "id": "T10-02",
+  "trace_sha1": "3cc73e03efd68ba517d8dad3290e2a9945efc93c",
+  "from": "C1",
+  "verdict": "needs_correction",
+  "disposition": "addendum",
+  "entry": "C1",
+  "topic": "",
+  "category": "sealed",
+  "route": "none",
+  "title": "",
+  "kb_text": "「穩態」的例外是 `fdps_cd_music_repeat_poll`（`0x30c50`）每 0x4b 輪向光碟機詢問狀態的那一輪（只在有選曲且音樂開著時）：那一格前 4 byte 會變成 `fdps_cd_audio_is_idle`（`0x3c6e8`）內部 CALL 留下的返回位址（`0x3c6f7` 在執行期被 DOS/4GW 搬移後的線性位址），若接著重播音軌則是 poll 內 `0x30ca4` 的返回位址，下一輪由 `free` 的 PUSH EBP 寫回選單的 EBP。物件以整頁搬移，兩者的最低 byte 仍是 `F7`、`A4`，超出看板選單會送進來的掃描碼範圍（小於 `0x7f`），不能作為暗號開頭，不改變進不去的結論。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "屬實但需修正細節：只有在有選曲（0x69d54 != -1）且音樂開著（0x60008 != 0）時，fdps_cd_music_repeat_poll 每 0x4b 輪才呼叫 0x3c6e8；那一輪索引 25 那一列前 4 byte（fdps_check_secret_code_key 的回傳值槽，選單 ESP 記作 S 時的 S-28）是 0x3c6e8 內 CALL 0x3c34f 留下的返回位址，若光碟機已停而重播音軌則是 0x3c85b 呼叫留下的返回位址（0x30ca4），下一輪被 free 的 PUSH EBP 改回選單的 EBP。存在堆疊上的是執行期線性位址而非 Ghidra 的連結位址，只有最低 byte（F7/A4，整頁搬移不變）是確定的；它們大於 0x7e，無法作為暗號開頭。只有同一輪讀到按鍵、真的呼叫暗號比對時才看得到。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/village.c:533",
+    "observation": "看板選單迴圈每輪先呼叫 fdps_cd_music_repeat_poll，再讀鍵盤（village.c:534），掃描碼 < 0x7f 才呼叫 fdps_check_secret_code_key（village.c:537-538）"
+   },
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:775",
+    "observation": "計數到 0x4b 時，只有 current_music_index != -1 且 bgm_enabled_flag != 0 才呼叫 fdps_cd_audio_is_idle；回非 0 才呼叫 fdps_cd_play_track（cdaudio.c:776-779）"
+   },
+   {
+    "source": "ghidra",
+    "location": "000357a0",
+    "observation": "PUSH EBX/ESI/EDI/EBP、MOV EBP,ESP；列位址 [id*8+EBP-0xcc]，id 25 落在 EBP-4 = 呼叫前選單 ESP（記作 S）的 S-28，後 4 byte 為 S-24 的存下 EBP；參數 [EBP+0x14] = S-4 印證佈局"
+   },
+   {
+    "source": "ghidra",
+    "location": "00030c50",
+    "observation": "poll 自 S 呼叫：返回位址 S-4、四個 PUSH 到 S-20、SUB ESP,0，00030c8c CALL 0x3c6e8 返回位址放 S-24；00030c9e PUSH EAX 放 S-24、00030c9f CALL 0x3c85b 返回位址 0x00030ca4 放 S-28"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003c6e8",
+    "observation": "PUSH 0x4 寫 S-28，0x4361a 的 XCHG [ESP+4],EAX 把該格換成進入時的 EAX、RET 4 丟掉；接著 0003c6f2 CALL 0x3c34f 把返回位址 0x0003c6f7 寫進 S-28；0x3c6d0 無 PUSH，所以返回 poll 時 S-28 = 0x3c6f7 的執行期位址"
+   },
+   {
+    "source": "ghidra",
+    "location": "000567be",
+    "observation": "fdps_read_keyboard_queue 只 PUSH EBX（S-8），不碰 S-28，所以 poll 留下的值原樣進入暗號比對"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003d478",
+    "observation": "free 自 00031f39 呼叫：PUSH EAX 在 S-4、返回位址 S-8、PUSH EDX S-12、CALL 0x3d486 返回位址 S-16，其內 PUSH EBX/ESI/EBP 依序落在 S-20/S-24/S-28，把選單 EBP 寫回 S-28，是每輪最後寫這格的指令"
+   },
+   {
+    "source": "ghidra",
+    "location": "00031f22",
+    "observation": "每輪結尾等待計時器改變，所以 poll 每輪都看到 tick 變動、計數每輪加 1，0x4b 輪觸發一次"
+   },
+   {
+    "source": "investigation",
+    "location": "rebuild_info/playtest.md「從當機到 function」",
+    "observation": "DOS/4GW 把映像搬到 1 MB 以上，連結在物件 1 = 0x10000 的程式執行時 main 在 0x1a0040；堆疊上的返回位址是執行期線性位址，不是 Ghidra 的 0x3c6f7 / 0x30ca4 本身"
+   }
+  ],
+  "corrected_trace": "看板選單迴圈中，fdps_cd_music_repeat_poll（0x30c50）每 0x4b 輪、且只在有選曲又開著音樂時呼叫 fdps_cd_audio_is_idle（0x3c6e8）；那一輪索引 25 那一列的前 4 byte（fdps_check_secret_code_key 的回傳值槽）會變成 0x3c6f7 的執行期返回位址，若接著重播音軌則是 0x30ca4 的執行期返回位址，下一輪由 free 還原為選單的 EBP。只有同一輪有按鍵進入暗號比對時才會讀到，兩者最低 byte（F7、A4）都超出掃描碼範圍，不能作為暗號開頭。",
+  "pitfall_candidate": "",
+  "open_question": "那一格的第 1 到 3 byte 取決於 DOS/4GW 執行期把程式物件搬到哪裡，不是連結位址的 C6 03 00 / 0C 03 00；若前幾鍵已依選單 EBP 的 byte 比對成功，恰逢這一輪時理論上可能與某鍵或結尾的 0 對上，這取決於未實測的執行期位址，未在 DOSBox 驗證。「整頁搬移使最低 byte 不變」依 LE 以 4 KB 頁載入推定，也未實測。",
+  "_supersedes": "第一次判讀的結論與堆疊佈局（S-28、free 的 PUSH EBP、poll 內兩個返回位址）經獨立重看 000357a0、00030c50、0003c6e8、0004361a、000567be、0003d478 與選單 00031bc0 全部成立；但它把 Ghidra 的連結位址 0x0003c6f7、0x00030ca4 當成堆疊上的實際值，並在 open_question 據此推出列的第 2、3 byte 是 03 00。DOS/4GW 執行時會把物件搬到 1 MB 以上，堆疊上的是搬移後的線性位址，只有最低 byte F7/A4 能確定，所以 kb_text、結論與 open_question 改為執行期位址的說法，首 byte 不能開頭的結論不變。",
+  "trace": "fdps_cd_music_repeat_poll（00030c50）每 0x4b tick 呼叫 0003c6e8 時會改寫同一個堆疊槽，使索引 25 那一列的前 4 byte 偶爾變成別的值。"
+ },
+ {
+  "id": "T10-03",
+  "trace_sha1": "3f63cc053283437bce7e15bb02edef78adec769b",
+  "from": "C2",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "residual",
+  "route": "25.14",
+  "title": "",
+  "kb_text": "",
+  "route_note": "這是地圖 31 的內容而非程式痕跡，由 story.md 在 S02（沒有路徑的地圖 31）條目裡寫：MAP31.DAT 檔頭 +2 記 2 筆，檔長 469 = 0x83 + 13 × 0x1a，多出的第 2–12 筆是完整的部署記錄（角色編號 0x7d、0x8c、0x8d、0x8e×4、0x81–0x84，等級 2，波次依序 1–8 再三筆 0），而 MAP31.COD 只有 2 筆落點座標；由於地圖 31 本身沒有任何章節或腳本會載入，連前 2 筆也不會被讀到，接手者要一併查明這些角色編號的名字並寫明落點表缺 11 筆。",
+  "confidence": "high",
+  "conclusion": "MAP31.DAT 檔頭 +2 記 2 筆部署記錄，檔長 469 byte 恰為 0x83 + 13 × 0x1a，後 11 筆是完整記錄；fdps_deploy_wave 以檔頭 +2 為迴圈上限，這 11 筆永遠不會被讀。它是地圖 31 這個沒有路徑的場景的內容，歸劇情與場景主題檔，而且因為地圖 31 從不被載入，前 2 筆同樣讀不到。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/deploy.c:412",
+    "observation": "fdps_deploy_wave 的迴圈以 data_fdps_tile_event_data_table_ptr[SPAWN_TABLE_COUNT_OFFSET]（+2）為上限，逐筆比對 wave_no 後呼叫 fdps_deploy_unit"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:51",
+    "observation": "部署記錄起點 SPAWN_TABLE_RECORD_BASE 0x83，每筆 struct fdps_char_spawn_record 0x1a byte（src/fdpstype.h:67）"
+   },
+   {
+    "source": "ghidra",
+    "location": "000238b6",
+    "observation": "MOV EAX,[0x6013c] / MOV AL,[EAX+0x2] / AND EAX,0xff / CMP EAX,[EBP-0x8] / JG：每輪重讀檔頭 +2 當上限；記錄位址 IMUL [EBP-0x8],0x1a + 0x83（000238d2），比對 +0x15 的波次（000238e9）"
+   },
+   {
+    "source": "data",
+    "location": "MAP31.DAT@0x2",
+    "observation": "檔頭 +1 = 0（無我方 slot），+2 = 2；檔長 469 = 0x83 + 13×0x1a，無餘數"
+   },
+   {
+    "source": "data",
+    "location": "MAP31.DAT@0xb7",
+    "observation": "第 2–12 筆（0xb7 起）皆為完整記錄：side 0、角色編號 0x7d,0x8c,0x8d,0x8e,0x8e,0x8e,0x8e,0x81,0x82,0x83,0x84、等級 2、裝備 01/71、波次 +0x15 依序 1–8 後三筆 0、死亡腳本 0xff、AI byte 全 0"
+   },
+   {
+    "source": "data",
+    "location": "MAP31.COD@0x0",
+    "observation": "21 byte = 9 byte 檔頭 + 2 筆 6 byte 落點（0x8b@(2,6)、0x7e@(8,6) 形狀），多出的 11 筆部署記錄沒有對應落點"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md",
+    "observation": "知識庫已記 MAP31.DAT 多出 286 byte 恰為 11 筆記錄，且 MAP31 沒有任何腳本或章節編號會切過去、缺 DSC31；cut_content/code.md 的 C2 只順帶提到這 11 筆的 AI byte 全 0"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "這 11 個角色編號（敵方表索引 0x41、0x50–0x52、0x45–0x48）的名字與是否構成序章演出，未在本判定查證，留給 25.14。",
+  "_reread": "第二位讀者確認：重新逐筆解析 MAP31.DAT 13 筆與 MAP31.COD（2 筆落點）、Ghidra 000238b6 每輪重讀檔頭 +2 當上限、src/deploy.c fdps_deploy_wave 迴圈，並核對 resource_info/map.md 已記此事、地圖 31 無任何路徑、來源 S02 已判給 25.14 且 T10-05 同樣轉 25.14，判定與轉交不變；另見這 13 筆與 MAP32.DAT 前 13 筆只差第 9 筆（0x81 對 0x83），S02 結論已載。",
+  "trace": "MAP31.DAT header byte 2 記 2 筆部署紀錄，但檔案實際容納 13 筆（0x83 + 13*0x1a = 469），多出的 11 筆不會被 fdps_deploy_wave 讀到。"
+ },
+ {
+  "id": "T10-04",
+  "trace_sha1": "970f505de60e6f558655f0dc928d47accee02208",
+  "from": "C2",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C3",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "名冊區塊在啟動時以 malloc(0xa00) 配置（0x296b8）且不清零，fdps_roster_add_character（0x23bc0）寫入的欄位不含 +0x34..+0x36，因此名冊記錄的 AI 行為 byte 與兩個目標座標 byte 是堆積原有內容（示範戰之後是已釋放區塊的內容），並隨 fdps_build_map_unit_array 的整筆 memmove 帶進我方單位與存檔。這件事已由 C3 的「為什麼沒作用」與 pitfalls.md 的名冊 +0x34 一列完整記載。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/main.c:367",
+    "observation": "data_fdps_roster_array_ptr = malloc(ROSTER_BLOCK_BYTES)，之後沒有 memset；註解（main.c:32）載明原版是 PUSH 0xa00 / CALL malloc / MOV [0x00064108],EAX at 000296b8。trace 引用的 main.c:363 為行號漂移"
+   },
+   {
+    "source": "src",
+    "location": "src/roster.c:285",
+    "observation": "fdps_roster_add_character 寫 flags、side、portrait_id、char_id、背包、法術、race/class/level、status_timers(6)、death_script_opcode 與各數值；註解（roster.c:273-280）明說 AI 欄位 +0x34..+0x36 留著名冊區塊原值"
+   },
+   {
+    "source": "ghidra",
+    "location": "00023bc0",
+    "observation": "整支函式對記錄 [EAX/EDX+off] 的寫入位移為 0x5,0x6,0x7,0x8,0x9,0xa-0x18,0x1a(memmove 4),0x1e,0x1f,0x20,0x21,0x22(memset 6),0x31,0x37,0x39,0x3b,0x3c,0x3e,0x40-0x46，沒有 0x34、0x35、0x36"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:562",
+    "observation": "fdps_build_map_unit_array 以 memmove 整筆 0x50 byte 把名冊記錄抄進我方單位，只覆寫位置、facing、flags、side 等，+0x34..+0x36 原樣帶入"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:590",
+    "observation": "示範戰結束 free(data_fdps_roster_array_ptr) 且不重新配置，其後名冊存取落在已釋放區塊"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C3",
+    "observation": "C3「為什麼沒作用」已寫明 fdps_roster_add_character 從不寫 +0x34、名冊來的單位帶著 malloc 區塊（示範戰之後是已釋放的區塊）原有內容；pitfalls.md 第 39 列亦列 +0x34..+0x36 不初始化"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "隊伍名冊區塊以 malloc 配置（src/main.c:363）且 fdps_roster_add_character 不寫 +0x34..+0x36，隊員紀錄的 AI 位元組內容取決於配置時記憶體原值。"
+ },
+ {
+  "id": "T10-05",
+  "trace_sha1": "299cec192246c3ee3c59e41bf0c7fc157b3ce5bd",
+  "from": "C3",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "residual",
+  "route": "25.14",
+  "title": "",
+  "kb_text": "",
+  "route_note": "story.md 處理地圖 31（S02）的條目時，要寫明 `MAP31.DAT` 檔頭 byte 2 的部署筆數寫 2，但檔長 469 byte 恰為 `0x83 + 0x1a × 13`，筆數之外還有 11 筆完整的部署記錄；程式只照檔頭筆數讀（`src/rsrc.c` `fdps_field_load_chapter_resources`），所以即使地圖 31 被載入，這 11 筆也不會被讀到；格式細節連到 resource_info/map.md，不在條目重寫。",
+  "confidence": "high",
+  "conclusion": "`MAP31.DAT` 檔頭 byte 2（部署筆數）是 2，檔長 469 byte 恰為 `0x83 + 0x1a × 13`，筆數之外還有 11 筆完整的 0x1a byte 部署記錄。程式只以檔頭筆數決定讀幾筆，這 11 筆永遠不會被讀；而且沒有任何章節編號或過場腳本切到地圖 31，整個檔本身就不會被載入。這是一張到不了的地圖的資料內容，屬劇情與場景主題檔（地圖 31 的條目），不屬程式痕跡；`resource_info/map.md` 已記載此格式事實，`code.md` C2 也只順帶提到這 11 筆的行為 byte 全是 0。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD/MAP31.DAT@0x0",
+    "observation": "檔頭前 4 byte 為 00 00 02 ff：byte 2（部署筆數）= 2；檔長 469 = 0x83 + 0x1a × 13。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD/MAP31.DAT@0x83",
+    "observation": "自 0x83 起 13 筆 0x1a byte 記錄結構一致（各筆 +2..+6 同為 00 02 01 71 ff…），第 2–12 筆（@0xb7 起）在檔頭筆數之外，+0x11 行為 byte 全為 0。"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:313",
+    "observation": "fdps_field_load_chapter_resources 以 MAP%02d.DAT 的 byte 2（MAP_CHAR_SPAWN_COUNT_OFFSET，src/rsrc.c:237）設 data_fdps_map_char_spawn_count，部署迴圈只讀這麼多筆。"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:48",
+    "observation": "部署記錄基底 0x83、每筆 0x1a（IMUL ...,0x1a 在 00023457、ADD EAX,0x83 在 00023463）。"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md:7,23",
+    "observation": "知識庫已記載 MAP31 沒有任何腳本或章節編號會切過去、缺 DSC31 載入不了，以及 N 寫 2 後多出 286 byte 恰為 11 筆完整記錄、程式不會讀到。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C2",
+    "observation": "C2 只在行為模式分布處順帶寫「MAP31.DAT 筆數以外的 11 筆也全是 0」，沒有以地圖 31 為主體的條目；cut_content/_index.md 規定載入不了或沒有路徑的地圖歸 story.md（票 25.14）。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "MAP31.DAT 檔頭筆數為 2，但檔案長度容得下 13 筆部署記錄，筆數之外還有 11 筆完整記錄。"
+ },
+ {
+  "id": "T10-06",
+  "trace_sha1": "718d10026b431a0c6e6356a4c72ae4b43265696d",
+  "from": "C3",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "src/aiscore.c 中 AI_BEHAVIOR_MODE_BIT_0 上方的註解在已提交版本把 fdps_score_targets_for_item 的 AND AL,0x80 標在 0001337d（那是 MOV AL,byte ptr [EAX+0x34]），正確位址是 00013380；工作副本已改成 00013380，票 25.15 只需確認這處修正隨提交落地，src/chevt5b.c 三處以 0001337d 指稱「讀取該 byte」的位置是 MOV 的位址，與 00012c6f 的寫法一致，不必改。",
+  "confidence": "high",
+  "conclusion": "fdps_score_targets_for_item 中 AND AL,0x80 位於 00013380，0001337d 是其前一條 MOV AL,byte ptr [EAX+0x34]；src/aiscore.c 已提交版本的註解把 AND 標錯在 0001337d，工作副本已修正為 00013380。這是文件位址錯誤，不是刪減內容。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "00013380",
+    "observation": "AND AL,0x80（bytes 24 80）；前一條 0001337d 為 MOV AL,byte ptr [EAX + 0x34]（8a 40 34），其後 00013382 AND EAX,0xff / TEST / JZ"
+   },
+   {
+    "source": "src",
+    "location": "src/aiscore.c:664",
+    "observation": "工作副本寫 AND AL,0x80 at 00013380；git HEAD 版本同一行寫 0001337d（git diff 顯示此行為未提交修改）"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt5b.c:124",
+    "observation": "以 fdps_score_targets_for_item (0001337d) 指稱讀取 +0x34 byte 的位置，與 fdps_map_actor_take_best_action (00012c6f) 同樣引用 MOV 位址，並非 AND 的位址錯誤"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md:57",
+    "observation": "C3 條目已用 0x13380，知識庫本身無此錯"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "src/aiscore.c:664 的註解把 AND AL,0x80 標在 0001337d，Ghidra 中該指令實際在 00013380。"
+ },
+ {
+  "id": "T10-07",
+  "trace_sha1": "07350135ddd324df9dca0e63f21f7d4cd0ee83c3",
+  "from": "C3",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C3",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "fdps_roster_add_character（0x23bc0）寫了名冊記錄的 +0x05..+0x46 多數欄位，卻完全不寫 +0x34（AI 行為 byte）；名冊區塊由 fdps_load_global_resources 在 0x296bd 以 malloc(0xa00) 取得、之後沒有 memset，而同一函式裡另外兩塊（0x306、0xaf8）配置後都有 memset。這件事已完整寫在 cut_content/code.md 的 C3「為什麼沒作用」，重建陷阱也已在 rebuild_info/pitfalls.md 有名冊 +0x34 一列，不需再落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/roster.c:273",
+    "observation": "fdps_roster_add_character 的註解明言 +0x34..+0x36 的 AI 欄位留著名冊區塊原有內容；函式本體（src/roster.c:285-364）沒有任何對 ai_behavior 的寫入。"
+   },
+   {
+    "source": "ghidra",
+    "location": "00023bc0",
+    "observation": "fdps_roster_add_character 全部位元組寫入位移為 +0x5..+0xd、+0xe/+0xf（迴圈）、+0x16、+0x18、+0x1a（memmove 4）、+0x1e..+0x21、+0x22（memset 6）、+0x31、+0x37、+0x39、+0x3b、+0x3c、+0x3e、+0x40..+0x46，沒有 +0x34。"
+   },
+   {
+    "source": "src",
+    "location": "src/main.c:367",
+    "observation": "data_fdps_roster_array_ptr = malloc(ROSTER_BLOCK_BYTES)（0xa00），前後沒有 memset；全 src/ 沒有對名冊區塊的 memset。"
+   },
+   {
+    "source": "ghidra",
+    "location": "000296bd",
+    "observation": "PUSH 0xa00 / CALL 0x3d375 / MOV [0x64108],EAX，之後直接開 MISC.VFS；對照 00029cf4 與 00029df4 兩塊 0x306、0xaf8 的配置後各有 CALL 0x42cd0（memset 0）。"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:590",
+    "observation": "示範戰結束 free(data_fdps_roster_array_ptr) 而不更新指標，之後名冊記錄落在已釋放區塊上。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C3；rebuild_info/pitfalls.md 名冊 +0x34 一列",
+    "observation": "C3 已寫明 fdps_roster_add_character 從不寫 +0x34、名冊單位帶著 malloc 區塊（示範戰後為已釋放區塊）原有內容；pitfalls.md 也已有不得改用 calloc／memset／補寫 ai_behavior = 0 的一列。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "fdps_roster_add_character 不初始化名冊記錄的 +0x34 行為 byte，名冊區塊 malloc 後無 memset。"
+ },
+ {
+  "id": "T10-08",
+  "trace_sha1": "3fe44563834f861cd3751c4eb4a483c83e3d1de7",
+  "from": "C4",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C4",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "FD2 原始碼定義了 CHARFLAG_CANNOT_ACT（0x04）卻沒有任何地方使用；FD2 所有對單位 flags 的寫入只有整個指派 0 或 1、|= 0x80、&= 0x7f、&= 1，沒有寫 bit 2 的地方，所以 FD2 在全員前進與下一名角色循環的 0x85 遮罩在原始碼層就已是死遮罩。這件事 cut_content/code.md 的 C4「來歷」已經寫明（含只比到原始碼層、未在 FD2 映像逐指令確認的但書），不需另外落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/btlturn.c:964",
+    "observation": "PHASE_CYCLE_SKIP_FLAGS 0x85（AND AL,0x85 at 0002bc89），註解說明 bit 0 退場、bit 7 已行動、另外也跳 bit 2"
+   },
+   {
+    "source": "src",
+    "location": "src/btlmenu.c:271",
+    "observation": "ADVANCE_ALL_SKIP_FLAGS 0x85（00014c9c 全員前進），FDPS 這一端即 C4 的主體"
+   },
+   {
+    "source": "fd2",
+    "location": "fd2-anatomy/src/include/consts.h:45",
+    "observation": "#define CHARFLAG_CANNOT_ACT 0x04；grep 整個 FD2 src 除此定義外沒有任何使用"
+   },
+   {
+    "source": "fd2",
+    "location": "fd2-anatomy/src/ui_menu/menu.c:109",
+    "observation": "全員前進 (flags & 0x85)==0 && team==2；menu.c:182 下一名角色循環同樣 & 0x85"
+   },
+   {
+    "source": "fd2",
+    "location": "fd2-anatomy/src/battle/btl_init.c:395",
+    "observation": "FD2 對 flags 的寫入逐一列出：btl_turn.c:191 |= 0x80、btl_turn.c:286 = 1、btl_init.c:345 = 0、btl_init.c:395 &= 0x7f、spelleff.c:985 &= 0x7f、save.c:56 &= 1、anicombt.c:480/515 = 1、rsrc.c:385 = 1、chinit.c:1265/1645、chend1.c:402/471/472、chend2.c:740、chevt1.c:1324、promote.c:1034 = 0；沒有任何一筆產生 bit 2"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C4",
+    "observation": "C4 來歷：FD2 原始碼同樣找不到設 bit 2 的地方、常數也沒被使用，名稱只是前作推定；FD2 端只比到原始碼層"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "FD2 端只以原始碼 grep 確認沒有寫入 bit 2，未在 FD2 的映像上逐指令確認（C4 已帶此但書）。",
+  "_reread": "第二讀確認 holds／absorbed 到 C4：重查 FD2 src 對 flags 與 [5] 的所有寫入（只有 0、1、|=0x80、&=0x7f、&=1）與 CHARFLAG_CANNOT_ACT 無使用，並對 FD2.LE 原始 byte 掃過 OR/MOV byte [reg+5],imm8 帶 bit 2 的形式，唯一命中 0x35834 是 CRT 組暫存檔名（mov [edi+5],0x5f），FDPS.LE 同樣只命中對應的 CRT；暫存器來源的寫入未逐指令排除，C4 的但書仍成立。",
+  "trace": "FD2 的 bit 2 在前作本身也沒有寫入端，CHARFLAG_CANNOT_ACT 常數定義了卻沒被使用，前作的 0x85 遮罩本身可能就已經是死遮罩。"
+ },
+ {
+  "id": "T10-09",
+  "trace_sha1": "0f97e50cd36a470eb3a88e4164f2afdb7d9b3966",
+  "from": "C5",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C5",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "FDPS.LE 對 0x60004（data_fdps_battle_action_cancel_ends_turn_flag）只有 fdps_battle_unit_turn 內的兩處讀取，沒有任何寫入，包括每回合開頭的清 0；FD2 的同形全域 data_fd2_battle_player_action_result_code（0x53C53）則在 fd2_player_action_menu_loop 開頭清 0。C5 已寫明 FD2 每回合開頭清 0、FDPS 拿掉了全域的寫入端且整個映像沒有寫入端，本痕跡的事實已被涵蓋。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "00060004",
+    "observation": "get_xrefs_to 只回兩筆 READ：000156b2 與 000157ae，都在 fdps_battle_unit_turn，沒有 WRITE。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:44",
+    "observation": "data_fdps_battle_action_cancel_ends_turn_flag 的定義，無初值（0）。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:559",
+    "observation": "fdps_battle_unit_turn 內讀取旗標 == 0 以決定退回；全 src 只有 559、585 兩處讀取，沒有賦值。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:470",
+    "observation": "fdps_battle_unit_turn 開頭只初始化 action_icons/action_disabled 等區域變數，沒有清 0x60004。"
+   },
+   {
+    "source": "fd2",
+    "location": "fd2-anatomy/src/ui_menu/menu.c:354",
+    "observation": "fd2_player_action_menu_loop 開頭 data_fd2_battle_player_action_result_code = 0；status.c:822 交付道具時設 1。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C5",
+    "observation": "C5 的「為什麼沒作用」寫整個映像沒有寫入端，「來歷」寫 FD2 每回合開頭清 0、FDPS 拿掉了全域的寫入端，已涵蓋本痕跡。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "FDPS 的 fdps_battle_unit_turn 沒有在每回合開頭把 0x60004 清 0，而 FD2 對應處在 fd2_player_action_menu_loop 開頭清 0，FDPS 連重設都一併拿掉。"
+ },
+ {
+  "id": "T10-10",
+  "trace_sha1": "99f79246a8ab8d0fdd1ee82ba54b6bada95607c7",
+  "from": "C6",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "C6",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "八個方向並非全都正確：style 6（由右側滑入）的迴圈照其他三個水平方向數到 width，每幀的落點卻是 `dst + (height - 位置)`（`0x2fa76` 加的是 height），非正方形的矩形畫面就會錯，在 320×200 上位置超過 200 後落點跑到 `dst` 之前。因為 `fdps_transition_slide` 沒有呼叫點，這個原版錯誤從未在遊戲中出現。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`fdps_transition_slide`（`0x2f6d0`）的 style 6 分支以 width 為迴圈上限、卻以 height 計算每幀落點 `dst + (height - slide_pos)`，是原版錯誤；函式在整個映像沒有呼叫或指標引用，所以這個錯誤在遊戲中從不顯現。此事實屬於 C6 條目的主題，C6 目前寫「完整可運作」且未提到它，適合補一句。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/transit.c:316",
+    "observation": "case 6：for (slide_pos = step; slide_pos < width; ...) 且 blit 目的地為 dst + (height - slide_pos)，寬 slide_pos、高 height"
+   },
+   {
+    "source": "src",
+    "location": "src/transit.c:197",
+    "observation": "函式註解記 0002fa76 為 ADD EAX,[EBP+0x28] 再 SUB EAX,[EBP-0x10]，指出錨點用 height 而其他水平分支用 width"
+   },
+   {
+    "source": "src",
+    "location": "src/transit.h:98",
+    "observation": "宣告註解說明 style 6 錨點用 height，非正方形畫錯，320x200 時位置超過 200 後錨點落在 dst 之前"
+   },
+   {
+    "source": "ghidra",
+    "location": "0002fa4f",
+    "observation": "style 6 分支（跳躍表第 7 項）：0002fa58 CMP EAX,[EBP+0x24]（width）/ JL；0002fa73 MOV EAX,[EBP+0x1c]（dst）、0002fa76 ADD EAX,[EBP+0x28]（height）、0002fa79 SUB EAX,[EBP-0x10]（位置），再 CALL 0002f2f0 blit；與 src 一致"
+   },
+   {
+    "source": "ghidra",
+    "location": "0002f6d0",
+    "observation": "C6 的判定記錄此函式零 xref、記憶體無位址 dword、原檔無 rel32 呼叫落在入口；code.md C6 條目亦同"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C6；program_info/known_bugs.md",
+    "observation": "C6 寫兩支為「完整可運作」，未提 style 6 的錯誤；known_bugs.md 沒有 transit 相關條目"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：跳躍表 0x2f6e0 第 7 項為 0x2fa4f，該分支 0x2fa58 以 width 為上限、0x2fa76 以 height 算落點，與 src/transit.c 及 transit.h 一致；0x2f6d0 無 xref，C6 未提此錯誤、pitfalls 亦無，補述 C6 的判定與文字成立。",
+  "trace": "fdps_transition_slide 的 style 6 以 height 而非 width 錨定（transit.c:316），但因函式無呼叫者，此原版 bug 在遊戲中不會顯現。"
+ },
+ {
+  "id": "T10-11",
+  "trace_sha1": "8f52bd428f5e3945d7e071d86862c2c3f1e83f06",
+  "from": "C7",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "residual",
+  "route": "25.14",
+  "title": "",
+  "kb_text": "",
+  "route_note": "story.md 要為 MAP31 與 MAP49 各寫一條「沒有路徑的地圖」：章節流程只以章節編號 0–0x1D 載入，66 支過場腳本的 SWITCH_MAP 目標涵蓋 32、34–48、50–64 卻沒有 31 與 49，MAP31 另缺 DSC 即使切過去也載入不了（事實擁有者是 resource_info/map.md 與 terrain.md，story.md 連過去並附全圖與演員配置）。",
+  "confidence": "high",
+  "conclusion": "FIELD.VFS 有 MAP00–MAP64 共 63 組 MAP*.DAT（缺 MAP30、MAP33）；章節索引只由各章 end 處理函式（下一章 1–0x1D）、新遊戲、示範（0x19）、讀檔與過場腳本的 SWITCH_MAP（src/icon.c fdps_icon_script_run）寫入。66 支過場腳本的 SWITCH_MAP 目標在 30 以上的是 32、34–48、50–64，唯獨 MAP31 與 MAP49 沒有任何路徑載入，屬殘留的場景地圖，歸 story.md（25.14）而非程式痕跡頁。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:1053-1058",
+    "observation": "SWITCH_MAP 把 data_fdps_chapter_current_chapter_id 設為腳本的 1 byte 運算元後呼叫 fdps_chapter_state_reset 重載整組地圖資源"
+   },
+   {
+    "source": "src",
+    "location": "src/chend1.c:119",
+    "observation": "章節索引的其他寫入者：chend1/chend1b/chend2/chend2b 各章 end 處理函式寫 CHnn_NEXT_CHAPTER_ID（1–0x1D），title.c:526 示範寫 0x19、title.c:1024 新遊戲、save.c:446 與 savefile.c:354 讀檔還原；沒有任何常數是 31 或 49"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS@ICON00.DAT..WINGA26.DAT",
+    "observation": "以 tools/cutscene_script 的 decode_all 追蹤全部 66 支腳本的 SWITCH_MAP 目標：30 以上出現 32、34–48、50–64，沒有 31 與 49"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS@MAP31.DAT",
+    "observation": "FIELD 內 MAP*.DAT 編號為 0–29、31、32、34–64，共 63 組；MAP31.DAT 469 byte、MAP49.DAT 417 byte 都存在"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md",
+    "observation": "map.md 第 7 行已寫明其餘地圖由 SWITCH_MAP 載入，MAP31 與 MAP49 沒有任何腳本或章節編號會切過去；地圖 31 與 33 缺 DSC 無法載入"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "FIELD.VFS 除了 MAP00–MAP29 之外還有 MAP31、MAP32、MAP34–MAP64 等 MAP*.DAT；章節流程只以章節 id 0–29 載入，其餘由過場腳本的 SWITCH_MAP 切換章節編號而載入，其中 MAP31 與 MAP49 沒有任何腳本會切過去（resource_info/map.md 已記載）。"
+ },
+ {
+  "id": "T10-12",
+  "trace_sha1": "dbf2424f55eefbf4779b331afa81644b2dbe6bdd",
+  "from": "C7",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "成立：全部 63 個 MAP*.DAT 的部署記錄中，死亡腳本 opcode 4（畫一行本章文字後把戰鬥結束碼寫成 2，判定過關）只有 1 筆，在 MAP29.DAT 第 2 筆（陣營 0、角色編號 0x3E、波次 3、AI 行為 11，運算元 0xff 故不畫文字）；連 MAP31 讀不到的尾端 11 筆也算進去仍只有這一筆。這是有在用的功能的用量統計，不是刪減或未用內容，而且 resource_info/map.md 的死亡腳本用量已寫明「4（1）」，沒有需要落地的地方。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/death.c:406",
+    "observation": "DEATH_SCRIPT_CHAPTER_CLEARED 定義為 4；src/death.c:638-640 在 opcode 4 時把 data_fdps_chapter_event_or_battle_end_code 寫成 BATTLE_END_CHAPTER_CLEARED(2)，之前 631-637 先畫運算元指定的本章文字（0xff 與 -1 不畫）"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001dcfb",
+    "observation": "CMP dword ptr [EBP-0x14],0x4 / JNZ 之後 MOV dword ptr [0x00069da0],0x2；0001dd0d 是 opcode 5 的 MOV ...,0x1，與 src 相符"
+   },
+   {
+    "source": "data",
+    "location": "MAP29.DAT@0xcd",
+    "observation": "FIELD.VFS 的 MAP29.DAT 第 2 筆部署記錄（0x83+2*0x1a）+0x16 為 04、運算元 0x00ff；記錄 003e0000285cd1ffffffffffff002000000b0000000304ff0000，陣營 0、角色 0x3E、行為 0x0B、波次 3"
+   },
+   {
+    "source": "data",
+    "location": "MAP00.DAT@0x99",
+    "observation": "普查 FIELD.VFS 全部 63 個 MAP*.DAT 部署記錄 +0x16（N 筆範圍內）：0=316、1=97、2=20、3=11、4=1、5=7、0xff=1224；含 MAP31 讀不到的尾端 11 筆時只有 0xff 增為 1235，opcode 4 仍為 1。FIELD1、FIELD2 無 MAP*.DAT"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md（死亡腳本一節）",
+    "observation": "已寫明出貨資料的死亡腳本用量 0（316）、1（97）、2（20）、3（11）、4（1）、5（7）、0xff（1,224），與普查一致"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "死亡腳本 opcode 4（判勝）在全部 MAP*.DAT 中只出現 1 筆。"
+ },
+ {
+  "id": "T10-13",
+  "trace_sha1": "4ae3cb03da08df02017384352fd230b1bf404348",
+  "from": "C8",
+  "verdict": "needs_correction",
+  "disposition": "route",
+  "entry": "C8",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "cut_content/code.md 的 C8「為什麼沒有內容」寫「整份映像裡唯一碰它的程式，是戰鬥選單的存檔在 FDE.SAV 不存在時把 4 個 slot 的章節 byte 都寫成 0xFF」並不成立：src/save.c 的 fdps_save_game_screen 在 FDE.SAV 不存在時以 memset 把整份 0x59CB byte 映像填成 0xFF（0x242dc）再整份寫回，第 4 格因此同樣被填成 0xFF，兩條存檔路徑寫入的檢查碼（+0x59C7，存讀檔畫面在 0x243df）也落在第 4 格尾端，應改寫成「以 slot 欄位定址第 4 格的指令只有戰鬥選單存檔的 0x1514b；兩條存檔路徑在建立新檔時都讓它的章節 byte 成為 0xFF，檢查碼落在它尾端的保留區」。",
+  "confidence": "high",
+  "conclusion": "痕跡的事實部分成立：戰鬥選單存檔（src/btlmenu.c 的 fdps_battle_system_submenu）在 FDE.SAV 不存在時把 4 個 slot 的 chapter byte 逐一寫成 0xFF，第 4 格在 0x1514b（MOV byte ptr [EAX+0x59a3],0xff），這也是映像中唯一以 slot 欄位定址第 4 格的指令，C8 已寫出這件事。但「唯一碰到第四格的程式」不成立：存讀檔畫面的章節存檔 fdps_save_game_screen 在檔案不存在時以 memset(image, 0xFF, 0x59CB)（PUSH 0xff 於 0x242d3、CALL 於 0x242dc）填滿整份映像再寫回，第 4 格整格都是 0xFF；兩條存檔路徑寫入的整檔檢查碼 +0x59C7 也在第 4 格尾端。C8 條目本身就寫著同樣過強的「唯一碰它的程式」，所以不能只算已吸收，要把 C8 這句的更正交給知識庫修正。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/btlmenu.c:633",
+    "observation": "save_fp == NULL 分支把 ((struct fdps_save_slot *)(save_image + SAVE_IMAGE_SLOTS_AT))[3].chapter_index 設成 SAVE_SLOT_UNWRITTEN_CHAPTER，[0]..[2] 也同樣設定。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001514b",
+    "observation": "MOV byte ptr [EAX + 0x59a3],0xff，前面是 0x15137 的 +0x4553、0x15141 的 +0x4f7b；0x59a3 = 0x312b + 3*0xa28 + 0xa00，第 4 格的 chapter_index。"
+   },
+   {
+    "source": "src",
+    "location": "src/save.c:256",
+    "observation": "fdps_save_game_screen 在 fopen(\"FDE.SAV\",\"rb\") 失敗時 memset(save_image, 0xff, SAVE_IMAGE_BYTES)，之後 save.c:287-291 寫檢查碼到 +0x59c7、加密並 fwrite 整份 0x59cb byte。"
+   },
+   {
+    "source": "ghidra",
+    "location": "000242d3",
+    "observation": "PUSH 0x59cb / PUSH 0xff / PUSH [EBP-0x8] / CALL 0x00042cd0（memset），緊接 0x242e4 IMUL [EBP-0x14],0xa28 算所選 slot，確認整份映像含第 4 格都被填成 0xFF。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C8",
+    "observation": "C8「為什麼沒有內容」寫「整份映像裡唯一碰它的程式，是戰鬥選單的存檔在 FDE.SAV 不存在時把 4 個 slot 的章節 byte 都寫成 0xFF（第 4 個在 0x1514b）」，與痕跡同樣過強。"
+   }
+  ],
+  "corrected_trace": "以 slot 欄位定址第四格的指令只有戰鬥選單存檔的 0x1514b（FDE.SAV 不存在時把它的 chapter byte 設成 0xFF）；存讀檔畫面的章節存檔在檔案不存在時以 memset 把整份映像填成 0xFF（0x242dc）再寫回，兩條存檔路徑的檢查碼 +0x59C7 也落在第四格尾端，所以第四格並非只被一處程式碰到。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一次閱讀已指出「唯一碰到第四格」要限定為「唯一以 slot 欄位存取」，卻判為 C8 已吸收、無須落地；但 C8 條目自己就寫著同一句過強的「唯一碰它的程式」，且存讀檔畫面的章節存檔在 FDE.SAV 不存在時以 memset（0x242dc）把整份映像含第 4 格填成 0xFF 再寫回，C8 的說法因此是錯的，改為 route kb_fix，交由知識庫修正更正 C8 這一句。",
+  "trace": "戰鬥中存檔（btlmenu.c:633，0001514b）在 FDE.SAV 不存在時仍把第四格的 chapter byte 初始化成 0xFF，這是整份映像裡唯一碰到第四格的程式。"
+ },
+ {
+  "id": "T10-14",
+  "trace_sha1": "985eb88d5e362cb2ffaababe1a383fa61014fef2",
+  "from": "C8",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C8",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "FDE.SAV 的整檔檢查碼 dword 在 +0x59C7，等於第 4 個 slot（base 0x4FA3）內 +0xA24..+0xA27，正是 struct fdps_save_slot 尾端 30 byte 保留區 gap_a0a（+0xA0A..+0xA27）的最後 4 byte；FD2.SAV 的佈局與檢查碼位置完全相同。C8 條目已寫明檢查碼落在第 4 格尾端保留區、且 FD2 同樣在 +0x59C7，這條痕跡沒有新增事實。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:317",
+    "observation": "struct fdps_save_slot：roster[31]（0x9B0）、gap_9b0[60]、5 個 uint、chapter_index 在 +0xA00、roster_member_count、party_gold、四個開關，gap_a0a[30] 從 +0xA0A 到 +0xA28，整體 0xA28。"
+   },
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:332",
+    "observation": "unsigned char gap_a0a[30]; 0x4FA3 + 0xA24 = 0x59C7，檢查碼即此保留區末 4 byte。"
+   },
+   {
+    "source": "src",
+    "location": "src/savefile.h:6",
+    "observation": "檔頭註解：32-bit checksum dword at +0x59c7 overlaps the tail of the unreachable fourth slot。"
+   },
+   {
+    "source": "src",
+    "location": "src/save.c:117",
+    "observation": "#define SAVE_CHECKSUM_AT 0x59c7，註解引 MOV dword ptr [EDX + 0x59c7],EAX。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlmenu.c:141",
+    "observation": "戰鬥中存檔同樣以 SAVE_CHECKSUM_AT 0x59c7 存放檢查碼。"
+   },
+   {
+    "source": "fd2",
+    "location": "fd2-anatomy/resource_info/save_format.md:33",
+    "observation": "FD2 的 +0x59C7 checksum 落在 slot 3 尾端保留 padding（slot-local +0xA24..+0xA27），+0xA0A 起 0x1E byte 保留區，與 FDPS 相同。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C8",
+    "observation": "C8「為什麼沒有內容」已寫「整檔的檢查碼（+0x59C7）落在它尾端的保留區裡」，「來歷」已寫 FD2 同樣檢查碼在 +0x59C7。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "整檔 checksum 位於 +0x59C7，疊在第四格 struct 尾端的 gap_a0a 保留區裡，這一點與 FD2 相同。"
+ },
+ {
+  "id": "T10-15",
+  "trace_sha1": "5bcef542b0c3bf8330fa00ac6482bfa616ee9f1d",
+  "from": "C9",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "C9",
+  "topic": "",
+  "category": "predecessor_leftover",
+  "route": "none",
+  "title": "",
+  "kb_text": "隨附的 `SETSOUND.EXE` 是 Miles AIL V3.02（18-Jan-95）的通用音效設定程式，照樣提供「Select and configure MIDI music driver」選單並能寫出 `MDI.INI`，`AILDRVR.LST` 也列有 17 個 `.mdi` 驅動項目（`sbpro2.mdi`、`opl3.mdi` 各出現兩次），但遊戲目錄一個 `.MDI` 檔都沒附。即使玩家自備驅動讓 `MDI.INI` 存在，也只會讓 `fdps_audio_init` 的安裝與 sequence handle 配置成功，映像裡仍沒有任何播放端。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "陳述成立：SETSOUND.EXE 是 Miles AIL 3.02 的通用設定程式，含 MIDI 驅動選單、寫 MDI.INI 的格式字串與 *.mdi 搜尋，AILDRVR.LST 有 17 個 .mdi 區段（檔名 15 種），遊戲目錄只有 9 個 .DIG 驅動與 DIG.INI、沒有任何 .MDI。這是 C9（MIDI 背景音樂初始化的前作遺留）同一件事在隨附設定程式端的樣子，補進 C9 即可。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "SETSOUND.EXE@0x265a5",
+    "observation": "選單字串「Select and configure MIDI music driver」，後接「Select and configure digital audio driver」「No MIDI music」。"
+   },
+   {
+    "source": "data",
+    "location": "SETSOUND.EXE@0x26501",
+    "observation": "\"MDI.INI\\0DIG.INI\\0\"，緊接「Current Sound Configuration」。"
+   },
+   {
+    "source": "data",
+    "location": "SETSOUND.EXE@0x255f1",
+    "observation": "開檔模式 \"wt\" 與寫出的 INI 標頭「;Miles Design Audio Interface Library V3.02 of 18-Jan-95」及 DEVICE/DRIVER/IO_ADDR 格式字串，即寫出 MDI.INI/DIG.INI 的功能。"
+   },
+   {
+    "source": "data",
+    "location": "SETSOUND.EXE@0x256d5",
+    "observation": "\"AIL3MDI\\0AIL3DIG\\0*.dig\\0*.mdi\\0AILDRVR.LST\"：在目錄搜尋 .dig 與 .mdi 驅動檔。"
+   },
+   {
+    "source": "data",
+    "location": "AILDRVR.LST@0x1c03",
+    "observation": "第一個 .mdi 區段 [mpu401.mdi]；全檔共 17 個 .mdi 區段（至 0x3df9 [pcspkr.mdi]），sbpro2.mdi 與 opl3.mdi 各兩次；另有 9 個 .dig 區段。"
+   },
+   {
+    "source": "investigation",
+    "location": "fdps_game_files/",
+    "observation": "目錄內驅動只有 ADRV688、JAMMER、PROAUDIO、RAP10、SB16、SBLASTER、SBPRO、SNDSCAPE、ULTRA 九個 .DIG 與 DIG.INI，沒有 MDI.INI 也沒有任何 .MDI。"
+   },
+   {
+    "source": "src",
+    "location": "src/audio.c:293",
+    "observation": "fdps_audio_init 呼叫 AIL_install_MDI_INI，非 NULL 時才在 audio.c:297 配 sequence handle；C9 已確認沒有播放端。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認成立：親查 SETSOUND.EXE 的 MIDI 選單、MDI.INI 字串、V3.02 of 18-Jan-95 標頭與 *.mdi 搜尋，AILDRVR.LST 的 17 個 .mdi 區段（sbpro2、opl3 各二），遊戲目錄僅九個 .DIG 無 .MDI，src/audio.c fdps_audio_init 只安裝與配 handle；C9 只寫到缺 MDI.INI／.MDI，未提設定程式端，補進 C9 合適。",
+  "trace": "SETSOUND.EXE 是 Miles 通用設定程式，保有「Select and configure MIDI music driver」選單與 MDI.INI 寫出功能，AILDRVR.LST 也列有 17 個 .mdi 項目，但遊戲目錄未附任何 .MDI 驅動檔。"
+ },
+ {
+  "id": "T10-16",
+  "trace_sha1": "64d8b6a3ff0a4d039140cc2866cfd04b5576ed17",
+  "from": "C13",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C13",
+  "topic": "",
+  "category": "negative",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "Miles AIL 的 `AIL_startup`（`0x3d718`）讀環境變數 `AIL_DEBUG`，有設定時以其值為檔名開啟記錄檔，寫入 AIL V3.02 的用量記錄標頭與開始時間並啟用逐呼叫記錄（`AIL_SYS_DEBUG` 另開巢狀呼叫記錄）；`fdps_audio_init` 每次啟動都呼叫它。這件事已由 code.md 的 C13 第三條完整陳述，不需再落地。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "0003d718",
+    "observation": "AIL_startup: getenv(\"AIL_DEBUG\") 非空時再查 AIL_SYS_DEBUG 設 data_ail_log_nested_calls_enabled，fopen(值, \"w+t\") 開記錄檔，fprintf 寫 \"Audio Interface Library application usage script generated by AIL V%s\"（版本字串 3.02）與 Start time，設 data_ail_log_enabled=1；未設或開檔失敗只套用執行期預設"
+   },
+   {
+    "source": "ghidra",
+    "location": "0006227b",
+    "observation": "字串 \"AIL_DEBUG\"；00062285 為 \"AIL_SYS_DEBUG\"，全映像只有這兩個 AIL 除錯環境變數字串"
+   },
+   {
+    "source": "src",
+    "location": "src/audio.c:288",
+    "observation": "fdps_audio_init 無條件呼叫 AIL_startup()，所以此開關在原版執行時會生效"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C13",
+    "observation": "C13 第三條已寫明：唯一能由使用者打開的除錯輸出屬於 Miles AIL，設 AIL_DEBUG（加 AIL_SYS_DEBUG）時 AIL_startup 寫出用量記錄檔，fdps_audio_init 每次都呼叫它"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "Miles AIL 的 AIL_startup（0003d718）在設定 AIL_DEBUG 環境變數時會寫出 AIL V3.02 用量記錄檔，是執行檔內唯一能由使用者開啟的除錯輸出。"
+ },
+ {
+  "id": "T10-17",
+  "trace_sha1": "e73688623fd1749f50f1c5cb244efddd75032b1c",
+  "from": "C13",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "C13",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`AIL_internal_mdi_driver_setup_full`（`0x497f0`）在 `0x498c5` 以 MDI 驅動程式描述表第一個 far 指標指向的名稱呼叫 `getenv`，把值 `strncpy` 最多 0x80 byte 進驅動狀態表開頭（緊接其後的 +0x80 是以 `SAMPLE` 前綴加驅動副檔名組成的音色庫檔名），這是驅動自訂的音色庫目錄類設定，不是 IO 參數；IO 參數另由 `AIL_get_IO_environment` 經 `AIL_internal_get_IO_environment_inner`（`0x4597d`）的另一次 `getenv` 取得。這是第三方 Miles AIL 的正常驅動設定流程，而且只在 MDI 驅動安裝成功時才走到，原版安裝沒有 `MDI.INI`，這段根本不會執行；C13 已寫明原版 `getenv` 的呼叫者全在 Miles AIL 與 CRT、遊戲碼沒有環境變數開關，這條沒有額外值得記的事。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "000498c5",
+    "observation": "AIL_internal_mdi_driver_setup_full 內唯一的 getenv 呼叫：名稱取自 AIL_call_driver 0x301 回傳的描述表（mdi_driver[1]）第一個 seg:off 指標，非空時把結果 strncpy 0x80 byte 到 mdi_driver[2]（驅動狀態表）開頭"
+   },
+   {
+    "source": "ghidra",
+    "location": "0004990b",
+    "observation": "同函式把 0x610a4 的 GTL 檔名前綴（初值 'SAMPLE'）複製到 mdi_driver[2]+0x80 再接上描述表第二個指標的副檔名；IO_PARMS 則依序取呼叫端參數、AIL_get_IO_environment、驅動自己的表，與上述 getenv 無關"
+   },
+   {
+    "source": "ghidra",
+    "location": "000451a8",
+    "observation": "getenv 的七個呼叫者：AIL_startup ×2（0003d736、0003d753）、AIL_internal_get_IO_environment_inner（0004599c）、AIL_internal_mdi_driver_setup_full（000498c5）、tzset、spawnvpe、spawnve；遊戲碼沒有"
+   },
+   {
+    "source": "src",
+    "location": "src/audio.c:293",
+    "observation": "fdps_audio_init 以 AIL_install_MDI_INI 安裝 MDI 驅動，是唯一可能走到 AIL_internal_mdi_driver_setup_full 的路徑"
+   },
+   {
+    "source": "data",
+    "location": "fdps_game_files/DIG.INI@0x0",
+    "observation": "遊戲目錄只有 DIG.INI，沒有 MDI.INI 也沒有 .MDI 驅動，MDI 安裝在原版失敗，這個 getenv 不會被執行"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C13",
+    "observation": "C13 已寫明遊戲碼不呼叫 getenv、原版 getenv 的七個呼叫者全在 Miles AIL 與 CRT，唯一使用者可開的除錯輸出是 AIL_DEBUG"
+   }
+  ],
+  "corrected_trace": "Miles AIL 的 `AIL_internal_mdi_driver_setup_full`（`0x497f0`）會以 MDI 驅動程式描述表裡的名稱呼叫 `getenv`（`0x498c5`），把值複製進驅動狀態表開頭、做為驅動自訂的音色庫目錄設定；IO 參數不是從這裡來，而是由 `AIL_get_IO_environment` 另外讀環境變數。FDPS 的安裝沒有 MDI 驅動，這段在原版不會執行。",
+  "pitfall_candidate": "",
+  "open_question": "驅動狀態表開頭 0x80 byte 的確切欄位名（推定為音色庫目錄）沒有 Miles AIL V3 標頭可逐字對照，只由 +0x80 緊接 GTL 檔名的佈局推定。",
+  "_reread": "第二次閱讀確認原判定：重新反編譯 0x497f0 確認 getenv 結果只 strncpy 進驅動狀態表開頭、IO_PARMS 另走 AIL_get_IO_environment；getenv（0x451a8）七個呼叫者全在 AIL 與 CRT；遊戲目錄無 MDI.INI 與 .MDI 驅動；C13 已涵蓋，歸 absorbed 無誤，欄位名的開放問題維持開放（本機與前作皆無 AIL V3 標頭可對照）。",
+  "trace": "AIL_internal_mdi_driver_setup_full 會以驅動程式描述裡的名稱呼叫 getenv 取得 IO 參數（驅動程式自訂的環境變數，例如音效卡設定）。"
+ },
+ {
+  "id": "T10-18",
+  "trace_sha1": "ca85249ef9ceac5c52cd1ec0ec62cf913288c958",
+  "from": "C13",
+  "verdict": "needs_correction",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "cut_content/code.md 的 C13 寫「所有按鍵讀取點只比對單一掃描碼，沒有任何按鍵序列的比對」並列出遊戲認的鍵，這不對：看板選單 `fdps_village_signboard_menu`（`0x31bc0`）把每個 make code 送進 `fdps_check_secret_code_key`（`0x357a0`），逐鍵比對該章的神秘商店暗號（24 列、每列 8 byte 的掃描碼表，映像 `0x310c0`），暗號用到字母、主鍵盤數字 1–5 與 0、`.`、`-`；C13 應改成「除了看板選單的神秘商店暗號（見 C1 與 program_info/village.md）之外沒有按鍵序列比對」，按鍵清單補上暗號用的鍵，並說明暗號是設計好的遊戲功能而不是作弊碼。",
+  "confidence": "high",
+  "conclusion": "移動快轉確實只在 `src/walk.c` 的四支移動步進函式裡：按住主鍵盤 1（掃描碼 `0x02`）或 2（`0x03`）時略過每一格的重繪，按 1 另補畫一格，其他檔案沒有以 1、2 鍵做快轉。但主鍵盤 1、2 鍵不只在 walk.c 被比對：村莊看板選單的神秘商店暗號比對 `fdps_check_secret_code_key`（`0x357a0`）以資料表比對掃描碼，第 7 章暗號 1 2 2 1 1、第 19 章 1 2、第 20 章 1 3 2 4 等都用到 `0x02`／`0x03`；這也表示 cut_content/code.md 的 C13「沒有任何按鍵序列的比對」與它的按鍵清單有誤。攻略站鏡像與已解碼的遊戲文字裡找不到 1、2 鍵快轉的說明。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/walk.c:75",
+    "observation": "SCANCODE_FAST_FORWARD 2、SCANCODE_SKIP_ANIMATION 3；全 src 只有 walk.c 定義這兩個常數，用在 202、280、365、458 行的四支步進函式與其後的補畫判斷"
+   },
+   {
+    "source": "src",
+    "location": "src/village.c:1125",
+    "observation": "fdps_check_secret_code_key 的 chapter_codes[24][8] 表：第 5 列 {0x02,0x03,0x03,0x02,0x02}（1 2 2 1 1）、第 11 列 {0x03,0x0b,0x0c,0x05,0x0b}、第 13 列 {0x02,0x06}、第 17 列 {0x02,0x03}、第 18 列 {0x02,0x04,0x03,0x05}；第 n 列是玩家看到的第 n+2 章"
+   },
+   {
+    "source": "src",
+    "location": "src/village.c:534",
+    "observation": "看板選單以 fdps_read_keyboard_queue 讀鍵，make code 一律送進 fdps_check_secret_code_key（village.c:538），回 1 時選中神秘商店"
+   },
+   {
+    "source": "ghidra",
+    "location": "000310c0",
+    "observation": "映像 192 byte 暗號表與 src 一致，第 5 列 02 03 03 02 02、第 17 列 02 03"
+   },
+   {
+    "source": "ghidra",
+    "location": "000357a0",
+    "observation": "fdps_check_secret_code_key 唯一呼叫者是 fdps_village_signboard_menu 的 00031c51"
+   },
+   {
+    "source": "guide",
+    "location": "fdps/walkthrough line 379",
+    "observation": "攻略站第 7 章「神秘商店：按12211進入」，與表的第 5 列一致"
+   },
+   {
+    "source": "guide",
+    "location": "fdps guide mirror",
+    "observation": "搜尋「數字鍵」「快轉」「按住」「鍵盤」「熱鍵」「快速鍵」皆無關於移動快轉的記載"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C13",
+    "observation": "C13 寫「所有按鍵讀取點只比對單一掃描碼，沒有任何按鍵序列的比對」，按鍵清單只列 1、2 為快轉鍵，漏了暗號比對"
+   }
+  ],
+  "corrected_trace": "主鍵盤 1、2 鍵的移動快轉只在 `src/walk.c` 的四支移動步進函式裡；但 1、2 鍵（掃描碼 `0x02`、`0x03`）另外出現在村莊看板選單的神秘商店暗號表（`fdps_check_secret_code_key`，`0x357a0`，表在 `0x310c0`），例如第 7 章的暗號 1 2 2 1 1。攻略站與已解碼的遊戲文字都沒有提到移動快轉。",
+  "pitfall_candidate": "",
+  "open_question": "遊戲內是否有提示 1、2 鍵快轉只查了攻略站鏡像與已解碼的文字檔（字串搜尋無結果），沒有逐條檢視所有文字與圖片（例如說明畫面的點陣圖），無法完全排除有圖形形式的提示。",
+  "_reread": "複讀確認：walk.c 的 SCANCODE_FAST_FORWARD／SKIP_ANIMATION 只在四支步進函式使用；village.c 的 fdps_check_secret_code_key 暗號表含 0x02／0x03 等數字鍵，Ghidra 0x310e8 讀得第 5 列 02 03 03 02 02、0x357a0 唯一呼叫者為 0x31c51（fdps_village_signboard_menu），攻略站搜尋無快轉說明；C13「沒有按鍵序列比對」確實有誤，kb_fix 路由與開放問題維持。",
+  "trace": "主鍵盤 1、2 鍵的移動快轉只在 walk.c 的四支步進函式裡比對，遊戲內是否有提示未查。"
+ },
+ {
+  "id": "T10-19",
+  "trace_sha1": "494f069d32c791aa5ad1c038e3b25ecc592dab2a",
+  "from": "C14",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C14",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "fdps_chapter_27_end（0x3b8f0）的隱藏路線依序呼叫掃除殘敵、兩次找物品、兩次移除物品、執行 WinGA26.dat、復活陣亡者，沒有直接呼叫名冊寫回 fdps_roster_write_back_battle_units（0x23980）；它的其他 callee 也都不在寫回的呼叫者之列。唯一的寫回在 fdps_icon_script_run 的 opcode 0x61 分支（0x21d74），WINGA26.DAT@0x15f 正是 0x61。排除清單 C14 列已寫明「是那條路線唯一的一次寫回」，本條已被收錄。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chend2b.c:260",
+    "observation": "fdps_chapter_27_end 的 else 分支：fdps_unit_remove_item x2、fdps_icon_script_run(WinGA26.dat)、fdps_roster_revive_fallen_members、設章節為 0x1b；整個函式沒有 fdps_roster_write_back_battle_units"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1110",
+    "observation": "opcode 0x61（SCRIPT_OP_AWARD_XP_UNIT_3）迴圈給經驗後呼叫 fdps_roster_write_back_battle_units，是 icon.c 裡唯一的寫回呼叫"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003b8f0",
+    "observation": "反組譯只有 CALL 00039e10、00034520 x2、00025cc0 x2、00021650、00039e70（隱藏路線）與 00021650、0001ba40（結局路線），沒有 CALL 00023980"
+   },
+   {
+    "source": "ghidra",
+    "location": "00023980",
+    "observation": "xref 只有 fdps_icon_script_run@00021d74 與第 1–26、28–30 章的結束處理函式；fdps_chapter_27_end、00039e10、00039e70、00034520、00025cc0 都不在其中"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS:WINGA26.DAT@0x15f",
+    "observation": "byte 為 0x61，前面是 0c 03、0a 03 08 08 00，之後接 10 01（SHAKE_VIEW）"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "fdps_chapter_27_end 的隱藏路線本身不做名冊寫回，這條路線上唯一的寫回來自 WINGA26.DAT 的 opcode 0x61。"
+ },
+ {
+  "id": "T10-20",
+  "trace_sha1": "52d3086fbad65764426e8c21a27289e29b106da6",
+  "from": "C15",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "C15",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "字串池裡另有長度 1 到 2 的片段沒有 reference，例如 `0x619ca` 與 `0x61a76` 的 `r`、`0x61fad` 的 `el`、`0x61f3d` 的 `+`：它們都落在前一個字串的 NUL 與下一個 4 byte 對齊字串之間的填充空隙，是編譯器對齊填充留下的殘餘 byte，不是字串；真正在用的 `+` 在 `0x615ac`，由 `src/text.c` 的 `fdps_draw_number` 讀取。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "0x619ca、0x61a76 的 \"r\\0\"、0x61fad 的 \"el\\0\"、0x61f3d 的 \"+\" 都位於前一字串 NUL 之後、下一個 4 byte 對齊字串之前的 2 到 3 byte 填充空隙，Ghidra 沒有 reference，全映像也找不到指向它們的 dword。它們是編譯器對齊填充帶出的殘餘 byte（形狀像 \"rb\" 的頭、\".cel\" 的尾），不是刪減的字串，屬於 C15「沒有未被引用的字串」的補充說明。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "000619b8",
+    "observation": "read_memory: \"M%02d.dtl\\0\" 佔 0x619c0–0x619c9，0x619ca–0x619cb 為 72 00（\"r\\0\"），0x619cc 起是 4 byte 對齊的 \"dsc%02d.dat\""
+   },
+   {
+    "source": "ghidra",
+    "location": "00061a68",
+    "observation": "\"...buffer!!!\\n\\0\" 的 NUL 在 0x61a74，0x61a75–0x61a77 為 00 72 00，0x61a78 起是對齊的 \"Fde.pal\""
+   },
+   {
+    "source": "ghidra",
+    "location": "00061fa0",
+    "observation": "\"Item.cel\\0\" 佔 0x61fa4–0x61fac，0x61fad–0x61faf 為 65 6c 00（\"el\\0\"），0x61fb0 起是對齊的 \"Church.cel\""
+   },
+   {
+    "source": "ghidra",
+    "location": "00061f30",
+    "observation": "\"ICON.CEL\\0\" 佔 0x61f34–0x61f3c，0x61f3d–0x61f3f 為 2b 00 00（\"+\"），0x61f40 起是對齊的 \"CanBan.cel\"；其後 0x61f4b 也有非零填充 0xfd"
+   },
+   {
+    "source": "ghidra",
+    "location": "000619ca",
+    "observation": "get_xrefs_to 0x619ca、0x61a76、0x61fad、0x61f3d 都沒有 reference；search_byte_patterns 找 ca190600、761a0600、ad1f0600、3d1f0600 全映像皆無結果"
+   },
+   {
+    "source": "src",
+    "location": "src/text.c:190-193",
+    "observation": "遊戲真正使用的 \"+\" 字面值在 0x615ac，fdps_draw_number 在 00017600 以 MOV AX,[0x000615ac] 讀取"
+   },
+   {
+    "source": "src",
+    "location": "src/chend2b.c:24-30",
+    "observation": "同型的例子：\"Win23.dat\" 之後 0x621da–0x621db 是填到 4 byte 邊界的 64 61 殘餘 byte"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二位讀者確認：重讀 0x619b0、0x61a60、0x61f30、0x61fa0 的 byte，四個片段都在前一字串 NUL 與下一個 4 byte 對齊字串之間的填充空隙且無 xref，全映像找不到 0x61a76、0x61fad 的 dword，0x615ac 確為在用的 \"+\"（src/text.c fdps_draw_number），補進 C15 的判定與文字成立。",
+  "trace": "遊戲側字串池 4 byte 對齊的填充空隙裡留有看似字串片段的殘渣（0x619ca 與 0x61a76 的 \"r\\0\"、0x61fad 的 \"el\\0\"、0x61f3d 的 \"+\" 等），沒有任何引用。"
+ },
+ {
+  "id": "T10-21",
+  "trace_sha1": "02705e4070ec189c416f768756923fc8b7df2e73",
+  "from": "C15",
+  "verdict": "needs_correction",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "HEAD 的 ghidra_snapshot/data.txt 在 0x61783、0x6179f、0x61827、0x61833、0x61aa3、0x61ac9、0x61ad9、0x61aeb、0x61d03、0x61d82 定義的無名字串起點早於真正字串（吃進前面的填充 byte），正確起點是 0x61784、0x617a0、0x61828、0x61834、0x61aa4、0x61acc、0x61adc、0x61aec、0x61d04、0x61d84；目前 Ghidra 與工作區快照已是正確定義，25.15 只需確認並把重新匯出的快照一併 commit。",
+  "confidence": "high",
+  "conclusion": "這十個位址在 HEAD 快照中的 Ghidra 字串定義起點確實比 reference 指到的真正字串早，但不全是一個 byte：0x61ac9 與 0x61ad9 早三個 byte，0x61d82 早兩個 byte，其餘七個早一個 byte。這是 Ghidra 資料定義的錯誤，不是刪減或未用內容；目前 Ghidra 已改成正確起點，reference 全部落在修正後的位址上。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "00061780",
+    "observation": "0x61783 為填充 byte 'x'(0x78)，REST.WAV 從 0x61784 起；0x6179f 為 'P'(0x50)，PlyPhase.saf 從 0x617a0 起"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061ac9",
+    "observation": "0x61ac9-0x61acb 為 0a 20 46（\"\\n F\"），PlyPhase.saf 從 0x61acc 起；0x61ad9-0x61adb 為 \" %s\"，Save.cel 從 0x61adc 起；0x61aeb 為 't'，Load.cel 從 0x61aec 起"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061d82",
+    "observation": "0x61d82-0x61d83 為 \"al\"，\"file not found: 'field.vfs'\" 從 0x61d84 起"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061784",
+    "observation": "get_bulk_xrefs：十個舊起點的 xref 全為 0，修正後起點各有 reference（例如 0x61784 來自 0x1e550、0x61acc 來自 0x241bf、0x61d84 來自 0x29e87、0x61d04 來自 0x298b0）"
+   },
+   {
+    "source": "investigation",
+    "location": "ghidra_snapshot/data.txt (git diff HEAD)",
+    "observation": "HEAD 版本列出 00061783 0xa、0006179f 0xe、00061827 0xc、00061833 0xc、00061aa3 0x26、00061ac9 0x10、00061ad9 0xc、00061aeb 0xa、00061d03 0xd、00061d82 0x1f 的無名 string；工作區版本已換成 +1/+3/+2 起點的具名字串"
+   }
+  ],
+  "corrected_trace": "HEAD 的 Ghidra 快照在 0x61783、0x6179f、0x61827、0x61833、0x61aa3、0x61ac9、0x61ad9、0x61aeb、0x61d03、0x61d82 定義的字串起點早於真正字串，把前面的填充 byte 吃進去：0x61ac9 與 0x61ad9 早三個 byte、0x61d82 早兩個 byte、其餘早一個 byte；reference 都落在真正起點，目前 Ghidra 已修正。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：Ghidra 記憶體 0x61780、0x61820、0x61aa0、0x61ac8、0x61d00、0x61d80 的 byte 證實十個舊起點吃進填充 byte（0x61ac9、0x61ad9 早三個、0x61d82 早兩個、其餘早一個），0x61acc、0x61d84 的 reference 落在真正起點而 0x61ac9 無 reference，HEAD 快照為舊定義、工作區快照已修正，route kb_fix 成立。",
+  "trace": "Ghidra 在 0x61783、0x6179f、0x61827、0x61833、0x61aa3、0x61ac9、0x61ad9、0x61aeb、0x61d03、0x61d82 定義的字串起點比真正的字串早一個 byte，把前面的填充 byte 吃進去。"
+ },
+ {
+  "id": "T10-22",
+  "trace_sha1": "c6aa2d7862f7dc13397cc9fb19757d98d8f665e6",
+  "from": "C16",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "C16h",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "格子事件旗標 data_fdps_map_cell_event_triggered_flags（0x640d8，32 格）的 0x13–0x1F 共 13 格沒有任何程式以常數位址或資料驅動的索引單獨讀寫它們，只跟著整張表在開章時被 memset 清零、在存讀檔時被整段 0x20 byte 複製。資料驅動的索引（地圖事件碼層、部署記錄 +0x14 的事件格號、過場 opcode 0x13）全在 0–15，程式常數只用到 2、0x10、0x11、0x12。這是陣列容量大於用量，已由排除清單 C16h 記載。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/gamedata.h:311",
+    "observation": "陣列宣告 32 格，註解記開章 memset 0x20 byte（00022782）、存讀檔 memmove 0x20 byte（000151a6、00024062），索引無邊界檢查"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:282",
+    "observation": "fdps_chapter_state_reset 以 memset 清整張 0x20 byte 表"
+   },
+   {
+    "source": "src",
+    "location": "src/savefile.c:383",
+    "observation": "讀檔以 memmove 把 SAVE_TRIGGERED_FLAGS_BYTES 從存檔映像複製回整張表；src/btlmenu.c:646 存檔方向同樣整段複製"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt1.c:166",
+    "observation": "src 內所有這張表的 slot 常數只有 0x10、0x11、0x12（chevt*/chend*/chpost* 的 #define）與 chevt6.c:526 的 2；沒有 0x13 以上的常數"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:342",
+    "observation": "單位 event_slot 唯一寫入來源是部署記錄的 cell_event_code（+0x14），mapai.c:220 以它索引此表"
+   },
+   {
+    "source": "ghidra",
+    "location": "000640eb",
+    "observation": "get_bulk_xrefs：0x640eb..0x640f7 共 13 個位址全部沒有 xref；0x640da、0x640e8、0x640e9、0x640ea 各有引用，0x640d8 的 13 個引用是以基底加索引存取、清零與複製"
+   },
+   {
+    "source": "ghidra",
+    "location": "000640f7",
+    "observation": "search_byte_patterns 以 eb..f7 40 06 00 逐一搜尋 13 個位址的 dword，全部無匹配（對照組 e8 40 06 00 找到 26 處）"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/map_decode/map_decode.py check（FIELD1/M*.DTL）",
+    "observation": "map_decode check：全部地圖的事件碼層只用 0..15"
+   },
+   {
+    "source": "data",
+    "location": "FIELD/MAP10.DAT@0x83",
+    "observation": "全部 MAP*.DAT 部署記錄的 +0x14 只有 0（1671 筆）、2（2 筆）、3（3 筆），MAP31 筆數以外的 11 筆也是 0；行為 5 的單位在 MAP10/13/16/19，事件格號 0、2、3"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI/ICON12.DAT@0x96",
+    "observation": "66 支過場腳本中 opcode 0x13 共 5 處：ICON12 slot 15、ICON14@0x1b5 slot 14、ICON29@0xb7d slot 0、ICON7-1@0x8 slot 7、ICON7-3@0x17 slot 6，值皆為 1"
+   }
+  ],
+  "corrected_trace": "格子事件旗標陣列（0x640d8，32 格）的 0x13–0x1F 共 13 格，除了開章整表清零與存讀檔整段複製之外，程式與資料都沒有單獨讀寫它們：資料驅動的索引只到 15，程式常數只用 2 與 0x10–0x12。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀者確認：Ghidra 0x640eb–0x640f7 十三個位址全無 xref、0x640d8 的引用只有基底加索引存取與開章清零、存讀檔整段複製，src 的 slot 常數只有 2 與 0x10–0x12，map_decode check 確認事件碼層只用 0–15，排除清單 C16h 已完整記載此事實，判定與歸屬不變。",
+  "trace": "格子事件旗標陣列的 0x13–0x1F 共 13 格，在程式與資料中都沒有任何讀寫。"
+ },
+ {
+  "id": "T10-23",
+  "trace_sha1": "7f5cffc39bb600b839bfa35a6b535a8c94165f38",
+  "from": "C16",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C16c",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "fdps_cd_read_q_channel（0x3c5a6，src/cdaudio.c）在整個映像只有一個呼叫點 0x3c949，位於 fdps_cd_read_audio_position 內，而 fdps_cd_read_audio_position（0x3c93a）本身零引用，所以它屬於 MSCDEX 包裝庫走不到的成員。排除清單 C16c 已把它列為「只被未用成員呼叫」的三支之一，事實已被收錄。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "0003c5a6",
+    "observation": "get_xrefs_to 只回傳一筆：0003c949 在 fdps_cd_read_audio_position 內的 UNCONDITIONAL_CALL"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003c93a",
+    "observation": "fdps_cd_read_audio_position 入口沒有任何引用"
+   },
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:316",
+    "observation": "fdps_cd_read_q_channel 的定義；上方註解稱 fdps_cd_read_audio_position 為唯一呼叫者"
+   },
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:649",
+    "observation": "src 內唯一的呼叫，位於 fdps_cd_read_audio_position 本體"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/_index.md 排除清單 C16c",
+    "observation": "C16c 列出 MSCDEX 包裝走不到的 19 支，明記 fdps_cd_read_q_channel 只被未用成員呼叫，理由為通用程式庫沒用到的 API"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "fdps_cd_read_q_channel（0003c5a6，cdaudio.c:316）唯一的呼叫者是未用的 fdps_cd_read_audio_position，同屬 MSCDEX 包裝庫走不到的部分。"
+ }
+]
