@@ -40,6 +40,9 @@ import map_decode  # noqa: E402  (owner of the MAPnn.DAT parse)
 DEFAULT_DUMP = ROOT / "workspace" / "vfs_dump"
 DEFAULT_OUT = ROOT / "workspace" / "data_tables"
 CUT = "../cut_content/_index.md"
+# Never-deployed enemies and classes nobody has are entries of the units
+# page (ticket 25.11).
+CUT_UNITS = "../cut_content/units.md"
 
 # Entry bases in FDETXT00.TXT, each the constant the program adds to an id.
 NAME_BASES = {
@@ -323,7 +326,7 @@ def enemy_rows(game):
         if i in template:
             notes.append("樣板列")
         if not chapters and not scenes:
-            notes.append(f"[未部署]({CUT})")
+            notes.append(f"[未部署]({CUT_UNITS})")
         rows.append([str(i), code(pid), game.unit_label(pid),
                      coded(e["race"], game.race_name(e["race"])),
                      coded(e["class"], game.class_name(e["class"])),
@@ -372,7 +375,7 @@ def class_user_rows(game):
         if unnamed:
             theirs.append(f"無名演員 {unnamed} 列")
         ours = unique(ours)
-        note = "—" if ours or theirs else f"[沒有單位使用]({CUT})"
+        note = "—" if ours or theirs else f"[沒有單位使用]({CUT_UNITS})"
         rows.append([code(clazz), game.class_name(clazz) or BLANK, listing(ours),
                      listing(theirs), note])
     return rows

@@ -10,6 +10,8 @@
 | --- | --- |
 | `cut_content.py` | 四個子命令（見下）；素材產生器的註冊表 `GENERATORS`；給產生器用的讀檔與寫檔函式 |
 | `test_cut_content.py` | 單元測試：`python -m unittest tools/cut_content/test_cut_content.py` |
+| `units_media.py` | `units` 主題（票 25.11）的素材產生器：頭像（`FACE.CEL`）、12 格棋子圖示排成一張（`ICON.CEL`）、戰鬥動畫 `STAND`／`ACT` 的逐格 PNG 與總覽圖、動畫內嵌音效的 WAV。頭像與圖示用 `FDE.PAL`，戰鬥動畫用 `FIGHT.PAL`；動畫每格照 `saf_decode.compose_frame` 合成在 320×200 的戰鬥畫面上，再裁到整段動畫共同的最小框 |
+| `test_units_media.py` | 單元測試：`python -m unittest tools/cut_content/test_units_media.py`（有原版遊戲檔時另跑一次完整產生，檢查檔名與兩次產生逐 byte 相同） |
 
 ## 子命令
 

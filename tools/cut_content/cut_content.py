@@ -306,6 +306,17 @@ def write_wav(path, sound):
     owner(Path(path), sound)
 
 
+# Each topic's generator lives in its own module next to this one and imports
+# the helpers above when it runs, so registering it here makes no import cycle.
+
+def _units(out_dir, game_dir):
+    from units_media import generate
+    generate(out_dir, game_dir)
+
+
+GENERATORS["units"] = _units
+
+
 # ------------------------------------------------------------------- main
 
 def cmd_index(_args):
