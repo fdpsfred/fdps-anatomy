@@ -1,0 +1,367 @@
+[
+ {
+  "id": "T8-01",
+  "trace_sha1": "c0a3d02109f7fb080c4fc1fab6ad12adeab8c2c5",
+  "from": "ch03",
+  "verdict": "holds",
+  "disposition": "new_entry",
+  "entry": "",
+  "topic": "items",
+  "category": "residual",
+  "route": "none",
+  "title": "第 3 章判負時才出場的 44 隻石巨神身上的 22,000 金",
+  "kb_text": "分類：殘留內容｜`FIELD.VFS` `MAP02.DAT` 部署記錄第 26–69 筆（`+0x83 + 0x1a × 索引`，波次 `+0x15` = `0x0F`）；`src/chevt1.c` `fdps_chapter_03_event_turn_limit_game_over`（`0x36f10`）、`src/btlturn.c` `fdps_battle_advance_turn`、`src/death.c` `fdps_run_death_scripts`（`0x1d990`）\n\n- **是什麼**：第 3 章 `MAP02.DAT` 波次 15 的 44 筆部署記錄全是 LV6 `47` 石巨神，每一筆的死亡腳本都是 opcode 1（金錢）、運算元 500，合計 22,000 金。同一張圖其餘 36 筆裡帶金錢的只有三隻石巨神（700、800、300），這一波是整張圖唯一每隻都帶錢的波次。\n- **為什麼到不了**：波次 15 只由回合事件表第 22 回合、敵方階段、slot 5 那一筆部署：`fdps_chapter_03_event_turn_limit_game_over` 畫本章文字 `0x17`、以 `fdps_deploy_wave(2, 0x0F, 0)` 放出這 44 隻（`0x36f49`），接著把戰鬥結束碼寫成 1（`0x36f55`）。`fdps_battle_advance_turn` 在敵方階段的回合事件與狀態倒數之後一看到結束碼非 0 就返回，敵方階段本身不會執行，玩家沒有任何行動機會；金錢掉落又要求擊殺者是存活的我方單位（`fdps_run_death_scripts` 的 opcode 1 分支），所以這些死亡腳本永遠不會發放。\n- **暗示**：只有這一波每隻都填了 500 金，看起來像是有過「咒語完成後石巨神全數甦醒、仍須迎戰」的設計，出貨版改成出場即判負；但資料本身證實不了原本的設計。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 3 章 MAP02.DAT 波次 15 的 44 隻 LV6 石巨神（部署記錄第 26–69 筆）每隻帶 opcode 1、500 金的死亡腳本，合計 22,000 金；這一波只在第 22 回合敵方階段前由 fdps_chapter_03_event_turn_limit_game_over 部署，部署後立刻寫入敗北碼，回合流程隨即返回，玩家無從擊倒牠們，這筆錢永遠拿不到。錢是寫好的掉落內容而沒有任何路徑，歸殘留內容，落在道具主題檔。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP02.DAT@0x327",
+    "observation": "部署記錄第 26 筆（0x83 + 0x1a × 26）：陣營 0、角色 0x47、等級 6、波次 +0x15 = 0x0F、死亡腳本 +0x16 = 01、運算元 +0x17 = 0x01F4（500）；第 26–69 筆共 44 筆全是同一內容（第 69 筆在 @0x785），波次 15 的死亡腳本運算元總和 22,000"
+   },
+   {
+    "source": "data",
+    "location": "MAP02.DAT@0x27",
+    "observation": "回合事件第 12 筆 16 05 00：第 22 回合、handler slot 5、陣營 0（敵方階段）；MAP02 其餘 36 筆部署記錄中 opcode 1 只有 700（波次 2）、800（波次 5）、300（波次 8）三筆"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt1.c:535",
+    "observation": "fdps_chapter_03_event_turn_limit_game_over：畫文字 0x17、fdps_deploy_wave(CH03_PLACEMENT_MAP_NO, CH03_TURN_LIMIT_WAVE=0xf, 0)，接著 data_fdps_chapter_event_or_battle_end_code = 1"
+   },
+   {
+    "source": "ghidra",
+    "location": "00036f49",
+    "observation": "PUSH 0xf / PUSH 0x2 / CALL 0x00023830（fdps_deploy_wave），隨後 00036f55 MOV dword ptr [0x00069da0],0x1 寫入敗北碼，之後即 RET"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:853",
+    "observation": "fdps_battle_advance_turn：fdps_battle_run_turn_events(ENEMY_PHASE_SIDE) 與 fdps_battle_tick_status_effects 之後結束碼非 0 即 return，fdps_battle_enemy_turn_phase 不會執行"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:609",
+    "observation": "死亡腳本 opcode 1（DEATH_SCRIPT_GOLD）只在擊殺者 side 為我方且未退場時把金額加進 data_fdps_shared_party_total_gold，否則整串返回"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "這 44 筆每隻 500 金的掉落是否代表原本設計過要迎戰咒語完成後甦醒的石巨神，資料與程式都證實不了。",
+  "_reread": "第二讀確認：MAP02.DAT@0x327 起第 26–69 筆逐 byte 重算為波次 0x0F、死亡腳本 01／500，合計 22,000；@0x27 回合事件 16 05 00；0x36f10 反組譯（0x36f49 PUSH 0xf、0x36f4d 呼叫部署、0x36f55 寫敗北碼）；src/btlturn.c fdps_battle_advance_turn 敵方階段前見結束碼即返回；src/death.c opcode 1 只付給我方擊殺者；items.md 無既有條目涵蓋，歸道具頁殘留內容無誤。",
+  "trace": "第 3 章：MAP02.DAT 第 15 波的 44 隻魔像（golem）身上共帶 22,000 金，這些金錢拿不到（見 chapters/ch03.md 寶物一節、tools/chapter_docs/judgements/ch03.json）。"
+ },
+ {
+  "id": "T8-02",
+  "trace_sha1": "4f0df3cef732dd3eee6ac1978dd76a5012074949",
+  "from": "ch05",
+  "verdict": "holds",
+  "disposition": "new_entry",
+  "entry": "",
+  "topic": "items",
+  "category": "residual",
+  "route": "none",
+  "title": "第 5 章開場就退場的侍衛身上的 `B5` 回復劑掉落",
+  "kb_text": "- **是什麼**：第 5 章 `MAP04.DAT` 第 32 筆（`@0x3C3`，陣營 0、角色 `5B` 侍衛、LV8、波次 2）的死亡腳本是 opcode 0、運算元 `B5`：被我方擊倒就掉落 `B5` 回復劑。同圖另一名過場演員第 31 筆（`65` 冰魔導士），以及其他章節地圖上部署後就退場的過場演員（`MAP03` 第 22 筆、`MAP12` 第 20 筆、`MAP17` 第 33 筆），死亡腳本都是 `FF`（無動作）。\n- **為什麼到不了**：波次 2 只由開場過場 `ICON04.DAT` 在 `0x02D` 的 `DEPLOY_WAVE` 部署，同一支腳本在 `0x04E` 以 `BLINK_UNITS_OUT`（opcode 9，`fdps_icon_script_blink_units_out`，`0x221e0`，`src/icon.c`）讓他退場，閃爍的最後一相把單位旗標 byte 整個寫成 1。本章的處理函式都不呼叫 `fdps_deploy_wave`（`0x23830`），唯一的事件 `fdps_chapter_05_event_enemies_advance`（`0x370e0`，`src/chevt1.c`）只改單位 6–`0x22` 的 AI 行為碼、不動退場旗標，勝利腳本 `WIN04.DAT` 也不再放置他。死亡腳本的收集 `fdps_collect_death_scripts`（`0x26180`，`src/death.c`）跳過退場旗標已設的單位，而且只收 HP 不大於 0 的單位，他在戰鬥中既不在場也沒有損血，這筆掉落永遠不會執行。`B5` 回復劑本身在本章另有三名敵兵掉落，物品並沒有因此拿不到。\n- **暗示**：這筆記錄除了角色編號、波次與死亡腳本以外，與同圖魔導士的記錄（第 8、9、22、23、29、31 筆）逐 byte 相同，像是以魔導士的列為底複製、再另外填上掉落；他原本是否要留在戰場上被擊倒，資料判斷不出來。",
+  "route_note": "",
+  "confidence": "medium",
+  "conclusion": "第 5 章 `MAP04.DAT` 第 32 筆侍衛（角色 `5B`）帶著 opcode 0、`B5` 回復劑的死亡腳本，但他只由開場過場 `ICON04.DAT` 部署並在同一支腳本裡以 `BLINK_UNITS_OUT` 退場，本章沒有任何路徑讓他回到戰場，死亡腳本的收集又跳過已退場的單位，所以這筆掉落永遠不會執行。他是已知部署後就退場的章節地圖過場演員中唯一帶掉落的一筆。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP04.DAT@0x3C3",
+    "observation": "第 32 筆：00 5b 00 00 08 2f 82 ff ff ff ff ff ff 01 81 00 00 02 00 00 00 02 00 b5 00 00，+0x15 波次 2、+0x16 opcode 0、+0x17 運算元 0x00B5；表頭 +2 記錄數 33"
+   },
+   {
+    "source": "data",
+    "location": "MAP04.DAT@0x3A9",
+    "observation": "第 31 筆（65 冰魔導士，同為過場演員）與第 32 筆只差角色、波次與死亡腳本（FF 00 00），第 8、9、22、23、29 筆魔導士亦同樣式"
+   },
+   {
+    "source": "data",
+    "location": "ICON04.DAT@0x2D",
+    "observation": "04 02 01 = DEPLOY_WAVE 波次 2；@0x4E 09 01 06 = BLINK_UNITS_OUT 單位 6（5 個我方 slot + 波次 0 的第 30 筆之後的第一個追加，即第 32 筆）"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:478",
+    "observation": "fdps_icon_script_blink_units_out（0x221e0）把旗標 byte 整個寫成 phase & 1，最後一相為 1（退場）"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:87",
+    "observation": "fdps_collect_death_scripts（0x26180）遇到 flags & 1（退場）的單位直接 continue；src/death.c:93 另要求 hp_current <= 0"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt1.c:796",
+    "observation": "fdps_chapter_05_event_enemies_advance（0x370e0）只對單位 6..0x22 改 ai_behavior 低半位元組，不動退場旗標"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost1.c:287",
+    "observation": "fdps_chapter_05_post_action 只做預設勝敗檢查與單位 3 退場判負，不部署、不復原單位"
+   },
+   {
+    "source": "data",
+    "location": "MAP03.DAT@0x2BF",
+    "observation": "其他過場演員對照：MAP03 第 22 筆、MAP12.DAT@0x28B 第 20 筆、MAP17.DAT@0x3DD 第 33 筆的死亡腳本 opcode 都是 0xFF"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cutscene_script show ICON04.DAT / WIN04.DAT; chapter_facts ch05",
+    "observation": "ICON04 部署波次 2、3、1，第 5 章 deploy_call_sites 為空；WIN04 只 PLACE_UNIT u0–u3、u5，不碰 u6"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "這筆掉落是刻意留給一個原本會上戰場的侍衛，還是複製魔導士記錄時順手填入，資料無法判斷；歸殘留內容或歸排除（資料填錯）有判斷空間。",
+  "_reread": "第二位讀者確認：重讀 MAP04.DAT@0x3C3 第 32 筆（波次 2、死亡腳本 00/0xB5，與魔導士列只差角色、波次、腳本）、ICON04.DAT 0x2D 部署與 0x4E BLINK_UNITS_OUT、src/icon.c fdps_icon_script_blink_units_out 最後一相寫 1、src/death.c fdps_collect_death_scripts 跳過退場單位、第 5 章四支處理函式與 WIN04.DAT 都不讓他回場，以及 MAP03#22、MAP12#20、MAP17#33、MAP22 波次 10 的演員死亡腳本皆為 FF；事實、分類與 items 頁新條目的放置都成立，與 T8-01、T8-05 同型的處理一致。",
+  "trace": "第 5 章：守衛 #32（MAP04 第 32 筆部署記錄）的死亡腳本掉落 B5 拿不到（見 chapters/ch05.md 寶物一節；U09 只提到 MAP04 #32 缺 STAND）。"
+ },
+ {
+  "id": "T8-03",
+  "trace_sha1": "15c9ffd456e37f43a6f977dff19b5190cd7c3ff4",
+  "from": "ch12",
+  "verdict": "needs_correction",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "known_bugs",
+  "title": "",
+  "kb_text": "",
+  "route_note": "program_info/known_bugs.md 目前沒有「中毒致死不執行死亡腳本」這一條，要新增：機制是 `fdps_battle_tick_status_effects`（`0x1fa30`）只呼叫 `fdps_play_death_animation_and_mark_dead`（`0x1d6c0`）與本章行動後處理、不呼叫 `fdps_collect_death_scripts`（`0x26180`）與 `fdps_run_death_scripts`（`0x1d990`），而標成退場後收集函式也不再收它；後果列第 6 章第 7 筆騎兵毒死時波次 2 永不出場、第 6 章索爾毒死時他的敗北死亡腳本不執行而戰鬥照常繼續（第 1 章的索爾不受影響：`fdps_chapter_01_post_action`（`0x3a3b0`）自己判定敗北，只是遺言少畫一次），以及第 12 章守護獸毒死時不掉 `58` 修佩魯／`59` 雷德／`5A` 亞德尼恩（前兩把連帶讓第 16 章流浪鐵匠的交易做不成），並注明守護獸（職業 `0x21`）只有在關掉戰鬥動畫、由牠發起物理攻擊而被我方以帶中毒效果的武器（如 `31` 黑暗之杖）反擊時才會中毒（known_bugs 第 3 條），再連到 rebuild_info/pitfalls.md 既有的中毒致死一列。",
+  "confidence": "high",
+  "conclusion": "屬實但不是刪減內容：神兵在正常擊殺下拿得到，只有在戰鬥動畫關閉、守護獸發起物理攻擊並被我方以帶毒武器反擊中毒後，敵方階段開始時的中毒扣血把牠打到 0，死亡腳本才不執行、那把劍這一局不會掉落；這是「中毒致死不跑死亡腳本」這個原版行為在第 12 章的後果，不符合被封住的內容（玩家實際上拿得到）。第 16 章流浪工匠只檢查 `58`、`59`，所以受牽連的交易只限前兩把；`5A` 本來就沒有後續處理。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:1204",
+    "observation": "fdps_battle_tick_status_effects 扣中毒傷害（最大 HP 的 1/10，下限 0）後只呼叫 fdps_play_death_animation_and_mark_dead 與章節行動後處理表，沒有 fdps_collect_death_scripts／fdps_run_death_scripts"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001fa30",
+    "observation": "callees 只有 get_unit_record、map_cursor_move_to_unit、play_death_animation_and_mark_dead（0x1d6c0）、play_indicator_queue、play_vfs_animation_over_units、show_number_indicator、unit_recompute_combat_stats；無 0x26180 或 0x1d990"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:78",
+    "observation": "fdps_collect_death_scripts 跳過 flags bit 0（已退場）的單位，所以毒死標成退場後之後的收集也不會補收它的死亡腳本"
+   },
+   {
+    "source": "src",
+    "location": "src/aiact.c:162",
+    "observation": "戰鬥動畫關閉時 AI 的物理攻擊走 fdps_unit_attack_target，被攻擊方可反擊（守方改當攻方呼叫 fdps_unit_attack_target）；動畫開啟則走全螢幕 fdps_combat_play_attack_exchange"
+   },
+   {
+    "source": "src",
+    "location": "src/unitatk.c:447",
+    "observation": "地圖上的 fdps_unit_resolve_attack_hit 中毒分支只擋 clazz == 0x19（機兵）"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.c:603",
+    "observation": "fdps_unit_is_ailment_immune 涵蓋職業 0x19、0x21–0x22、0x24–0x26 與肖像 0x3c–0x44；全螢幕 combat.c:251 與法術 fdps_unit_apply_status_effect（unitstat.c:540）、fdps_unit_inflict_random_ailments 都查它，守護獸（0x21）免疫"
+   },
+   {
+    "source": "data",
+    "location": "MAP11.DAT@0x83",
+    "observation": "三筆部署記錄（0x83、0x9D、0xB7）：陣營 0、角色 71/72/73、LV 0x14、裝備 5E 74、AI 0x0B、波次 1/2/3，死亡腳本 opcode 00、運算元 0x0058/0x0059/0x005A（@0x99、@0xB3、@0xCD）；守護獸帶 5E 斧，會發起物理攻擊"
+   },
+   {
+    "source": "investigation",
+    "location": "assets/shops.md SHOP04–SHOP06",
+    "observation": "第 12 章之前的武器店賣 31 黑暗之杖（中毒 20%，射程 1-1），是我方能拿來反擊下毒的武器"
+   },
+   {
+    "source": "investigation",
+    "location": "chapters/ch16.md",
+    "observation": "fdps_chapter_16_event_wandering_smith_forge（0x37cd0）只找蘭迪斯背包的 58、59，不看 5A"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/known_bugs.md",
+    "observation": "22 條中沒有中毒致死跳過死亡腳本一條；第 3 條只寫地圖結算的免疫判定"
+   }
+  ],
+  "corrected_trace": "第 12 章：被選中的守護獸若在敵方階段開始時被中毒扣血致死，`fdps_battle_tick_status_effects`（`0x1fa30`）不收集也不執行死亡腳本，該局拿不到那把神兵（`58` 修佩魯／`59` 雷德／`5A` 亞德尼恩）；若是 `58` 或 `59`，第 16 章流浪工匠的交易也做不成（`5A` 本來就沒有後續）。守護獸（職業 `0x21`）對全螢幕戰鬥與法術的異常免疫，只有在關掉戰鬥動畫、由牠發起物理攻擊、被我方以帶中毒效果的武器（第 12 章前可買到 `31` 黑暗之杖）反擊時，地圖結算只擋職業 `0x19` 才會讓牠中毒。這是原版中毒致死行為的後果，神兵在正常擊殺下拿得到，不是被封住的內容；rebuild_info/pitfalls.md 的「中毒致死不跑死亡腳本」一列已涵蓋重建面，program_info/known_bugs.md 尚無對應條目。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一次判定為 route known_bugs，事實（毒死不收集死亡腳本、守護獸只在關動畫時被我方帶毒武器反擊才會中毒、玩家主動攻擊一律走全螢幕結算而受免疫擋下）重驗無誤，去向不變；更正 route_note 的後果清單：原本寫「第 1 章索爾」，但第 1 章的行動後處理 `fdps_chapter_01_post_action` 會自行判定索爾退場即敗北，毒死只讓遺言少畫一次，真正受影響的是第 6 章的索爾（敗北只靠死亡腳本，毒死後戰鬥照常繼續）。",
+  "trace": "第 12 章：被選中的守護獸若被毒死（fdps_battle_tick_status_effects 0x1fa30 的毒死不跑死亡腳本），該局拿不到神兵 58 修佩魯／59 雷德／5A 亞德尼恩，第 16 章工匠交易也做不成；能毒到守護獸的只有地圖攻擊的淬毒武器（那條路只擋職業 0x19，全螢幕戰鬥與法術會擋職業 0x21）。rebuild_info/pitfalls.md 已有「中毒致死不跑死亡腳本」一列，但 cut_content/ 沒有條目（候選：被封住的內容）。"
+ },
+ {
+  "id": "T8-04",
+  "trace_sha1": "a2c2857288ee727fbbfbc8d4e8451cad50b542c3",
+  "from": "ch15",
+  "verdict": "holds",
+  "disposition": "new_entry",
+  "entry": "",
+  "topic": "story",
+  "category": "residual",
+  "route": "none",
+  "title": "`MAP14` 砲座平台：沒有東西觸發的「要塞砲消失」重繪",
+  "kb_text": "分類：殘留內容｜`FIELD1.VFS` `M14.DTL`、`M140.MPL`、`M140.CEL`，`FIELD2.VFS` `ATTR140.DAT`；`src/maptile.c` `fdps_map_apply_triggered_cell_changes`（`0x2e910`）\n\n- **是什麼**：第 15 章戰場 `MAP14` 的砲座平台 (14–18, 9–12) 有 19 格類別 `0x60` 的重繪格，事件碼層全帶旗標 15（缺的 (14, 12) 是碼 4 的埋藏格）。它們的圖磚是 360–398 的偶數號，組成光束砲座底下的圓頂砲台；重繪後的 +1 號圖磚（361–399 的奇數號）是畫好的「砲台消失」版本：圓頂不見，只剩平台地面與幾處彈坑般的凹痕，屬性表也一併改好——19 格全改成類別 `0x00`，其中 14 格的地形類別由 5（不可部署）改為 0（另 5 格本來就是 0），戰鬥背景維持 19。\n- **為什麼到不了**：重繪只在格子事件旗標設起時發生，而旗標 15 在第 15 章沒有寫入者。玩家搜尋與 AI 行為 5 只寫寶箱／埋藏格自己的事件碼（`src/btlact.c` `fdps_battle_search_cell_at_cursor`、`src/mapai.c`），`MAP14` 的寶箱與埋藏格只用碼 0–6，類別 `0x60` 的格子本身也不能搜尋；章節事件處理函式只寫 `0x10`–`0x12`（第 30 章另寫 2）；唯一以任意值設旗標的過場 opcode `0x13` `TRIGGER_CELL_EVENT`（`src/icon.c`）在本章的兩支腳本裡只出現一次，是 `ICON14.DAT` 的 `13 0e 01`（放下索橋的旗標 14），`WIN14.DAT` 沒有。唯一寫旗標 15 的腳本是第 13 章的 `ICON12.DAT`（`13 0f 01`，對 `MAP12` 的兩格），而 `fdps_chapter_state_reset` 在每章開始時把 32 格旗標清零，帶不過來。所以砲座 (16, 10) 被打倒、`fdps_chapter_15_event_boss_defeat`（`0x37b70`）清場後，圓頂仍畫在原處；決鬥成立時戰鬥會繼續，裘娜與挑戰者就在仍畫著圓頂的平台旁對打。\n- **暗示**：換圖與屬性都做齊，圖案正是砲座被摧毀後的樣子，像是原本要在打倒砲座時設旗標 15，但這一步沒有接上；打倒砲座的處理函式與勝利腳本都沒有對應的指令，證實不了原本的觸發點。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "屬實：`MAP14` 砲座平台 (14–18, 9–12) 有 19 格帶旗標 15 的重繪格，第 15 章沒有任何程式或腳本寫旗標 15，旗標又在每章開始清零，所以第 13 章 `ICON12.DAT` 設的旗標 15 也帶不過來。重繪後的圖磚是畫好的「圓頂砲台消失」版本，屬性也改成可部署的地形 0，是完整但走不到的殘留內容。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "M14.DTL@0x23a",
+    "observation": "(14, 9) 的事件碼是 15（寬 60）；map_decode show 14 列出 (14–18, 9–11) 與 (15–18, 12) 共 19 格 repaint flag 15，(14, 12) 是碼 4 的埋藏格"
+   },
+   {
+    "source": "data",
+    "location": "M140.MPL@0x231",
+    "observation": "(14, 9) 的圖磚是 360；19 格依序是 360–398 的偶數號，ATTR140.DAT 對應列旗標 0x60、地形類別 0 或 5；+1 號圖磚旗標 0、地形類別 0、背景 19"
+   },
+   {
+    "source": "investigation",
+    "location": "M140.CEL 渲染",
+    "observation": "把 19 格圖磚 +1 後渲染，光束砲座的灰色圓頂消失，只剩平台地面與焦痕，圖案完整"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:195",
+    "observation": "fdps_map_apply_triggered_cell_changes 對類別 0x20/0x60 且旗標[事件碼] 非零的格子把圖磚 +1、事件碼清 0"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:214",
+    "observation": "搜尋在類別 0x00 與 0x60 直接返回；寫旗標只寫所搜格子自己的事件碼（src/btlact.c:271、362）"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1071",
+    "observation": "opcode 0x13 以腳本 operand 為索引寫旗標，並呼叫重繪"
+   },
+   {
+    "source": "data",
+    "location": "ICON14.DAT@0x1b5",
+    "observation": "13 0e 01：本章唯一的 TRIGGER_CELL_EVENT，設旗標 14（索橋）；WIN14.DAT 沒有 0x13"
+   },
+   {
+    "source": "data",
+    "location": "ICON12.DAT@0x96",
+    "observation": "13 0f 01：全部腳本中唯一設旗標 15 的指令，屬第 13 章 MAP12（(7, 5)、(8, 5) 兩格旗標 15）"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:282",
+    "observation": "fdps_chapter_state_reset 把 32 格旗標 memset 為 0；src/chinit1b.c:551 fdps_chapter_15_init 先呼叫它再跑 ICON14"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt3.c:271",
+    "observation": "fdps_chapter_15_event_boss_defeat 清場、可能部署決鬥波次，只寫旗標 0x10，不寫 15"
+   },
+   {
+    "source": "ghidra",
+    "location": "000640e7",
+    "observation": "旗標陣列 0x640d8 第 15 格的位址沒有任何參照，也沒有指令以它為運算元"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "_supersedes": "第一次判定為屬實、新條目（story、殘留內容），結論與所有證據重驗後都成立：19 格旗標 15 的重繪格、每章開始旗標清零、全部腳本只有 `ICON12.DAT` 設旗標 15、章節處理函式只寫 `0x10`–`0x12` 與 2、`0x640e7` 無參照、重繪後圓頂確實消失。改動只在 kb_text 的兩處細節：原文說地形類別「由 5 改為 0」，實際 19 格中只有 14 格是 5、另 5 格原本就是 0；「焦痕」改為較貼近圖案的「彈坑般的凹痕」；「沒有砲座的圓頂」改為「仍畫著圓頂的平台」以免誤讀。",
+  "open_question": "原本要由哪個時機設旗標 15（打倒砲座時、或勝利腳本）資料證實不了；要落地圖片可比照 S12 另存砲台前後對照圖。",
+  "trace": "第 15 章：MAP14 有 19 個重繪格用旗標 15，沒有任何程式設定這個旗標（見 chapters/ch15.md）。"
+ },
+ {
+  "id": "T8-05",
+  "trace_sha1": "9204eb3fa3c4ad4ef880a40759a046766cc464d1",
+  "from": "ch15",
+  "verdict": "holds",
+  "disposition": "new_entry",
+  "entry": "",
+  "topic": "items",
+  "category": "residual",
+  "route": "none",
+  "title": "第 15 章開場過場友軍步兵身上的 2000 金掉落",
+  "kb_text": "分類：殘留內容｜`FIELD.VFS` `MAP14.DAT` 第 1 筆（`@0x9d`，死亡腳本在 `@0xb3`）；`src/death.c` `fdps_run_death_scripts`（`0x1d990`）、`src/aiact.c` `fdps_map_actor_use_item`（`0x27180`）、`src/item.c` `fdps_apply_item_effect_to_targets`（`0x262a0`）\n\n- **是什麼**：第 15 章戰場 `MAP14.DAT` 第 1 筆是陣營 1 的友軍 `62` 步兵（等級 15，波次 0），死亡腳本是 opcode 1、金錢 2000，與同圖第 10 筆敵方 `50` 野蠻戰士的掉落相同。章節地圖 `MAP00`–`MAP29` 非敵方的部署記錄裡，帶金錢掉落的只有這一筆。\n- **為什麼到不了**：這名步兵只是開場過場 `ICON14.DAT` 的演員。腳本讓他走到 (3, 10) 後，以 opcode `0x62`（`+0xE5`）讓 (16, 10) 的光束砲座跑一回合 AI（`fdps_map_actor_behavior_step`，`0x10010`）：砲座的武器 `63` 光束砲射程 0、砲座移動力 0，物理攻擊找不到目標，改把光束砲當道具使用——使用效果 `1E` 直接扣 9999 HP、射程 14 格直線，沿第 10 列必定打倒步兵。道具路徑最後以使用者（砲座）為對象呼叫 `fdps_run_death_scripts`（`0x26dec`），而物品與金錢兩個 opcode 要求這個單位是未退場的陣營 2（`0x1dc1d`），陣營 0 的砲座不合格，整串腳本就此返回。步兵在戰鬥開始前已退場，玩家沒有機會自己打倒他。\n- **暗示**：步兵的記錄有自己的角色編號、等級與裝備，掉落卻與同圖野蠻戰士逐值相同，像是填表時從敵兵記錄沿用過來；也可能原本打算讓這名步兵上戰場，資料判斷不出是哪一種。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 15 章 `MAP14.DAT` 第 1 筆陣營 1 的 `62` 步兵確實帶有 opcode 1、金錢 2000 的死亡腳本，而且永遠不會發放：開場過場 `ICON14.DAT` 讓 (16, 10) 的光束砲座跑一回合 AI，砲座的光束砲射程 0、移動力 0，物理分數為 0，改走道具路徑（使用效果 1E、9999 直接傷害、14 格直線）沿第 10 列必定打倒走到 (3, 10) 的步兵；道具路徑以使用者砲座（陣營 0）為 actor 呼叫 `fdps_run_death_scripts`，金錢 opcode 要求存活的陣營 2，整串中止。chapters/ch15.md 寫「擊殺者是敵方」是正確的。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP14.DAT@0x9d",
+    "observation": "記錄 1：01 62 00 00 0f 22 69 ...，陣營 01、角色 0x62、等級 15；+0x16（@0xb3）opcode 01，+0x17 運算元 d0 07 = 2000。記錄 10（@0x187）敵方 0x50 同樣是 opcode 1、2000"
+   },
+   {
+    "source": "data",
+    "location": "MAP14.DAT@0x341",
+    "observation": "記錄 27 光束砲座：陣營 0、角色 0x80、等級 16、裝備 0x63 光束砲與 0x99，攜帶全 ff，死亡腳本 opcode 2、slot 0x15"
+   },
+   {
+    "source": "data",
+    "location": "MAP14.COD@0x0b",
+    "observation": "錨點記錄 1 = (3, 14)，記錄 27 = (16, 10)；ICON14 讓步兵往上走 4 格到 (3, 10)，與砲座同列、距離 13"
+   },
+   {
+    "source": "data",
+    "location": "ITEM.DAT@0x8e5",
+    "observation": "物品 0x63 光束砲（23 byte 記錄 15 10 27 ... 00 00 1e 0f 27 1e 05 ...）：range_min 0、range_max 0；use_effect 1E（直接傷害）、use_amount 9999、use_distance 0x1E（直線 14 格）、use_target 05；ENEMYDAT 0x80 光束砲座 mv 0"
+   },
+   {
+    "source": "src",
+    "location": "src/chinit1b.c:520",
+    "observation": "ICON14.DAT 唯一的 opcode 0x62 在腳本偏移 229（0xE5）執行 fdps_map_actor_behavior_step(35, 0)，地圖單位 35 = 記錄 27 的光束砲座"
+   },
+   {
+    "source": "src",
+    "location": "src/aiscore.c:117",
+    "observation": "fdps_map_actor_score_best_attack 以武器 range_max/min 與移動力找目標；射程 0、移動 0 找不到 (3, 10) 的步兵，物理分數 0"
+   },
+   {
+    "source": "src",
+    "location": "src/aiscore.c:316",
+    "observation": "fdps_map_actor_score_best_item 走整個背包（含裝備中的 0x63），直線道具以 fdps_collect_targets_in_line 收目標；enemy phase 的篩選值 (use_target==0)=0，直線收集器此時保留陣營非 0 的單位，即步兵"
+   },
+   {
+    "source": "src",
+    "location": "src/mapai.c:737",
+    "observation": "fdps_map_actor_take_best_action：道具分數高於物理與法術時呼叫 fdps_map_actor_use_item"
+   },
+   {
+    "source": "src",
+    "location": "src/aiact.c:549",
+    "observation": "fdps_map_actor_use_item 以 unit_index（砲座）呼叫 fdps_apply_item_effect_to_targets"
+   },
+   {
+    "source": "src",
+    "location": "src/item.c:705",
+    "observation": "fdps_apply_item_effect_to_targets 結尾 fdps_run_death_scripts(unit_index, ...)，actor 是道具使用者"
+   },
+   {
+    "source": "ghidra",
+    "location": "00026de8",
+    "observation": "MOV EAX,[EBP+0x14]（使用者 unit_index）/ PUSH / CALL 0x0001d990 於 00026dec"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.c:331",
+    "observation": "fdps_unit_apply_damage：9999 的直接傷害扣到 0 為止，無命中判定，步兵必死"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:609",
+    "observation": "opcode 1（金錢）：actor->side != 2 或已退場時 return，整串剩下的腳本都不執行"
+   },
+   {
+    "source": "investigation",
+    "location": "FIELD MAP00–MAP29 普查",
+    "observation": "章節地圖非陣營 0 的部署記錄中帶 opcode 0/1 的只有 MAP02 第 0 筆（索爾，opcode 0 運算元 0）與 MAP14 第 1 筆（金錢 2000）"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "步兵的掉落是從敵兵記錄沿用過來的填表殘留，還是原本打算讓他上戰場，資料判斷不出。",
+  "_supersedes": "第一次判讀的結論與落點（items 頁新條目、殘留內容）不變，但把擊殺路徑寫錯：它認為砲座以物理攻擊（fdps_map_actor_move_and_attack）打倒步兵、交給 fdps_run_death_scripts 的是被攻擊的步兵本人，並據此說 chapters/ch15.md 的「擊殺者是敵方」不精確。實際上光束砲射程 0、砲座移動力 0，物理攻擊找不到目標，砲座是把光束砲當道具使用（效果 1E、9999 直接傷害、14 格直線），道具路徑以使用者砲座（陣營 0）為 actor 呼叫 fdps_run_death_scripts（0x26dec），所以 ch15.md 的說法正確。kb_text 的「為什麼到不了」改寫為道具路徑，刪去以物理攻擊為前提的假設情境，證據改列道具路徑的 src 與 Ghidra 位置。",
+  "trace": "第 15 章：友軍步兵身上的 2000 金掉落永遠不會發放（見 chapters/ch15.md）。"
+ }
+]

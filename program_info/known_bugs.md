@@ -32,6 +32,7 @@
 | 20 | 第 28 章援軍的波次 3 出場兩次、波次 4 永不出場 | `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`） | 封住三名敵兵 |
 | 21 | 第 17、23 章幾個沒有戰鬥畫面的單位被捲入全螢幕戰鬥時程式結束 | `fdps_vfs_load_entry`（`0x2a140`） | 回到 DOS（潛在，觸發未經實機確認） |
 | 22 | 第 10 章一名敵兵掉出表外物品 `FF` | `fdps_run_death_scripts`（`0x1d990`） | 背包多一件名為「裂地術」、數值不定的物品 |
+| 23 | 中毒致死不執行死亡腳本 | `fdps_battle_tick_status_effects`（`0x1fa30`） | 毒死的單位不掉寶、不觸發援軍、不下敗北判定 |
 
 ## 1. 連擊的經驗只算最後一擊
 
@@ -207,7 +208,7 @@
 
 **現象**：下面這幾個單位只要成為全螢幕物理交戰或法術演出的一方，畫面印出找不到檔案的訊息、等一個按鍵後遊戲結束回到 DOS，存檔以外的進度全部失去：第 17 章關在 (18,23) 牢房裡的人質 `0E` 亞雷斯，第 23 章圍牆後的亡魂 `24`–`27`。平常碰不到他們，只有射程或施法距離穿過牆時才會捲進去：第 17 章（地圖 16）暗魔導士站在 (18,17) 放奔雷彈；第 23 章（地圖 22）幽魂站在 (21,4) 以靈擊打 (24,4)，或死神站在 (20,6) 對 (24,6) 放咒殺術（(21,3) 對著的 (24,3) 是亡魂的目的地，亡魂一到就退場）。AI 會不會真的站上這幾格、選這個目標，靜態分析判斷不了，沒有實機確認過。
 
-**成因**：全螢幕的物理交戰 `fdps_combat_play_attack_exchange`（`0x18d60`）與法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）以雙方（法術則是施法者與每個目標）的肖像編號組出 `Stand%03d.saf`（十進位三位數），經 `fdps_vfs_load_entry`（`0x2a140`）從 `FIGHT.VFS` 載入。成員不存在時 `fdps_vfs_load_entry` 在底層讀取器印出訊息之後等一個按鍵，接著 `exit(1)`，沒有任何退路。`FIGHT.VFS` 沒有 `STAND014` 與 `STAND036`–`STAND039`，也就是肖像編號 `0x0E` 與 `0x24`–`0x27`。戰鬥動畫關閉時，AI 發動的交戰改在地圖上結算，不載入戰鬥畫面，不會當機；玩家的施法則不看這個開關、一律走全螢幕演出（[`spell.md`](spell.md)），玩家的法術若選中這幾個單位，同樣會結束程式。容器格式見 [`../resource_info/vfs.md`](../resource_info/vfs.md)，這兩章的部署見 [`../chapters/_index.md`](../chapters/_index.md) 的第 17、23 章。
+**成因**：全螢幕的物理交戰 `fdps_combat_play_attack_exchange`（`0x18d60`）與法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）以雙方（法術則是施法者與每個目標）的肖像編號組出 `Stand%03d.saf`（十進位三位數），經 `fdps_vfs_load_entry`（`0x2a140`）從 `FIGHT.VFS` 載入。成員不存在時 `fdps_vfs_load_entry` 在底層讀取器印出訊息之後等一個按鍵，接著 `exit(1)`，沒有任何退路。`FIGHT.VFS` 沒有 `STAND014` 與 `STAND036`–`STAND039`，也就是肖像編號 `0x0E` 與 `0x24`–`0x27`。戰鬥動畫關閉時，AI 發動的交戰改在地圖上結算，不載入戰鬥畫面，不會當機；玩家的施法則不看這個開關、一律走全螢幕演出（[`spell.md`](spell.md)），玩家的法術若選中這幾個單位，同樣會結束程式。容器格式見 [`../resource_info/vfs.md`](../resource_info/vfs.md)，這兩章的部署見 [第 17 章](../chapters/ch17.md)與[第 23 章](../chapters/ch23.md)。
 
 `FIGHT.VFS` 另外缺的 `STAND` 屬於正常流程不會上戰鬥畫面的單位（過場演員、MP 係數 0 而從不施法的單位），逐一的理由見 [`cut_content/_index.md`](../cut_content/_index.md) 排除清單的 U09。
 
@@ -222,3 +223,11 @@
 這是資料填錯，不是被封住的內容，見 [`cut_content/_index.md`](../cut_content/_index.md) 排除清單的 I07。
 
 **重建**：照原樣保留，運算元以帶號 16-bit 讀、入包只存低 byte，見 [`pitfalls.md` 的「不能換的型別與寫法」](../rebuild_info/pitfalls.md#不能換的型別與寫法) 的死亡腳本物品運算元一列；表外那一筆讀到什麼由堆積佈局決定。
+
+## 23. 中毒致死不執行死亡腳本
+
+**現象**：單位在陣營階段開始時被中毒扣血打死，照常倒下、退場，但它部署記錄上的死亡腳本不執行：不掉物品、不給金錢、不觸發章節事件，也不下死亡腳本的勝敗判定。已知會影響遊戲的有三處：第 6 章第 7 筆騎兵若是毒死，他死亡時才部署的波次 2 援軍永遠不會出場；第 6 章的索爾若是毒死，他的敗北死亡腳本不執行，戰鬥照常繼續；第 12 章被選中的守護獸若是毒死，這一局拿不到牠身上的神兵（`58` 修佩魯、`59` 雷德、`5A` 亞德尼恩），前兩把連帶讓第 16 章流浪鐵匠的交易做不成（[`../chapters/ch06.md`](../chapters/ch06.md)、[`../chapters/ch12.md`](../chapters/ch12.md)、[`../chapters/ch16.md`](../chapters/ch16.md)）。第 1 章的索爾不受影響：`fdps_chapter_01_post_action`（`0x3a3b0`）自己判定敗北，毒死時只是遺言少畫一次。
+
+**成因**：中毒扣血由 `fdps_battle_tick_status_effects`（`0x1fa30`）在陣營階段開始時結算，它把 HP 歸零的單位交給 `fdps_play_death_animation_and_mark_dead`（`0x1d6c0`）標成退場，再呼叫本章的行動後處理，中間不呼叫 `fdps_collect_death_scripts`（`0x26180`）與 `fdps_run_death_scripts`（`0x1d990`）；死亡腳本只在攻擊交戰與施法之後收集，而收集函式跳過已經標成退場的單位，之後也不會補收。流程見 [`battle.md`](battle.md)，死亡腳本的格式見 [`../resource_info/map.md`](../resource_info/map.md)。守護獸（職業 `0x21`）對全螢幕戰鬥與法術的異常免疫，只有在關掉戰鬥動畫、由牠發起物理攻擊、被我方以帶中毒效果的武器（第 12 章前買得到的 `31` 黑暗之杖）反擊時才會中毒（第 3 條）；正常擊倒時神兵照樣掉落，所以那三把劍不是被封住的內容。
+
+**重建**：照原樣保留，中毒結算不收集死亡腳本，見 [`pitfalls.md` 的「不能修的原版 bug」](../rebuild_info/pitfalls.md#不能修的原版-bug) 的中毒致死一列。

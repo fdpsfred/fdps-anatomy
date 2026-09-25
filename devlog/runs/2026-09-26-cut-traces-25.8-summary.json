@@ -1,0 +1,91 @@
+{
+ "ticket": "25.8",
+ "total": 5,
+ "complete": 5,
+ "unfinished": [],
+ "unfinished_detail": [],
+ "by_verdict": {
+  "holds": [
+   "T8-01",
+   "T8-02",
+   "T8-04",
+   "T8-05"
+  ],
+  "refuted": [],
+  "needs_correction": [
+   "T8-03"
+  ]
+ },
+ "by_disposition": {
+  "absorbed": [],
+  "addendum": [],
+  "new_entry": [
+   "T8-01",
+   "T8-02",
+   "T8-04",
+   "T8-05"
+  ],
+  "exclude": [],
+  "route": [
+   "T8-03"
+  ],
+  "drop": []
+ },
+ "by_route": {
+  "known_bugs": [
+   "T8-03"
+  ],
+  "pitfalls": [],
+  "kb_fix": [],
+  "25.11": [],
+  "25.12": [],
+  "25.13": [],
+  "25.14": []
+ },
+ "reread": [
+  {
+   "id": "T8-01",
+   "changed": false
+  },
+  {
+   "id": "T8-02",
+   "changed": false
+  },
+  {
+   "id": "T8-03",
+   "changed": true
+  },
+  {
+   "id": "T8-04",
+   "changed": true
+  },
+  {
+   "id": "T8-05",
+   "changed": true
+  }
+ ],
+ "still_open": [
+  {
+   "id": "T8-01",
+   "confidence": "high",
+   "open_question": "這 44 筆每隻 500 金的掉落是否代表原本設計過要迎戰咒語完成後甦醒的石巨神，資料與程式都證實不了。"
+  },
+  {
+   "id": "T8-02",
+   "confidence": "medium",
+   "open_question": "這筆掉落是刻意留給一個原本會上戰場的侍衛，還是複製魔導士記錄時順手填入，資料無法判斷；歸殘留內容或歸排除（資料填錯）有判斷空間。"
+  },
+  {
+   "id": "T8-04",
+   "confidence": "high",
+   "open_question": "原本要由哪個時機設旗標 15（打倒砲座時、或勝利腳本）資料證實不了；要落地圖片可比照 S12 另存砲台前後對照圖。"
+  },
+  {
+   "id": "T8-05",
+   "confidence": "high",
+   "open_question": "步兵的掉落是從敵兵記錄沿用過來的填表殘留，還是原本打算讓他上戰場，資料判斷不出。"
+  }
+ ],
+ "pitfall_candidates": [],
+ "stopped": ""
+}
