@@ -5,6 +5,7 @@
 | 文件 | 內容 |
 | --- | --- |
 | [`cel.md`](cel.md) | `.CEL` sprite 圖表的欄位佈局、兩種像素編碼，與 99 個檔的 sprite 數與尺寸 |
+| [`cutscene_script.md`](cutscene_script.md) | `ICONANI.VFS` 的 66 支過場腳本（`ICONnn`、`WINnn`、`GOODEND` 等）：誰在什麼時機播放、opcode 的長度與作用與使用統計、切換地圖時文字區塊與單位陣列怎麼跟著變、原版的越界寫入，以及每支腳本切到的地圖與用到的文字區塊條目 |
 | [`data_tables.md`](data_tables.md) | `MISC.VFS` 內九個 `.DAT` 資料表的大小、record 大小、筆數與索引方式，以及攻略站偏移的歸屬 |
 | [`disc_images.md`](disc_images.md) | 兩片光碟的內容清單（檔名、大小、SHA-256、音軌表）與各檔案在遊戲中的角色 |
 | [`map.md`](map.md) | `FIELD.VFS` 的 `MAPnn.DAT`／`MAPnn.COD`：命名與載入、回合事件、格子事件與部署記錄的佈局、部署座標、地圖單位索引的排法 |
