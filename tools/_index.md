@@ -29,7 +29,7 @@
 | [`ail_link/`](ail_link/_index.md) | 把前作抽出的 `ailv3.lib` 連進客戶端程式並在 DOSBox-X 裡實跑，驗證音效初始化與播放（票 19） |
 | [`backbone_walk/`](backbone_walk/_index.md) | 骨幹走查的全自動 workflow（票 12 專屬），也是 [ADR-0007](../docs/adr/0007-workflow-automation-and-agent-context.md) 五條原則的參考範例——是範例不是框架，別票自己寫自己的 |
 | [`build_flags/`](build_flags/_index.md) | 反推建置旗標組：解 LE header、跨 Watcom 版本差分編譯、CRT 位元組比對、連結實驗 |
-| [`build_gate/`](build_gate/_index.md) | 自我回歸閘：重建、與基準值做雜湊與重定位感知的比對、跑測試套件，回結構化判定（票 20） |
+| [`build_gate/`](build_gate/_index.md) | 自我回歸閘：重建、與基準值做雜湊與重定位感知的比對（含 `wcc386` 不清零的對齊空隙，票 27）、跑測試套件，回結構化判定（票 20） |
 | [`call_graph/`](call_graph/_index.md) | 建出呼叫圖（含函式指標表的間接邊）並算可達性、孤島分量與共用 helper 排名 |
 | [`cd_scope/`](cd_scope/_index.md) | 透過 DOSBox-X 把光碟映像的內容複製出來並清點 |
 | [`cel_decode/`](cel_decode/_index.md) | 解出 `.CEL` 的每個 sprite 並算圖成 PNG |

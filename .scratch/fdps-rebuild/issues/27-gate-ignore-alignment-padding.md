@@ -14,9 +14,13 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 閘門比對 `game`（與 `ailsmoke`）時抹掉對齊空隙；判定結果多一種能說明「只差填充」的等價等級，或併入既有等級並寫明
-- [ ] 證明：只改一行註解、只改換行字元，閘門不報 `different`；改一個常數或一個字串內容，閘門照樣報出來（單元測試或固定的 fixture）
-- [ ] 在乾淨 worktree 以 `HEAD` 重建，與主工作目錄的建置判定為等價；必要時以新的判定重記基準值，理由寫明
-- [ ] `rebuild_info/build_gate.md` 改寫「第三個行為中性的效果」與基準值更新規則表對應的列，`pad_diff.py` 的角色（併入閘門或保留為診斷工具）寫明
+**前作：** 查過 `C:\Users\fdpsf\Documents\fd2-anatomy` 的 `tools/`（`fd2_build`、`fd2_diff` 等）與知識庫，前作的閘門沒有處理對齊空隙，無可沿用；重定位抹零的手法沿用本專案 `lefixup.py`（其來源是前作）。
+
+- [x] 閘門比對 `game`（與 `ailsmoke`）時抹掉對齊空隙；判定結果多一種能說明「只差填充」的等價等級，或併入既有等級並寫明——新等級 `pad`（`tools/build_gate/lepad.py`；`ailsmoke` 的連結改為寫出 map）
+- [x] 證明：只改一行註解、只改換行字元，閘門不報 `different`；改一個常數或一個字串內容，閘門照樣報出來（單元測試或固定的 fixture）——`lepad.py selftest`（合成的建置，排進測試套件）加上乾淨 worktree 的逐項實建，見 `devlog/2026-09-26-gate-alignment-gaps.md`
+- [x] 在乾淨 worktree 以 `HEAD` 重建，與主工作目錄的建置判定為等價；必要時以新的判定重記基準值，理由寫明——`game` 與 `ailsmoke` 以帶空隙指紋的新判定重記
+- [x] `rebuild_info/build_gate.md` 改寫「第三個行為中性的效果」與基準值更新規則表對應的列，`pad_diff.py` 的角色（併入閘門或保留為診斷工具）寫明——`pad_diff.py` 改寫成與閘門同規則的診斷工具
+
+**結果：** 實測觸發殘值改變的是標頭檔的換行字元；在 `.c`／`.h` 加改註解、改巨集名、`.c` 換成 LF，映像都逐 byte 不變（票面「只改註解就會變」不成立）。

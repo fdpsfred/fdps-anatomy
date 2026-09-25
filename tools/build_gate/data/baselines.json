@@ -21,9 +21,9 @@
       "history": []
     },
     "ailsmoke": {
-      "recorded": "2026-09-24",
-      "commit": "cb94c81",
-      "reason": "票 22 以逐支 emit 的 fdps_dpmi_* 六支取代了票 19 的手寫 DPMI 替身（src/dpmi.c 在基準值 ba5129c 之後有 6 個 emit commit），基準值當時只跑 --target emittest 而沒有推進；票 24 跑完整 gate 時發現。link_ail.py all 實跑音效：startup/dig/sample/playing/timer/shutdown 全 ok",
+      "recorded": "2026-09-26",
+      "commit": "14a5e44",
+      "reason": "票 27：連結改為寫出 AILSMOK.MAP，閘門的指紋新增對齊空隙；映像未變——推進前的完整閘門判定為 identical（sha 049e0856 相同）。",
       "warnings": [],
       "summary_warnings": 0,
       "profile": {
@@ -35,9 +35,32 @@
         "fixup_sites": 2412,
         "outside_sha256": "03b3d6137f17b661b7c0ea14fa76a13e67d17cb1e1cc774f8c4452d9ebfc588a",
         "fixup_multiset_sha256": "fe132c0f7f4870c8c3578026dd8c8fb2e8982c454975b84aacc4f5d656eba3d3",
-        "residual_sha256": "d2e4b3af3f0c9f5faffa3f2b1699e38cc0859d6ab345a29319c27a337f9dcf1b"
+        "residual_sha256": "d2e4b3af3f0c9f5faffa3f2b1699e38cc0859d6ab345a29319c27a337f9dcf1b",
+        "pad_bytes": 29,
+        "pad_mask_sha256": "2ea72828f2e24912b9af3b8eeea9ebe95a2c0543d67ccb6f21d0870d363dd888",
+        "pad_residual_sha256": "5278541ee65351a68c1c9419d6532e9d85b0f026bf7c95ca7c18e7c643fcb647"
       },
       "history": [
+        {
+          "recorded": "2026-09-24",
+          "commit": "cb94c81",
+          "reason": "票 22 以逐支 emit 的 fdps_dpmi_* 六支取代了票 19 的手寫 DPMI 替身（src/dpmi.c 在基準值 ba5129c 之後有 6 個 emit commit），基準值當時只跑 --target emittest 而沒有推進；票 24 跑完整 gate 時發現。link_ail.py all 實跑音效：startup/dig/sample/playing/timer/shutdown 全 ok",
+          "warnings": [],
+          "summary_warnings": 0,
+          "profile": {
+            "size": 119341,
+            "sha256": "049e08565c3fe799642d4ecbacc8e63c2ece803953c7bd1f295228aea03b179c",
+            "fixup_lo": 11276,
+            "fixup_hi": 28188,
+            "fixup_len": 16912,
+            "fixup_sites": 2412,
+            "outside_sha256": "03b3d6137f17b661b7c0ea14fa76a13e67d17cb1e1cc774f8c4452d9ebfc588a",
+            "fixup_multiset_sha256": "fe132c0f7f4870c8c3578026dd8c8fb2e8982c454975b84aacc4f5d656eba3d3",
+            "residual_sha256": "d2e4b3af3f0c9f5faffa3f2b1699e38cc0859d6ab345a29319c27a337f9dcf1b"
+          },
+          "superseded_by": "票 27：連結改為寫出 AILSMOK.MAP，閘門的指紋新增對齊空隙；映像未變——推進前的完整閘門判定為 identical（sha 049e0856 相同）。",
+          "superseded_verdict": "identical"
+        },
         {
           "recorded": "2026-08-28",
           "commit": "ba5129c",
@@ -62,8 +85,8 @@
     },
     "game": {
       "recorded": "2026-09-26",
-      "commit": "fb14791",
-      "reason": "票 25.15：src/ 只改註解與巨集名（SCRIPT_OP_AWARD_XP_UNIT_3、DEMO_CHAR_SOL，值不變）。映像的差異全在 wcc386 沒清零的對齊填充：與同一 HEAD 在乾淨 worktree 的建置相比 272 byte，其中 270 byte 是字面值 NUL 後的填充、2 byte 是 _DATA 裡 data_fdps_ui_play_active_flag（unsigned char）之後到下一個對齊邊界的空隙（tools/build_gate/pad_diff.py）；填充內容也隨換行字元改變，舊基準值在它自己的 commit 6abf243 於 worktree 重建就已對不上。",
+      "commit": "14a5e44",
+      "reason": "票 27：閘門的指紋新增對齊空隙（lepad.py：空隙位置與抹掉空隙後的殘差），映像未變——推進前的完整閘門判定為 identical（sha 0a1d7c30 相同）。空隙 520 byte：字面值 258 段、符號 3 段。與乾淨 worktree（HEAD 66735c4，CRLF 取出）的建置相比差 270 byte，全數落在兩邊位置相同的空隙裡，判定 pad（pad_diff.py：relocation 0、gap 270、unexplained 0）。",
       "warnings": [],
       "summary_warnings": 0,
       "profile": {
@@ -75,9 +98,32 @@
         "fixup_sites": 6839,
         "outside_sha256": "ffec320732f0086c42395122471d0962bb218db92b1e328cd3e29a9a3763501d",
         "fixup_multiset_sha256": "cc27d7d9256cf1fb30022cc5170d554647de441060592dc5680522560061e311",
-        "residual_sha256": "10192b6b74ff3b9d2c68b1ebbf973d60f33409590aff053ccac8f65bf72af05d"
+        "residual_sha256": "10192b6b74ff3b9d2c68b1ebbf973d60f33409590aff053ccac8f65bf72af05d",
+        "pad_bytes": 520,
+        "pad_mask_sha256": "41272ce1c00128b9fa878093ecfc9777ae23637eb25ab000683380c135ea8949",
+        "pad_residual_sha256": "15efdc9b1fa28d09cf666a67e96e1d732ba89507076ec331394a62c90c8b64d6"
       },
       "history": [
+        {
+          "recorded": "2026-09-26",
+          "commit": "fb14791",
+          "reason": "票 25.15：src/ 只改註解與巨集名（SCRIPT_OP_AWARD_XP_UNIT_3、DEMO_CHAR_SOL，值不變）。映像的差異全在 wcc386 沒清零的對齊填充：與同一 HEAD 在乾淨 worktree 的建置相比 272 byte，其中 270 byte 是字面值 NUL 後的填充、2 byte 是 _DATA 裡 data_fdps_ui_play_active_flag（unsigned char）之後到下一個對齊邊界的空隙（tools/build_gate/pad_diff.py）；填充內容也隨換行字元改變，舊基準值在它自己的 commit 6abf243 於 worktree 重建就已對不上。",
+          "warnings": [],
+          "summary_warnings": 0,
+          "profile": {
+            "size": 367139,
+            "sha256": "0a1d7c300c3890be35366a54da983a6f365dcac8d112d0e7ef1b09e9e55ba579",
+            "fixup_lo": 11688,
+            "fixup_hi": 61063,
+            "fixup_len": 49375,
+            "fixup_sites": 6839,
+            "outside_sha256": "ffec320732f0086c42395122471d0962bb218db92b1e328cd3e29a9a3763501d",
+            "fixup_multiset_sha256": "cc27d7d9256cf1fb30022cc5170d554647de441060592dc5680522560061e311",
+            "residual_sha256": "10192b6b74ff3b9d2c68b1ebbf973d60f33409590aff053ccac8f65bf72af05d"
+          },
+          "superseded_by": "票 27：閘門的指紋新增對齊空隙（lepad.py：空隙位置與抹掉空隙後的殘差），映像未變——推進前的完整閘門判定為 identical（sha 0a1d7c30 相同）。空隙 520 byte：字面值 258 段、符號 3 段。與乾淨 worktree（HEAD 66735c4，CRLF 取出）的建置相比差 270 byte，全數落在兩邊位置相同的空隙裡，判定 pad（pad_diff.py：relocation 0、gap 270、unexplained 0）。",
+          "superseded_verdict": "identical"
+        },
         {
           "recorded": "2026-09-24",
           "commit": "cb94c81",

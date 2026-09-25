@@ -16,7 +16,11 @@ Two comparisons, in this order:
                 difference is confined to what the linker relocates.  Renaming a
                 symbol permutes the LE fixup records and can shift a tentative
                 definition by a few bytes; that is behaviour-neutral and must
-                not read as a regression.  Anything else does.
+                not read as a regression.  For a target that writes a linker
+                map, the alignment gaps wcc386 never clears (lepad.py) are
+                also set aside, so the same sources built from a CRLF checkout
+                and from LF-written files read as `pad`.  Anything else is
+                `different`.
 
 A pass also requires zero build errors, no warning that the baseline did not
 already record, zero undefined symbols, and every test suite green.
@@ -54,6 +58,7 @@ sys.path.insert(0, str(ROOT / "tools" / "ail_link"))
 sys.path.insert(0, str(ROOT / "tools" / "code_emit"))
 sys.path.insert(0, str(ROOT / "tools" / "game_build"))
 import lefixup  # noqa: E402
+import lepad  # noqa: E402
 import build_min as bm  # noqa: E402
 import link_ail as la  # noqa: E402
 import build_emit as ce  # noqa: E402
@@ -74,7 +79,9 @@ def _build_ailsmoke(ctx):
                             ctx["timeout"])
     return {"builder_ok": ok,
             "exe": bm.find_ci(la.OUT, "ailsmok.exe"),
-            "build_out": bm.find_ci(la.OUT, "build.out")}
+            "build_out": bm.find_ci(la.OUT, "build.out"),
+            "pad": {"map": bm.find_ci(la.OUT, la.MAP), "objs": la.OBJ,
+                    "sources": la.STAGE}}
 
 
 def _build_emittest(ctx):
@@ -107,7 +114,9 @@ def _build_game(ctx):
     ok = gb.do_build(ctx["dosbox"], ctx["watcom"], ctx["disc"], ctx["timeout"])
     return {"builder_ok": ok,
             "exe": bm.find_ci(gb.OUT, gb.EXE),
-            "build_out": bm.find_ci(gb.OUT, "build.out")}
+            "build_out": bm.find_ci(gb.OUT, "build.out"),
+            "pad": {"map": bm.find_ci(gb.OUT, gb.MAP), "objs": gb.OBJ,
+                    "sources": gb.STAGE / gb.G_SRC}}
 
 
 # The gate is target-parameterised because the thing being gated changed as the
@@ -146,6 +155,9 @@ TARGETS = {
 TEST_SUITES = [
     {"name": "build_gate.selftest",
      "argv": ["tools/build_gate/gate.py", "selftest"],
+     "needs": (), "target": None},
+    {"name": "build_gate.pad_selftest",
+     "argv": ["tools/build_gate/lepad.py", "selftest"],
      "needs": (), "target": None},
     {"name": "fdps_build.selftest",
      "argv": ["tools/fdps_build/build_min.py", "selftest"],
@@ -410,8 +422,26 @@ def build_and_compare(name, ctx, baselines):
         ", ".join(diag["undefined"]) or "none")
 
     base = (baselines.get("targets") or {}).get(name)
+    pad = None
+    if spec.get("compare", True) and built.get("pad") is not None:
+        # The alignment gaps wcc386 leaves uncleared, proved from this build's
+        # own map, objects and staged sources (lepad.py).  A target that says
+        # it has them and cannot produce them fails here rather than quietly
+        # losing the `pad` tier.
+        inputs = built["pad"]
+        try:
+            if inputs["map"] is None:
+                raise lepad.PadError("the build wrote no linker map")
+            found = lepad.analyse_build(exe, inputs["map"], inputs["objs"],
+                                        inputs["sources"])
+        except (lepad.PadError, lefixup.LeError, struct.error, OSError) as exc:
+            add("pad", False, "alignment gaps not computable: %s" % exc)
+            row["equivalence"] = None
+            return settle()
+        pad = found["ranges"]
+        row["pad"] = {k: v for k, v in found.items() if k != "ranges"}
     try:
-        fresh = lefixup.profile(exe.read_bytes())
+        fresh = lefixup.profile(exe.read_bytes(), pad=pad)
     except (lefixup.LeError, struct.error, OSError) as exc:
         # A truncated image, or one linked as something other than LE, is a
         # gate failure like any other -- never a traceback, which would skip
@@ -476,8 +506,11 @@ def build_and_compare(name, ctx, baselines):
     settle()
 
     if verdict == "different":
-        print("[gate]   a code or data byte outside every relocation changed --")
-        print("[gate]   this is a real difference, not a rename artefact.")
+        print("[gate]   a code or data byte outside every relocation and every")
+        print("[gate]   provable alignment gap changed -- this is a real")
+        print("[gate]   difference.  tools/build_gate/pad_diff.py lists the bytes.")
+    elif verdict == "pad":
+        print("[gate]   differences are relocations and uncleared alignment gaps only.")
     elif verdict == "size":
         print("[gate]   the image changed size; nothing finer is comparable.")
     elif verdict == "reloc":
@@ -614,9 +647,11 @@ def show():
               % (name, entry["recorded"], entry["profile"]["sha256"][:16],
                  entry["profile"]["size"], entry.get("commit") or "-"))
         print("           reason: %s" % entry.get("reason", "-"))
-        print("           warnings accepted: %d, relocations: %d"
+        print("           warnings accepted: %d, relocations: %d, alignment gaps: %s"
               % (len(entry.get("warnings") or []),
-                 entry["profile"]["fixup_sites"]))
+                 entry["profile"]["fixup_sites"],
+                 "%d bytes" % entry["profile"]["pad_bytes"]
+                 if "pad_bytes" in entry["profile"] else "not fingerprinted"))
         for old in entry.get("history") or []:
             print("           prior : %s %s (%s)"
                   % (old["recorded"], old["profile"]["sha256"][:16],

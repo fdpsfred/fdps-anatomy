@@ -1,93 +1,115 @@
-"""Tell whether two builds of the same LE image differ only in alignment fill.
+"""List every byte two builds of the same target differ in, and why.
 
-wcc386 pads data out to alignment boundaries without zeroing the pad: the 1-3
-bytes after a string literal's terminating NUL in the CONST pool, and the gap
-after a small initialised object in _DATA, hold whatever was left in the
-compiler's buffer, and that changes with the source text around it -- a
-comment edit is enough.  No code reads those bytes, so a difference confined
-to them is behaviour-neutral, but the gate's relocation-aware comparison sees
-a data byte outside every relocation and reports `different`
-(rebuild_info/build_gate.md).
+The gate answers with one word; when that word is `different` this is the tool
+that says where.  Each differing byte is put in one of three classes, using the
+same rules the gate uses (lefixup.py for relocations, lepad.py for the
+alignment gaps wcc386 leaves uncleared):
 
-    python tools/build_gate/pad_diff.py <old .EXE> <new .EXE> [<new .MAP>]
+    relocation   a fixup site or the Fixup Record Table
+    gap          an alignment gap proved in BOTH builds at the same place
+    unexplained  anything else -- a real difference, or a gap lepad.py could
+                 not prove (an unsized symbol, a literal it could not show to
+                 be a string); listed with the map symbols on either side
 
-A differing byte is classified automatically as literal padding when both
-images hold a NUL within the three bytes before it and the byte still lies
-before the 4-byte boundary that follows that NUL.  Every other differing run is
-listed with its object-relative offset and, when the wlink map is given, the
-map symbols on either side of it, so the gap after a small object can be
-checked by eye against the symbol's declared size in src/.
+    python tools/build_gate/pad_diff.py [--target game|ailsmoke] OLD_ROOT NEW_ROOT
 
-Exit status 0: every differing byte is literal padding.  1: some runs need the
-manual check above.  2: bad arguments or the files differ in size.
+OLD_ROOT and NEW_ROOT are repository roots that have each built the target --
+typically a clean `git worktree` at HEAD and the main working directory.  Each
+side's gaps are computed from its own image, map, objects and staged sources.
+
+Exit status 0: nothing unexplained and the gaps sit at the same places.
+1: something is unexplained, or the gap positions differ.  2: bad arguments,
+missing build files, or the images differ in size.
 """
+import argparse
 import bisect
-import os
-import re
-import struct
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import lefixup  # noqa: E402  (same folder; owns the LE header parsing)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lefixup  # noqa: E402
+import lepad  # noqa: E402
+
+# Where each target's build leaves its image, map, objects and the sources it
+# compiled, relative to the repository root (tools/game_build/build_game.py,
+# tools/ail_link/link_ail.py).
+LAYOUT = {
+    "game": ("workspace/game_build", "out/FDE.EXE", "out/FDE.MAP", "out/obj",
+             "stage/SRC"),
+    "ailsmoke": ("workspace/ail_link", "out/AILSMOK.EXE", "out/AILSMOK.MAP",
+                 "out/obj", "src"),
+}
 
 
-def is_literal_padding(a, b, i):
-    """True when byte i follows a NUL shared by both images, before the next 4-byte boundary."""
-    for k in range(i - 1, max(i - 4, -1), -1):
-        if a[k] == 0 and b[k] == 0:
-            return i < ((k + 1 + 3) // 4) * 4
-    return False
+def load(root, target):
+    work, exe, mapf, objs, src = LAYOUT[target]
+    base = Path(root) / work
+    paths = [base / exe, base / mapf, base / objs, base / src]
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        raise FileNotFoundError(", ".join(missing))
+    image = paths[0].read_bytes()
+    found = lepad.analyse_build(*paths)
+    syms = {}
+    for mod in lepad.parse_map(paths[1].read_text(encoding="latin-1"))["modules"]:
+        for obj, off, name in mod["symbols"]:
+            syms.setdefault(obj, []).append((off, name))
+    return image, found, {k: sorted(v) for k, v in syms.items()}
 
 
-def le_objects(data):
-    """(number, linear base, file start, file end) of every LE object."""
-    le = lefixup.le_base(data)
-    page = struct.unpack_from("<I", data, le + 0x28)[0]
-    table = le + struct.unpack_from("<I", data, le + 0x40)[0]
-    count = struct.unpack_from("<I", data, le + 0x44)[0]
-    pages = struct.unpack_from("<I", data, le + 0x80)[0]
-    out = []
-    for n in range(count):
-        _size, base, _flags, first, npages, _ = struct.unpack_from("<6I", data, table + 24 * n)
-        start = pages + (first - 1) * page
-        out.append((n + 1, base, start, start + npages * page))
+def covered(ranges):
+    out = set()
+    for off, length in ranges:
+        out.update(range(off, off + length))
     return out
 
 
-def map_symbols(path):
-    syms = {}
-    for line in open(path, encoding="latin-1"):
-        m = re.match(r"(\d{4}):([0-9a-f]{8})\*?\s+(\S+)", line)
-        if m:
-            syms.setdefault(int(m.group(1)), []).append((int(m.group(2), 16), m.group(3)))
-    return {k: sorted(v) for k, v in syms.items()}
-
-
 def main(argv):
-    if len(argv) not in (3, 4):
-        print(__doc__, file=sys.stderr)
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--target", choices=sorted(LAYOUT), default="game")
+    ap.add_argument("old_root")
+    ap.add_argument("new_root")
+    args = ap.parse_args(argv[1:])
+    try:
+        a, pa, _ = load(args.old_root, args.target)
+        b, pb, syms = load(args.new_root, args.target)
+    except (FileNotFoundError, lepad.PadError, lefixup.LeError) as exc:
+        print("cannot read the builds: %s" % exc)
         return 2
-    a = open(argv[1], "rb").read()
-    b = open(argv[2], "rb").read()
     if len(a) != len(b):
         print("size differs: %d vs %d" % (len(a), len(b)))
         return 2
-    syms = map_symbols(argv[3]) if len(argv) == 4 else {}
-    le_objs = le_objects(b)
+
+    reloc = set()
+    for img in (a, b):
+        lo, hi = lefixup.fixup_bounds(img)
+        reloc.update(range(lo, hi))
+        reloc |= covered(lefixup.fixup_sites(img))
+    gaps = covered(pa["ranges"]) & covered(pb["ranges"])
+    same_gaps = pa["ranges"] == pb["ranges"]
+
     diff = [i for i in range(len(a)) if a[i] != b[i]]
-    unexplained = [i for i in diff if not is_literal_padding(a, b, i)]
-    print("differing bytes: %d, not literal padding: %d" % (len(diff), len(unexplained)))
+    in_reloc = [i for i in diff if i in reloc]
+    in_gap = [i for i in diff if i not in reloc and i in gaps]
+    unexplained = [i for i in diff if i not in reloc and i not in gaps]
+    print("differing bytes: %d  relocation: %d  gap: %d  unexplained: %d"
+          % (len(diff), len(in_reloc), len(in_gap), len(unexplained)))
+    print("gaps: old %d bytes, new %d bytes, %s"
+          % (pa["bytes"], pb["bytes"],
+             "same positions" if same_gaps else "POSITIONS DIFFER"))
+
     runs = []
     for i in unexplained:
         if runs and i == runs[-1][1] + 1:
             runs[-1][1] = i
         else:
             runs.append([i, i])
+    objects = lepad.le_objects(b)
     for s, e in runs:
         where = "file 0x%x..0x%x" % (s, e)
-        for n, _base, start, end in le_objs:
-            if start <= s < end:
-                off = s - start
+        for n, obj in objects.items():
+            if obj["start"] <= s < obj["end"]:
+                off = s - obj["start"]
                 where += "  obj %d +0x%x" % (n, off)
                 table = syms.get(n, [])
                 j = bisect.bisect_right(table, (off, "\xff")) - 1
@@ -96,7 +118,10 @@ def main(argv):
                 if j + 1 < len(table):
                     where += "  before %s (+0x%x)" % (table[j + 1][1], table[j + 1][0])
         print("  " + where + "  old " + a[s:e + 1].hex() + "  new " + b[s:e + 1].hex())
-    return 1 if unexplained else 0
+    if pb["unsized"]:
+        print("symbols without a provable size (the bytes after them are "
+              "compared): %s" % ", ".join(pb["unsized"]))
+    return 1 if unexplained or not same_gaps else 0
 
 
 if __name__ == "__main__":

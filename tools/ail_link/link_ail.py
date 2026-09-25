@@ -52,6 +52,7 @@ OUT = WORK / "out"
 OBJ = OUT / "obj"
 RUN = WORK / "run"
 GUEST_LIB = WORK / "lib"
+MAP = "AILSMOK.MAP"
 
 DRV_SRC = bm.DRV_SRC
 DRV_WATCOM = bm.DRV_WATCOM
@@ -120,7 +121,11 @@ def gen_lnk(aliases):
     w = DRV_WORK
     lines = ["system dos4g",
              r"name %s:\OUT\AILSMOK.EXE" % w,
-             "option stack=8k"]
+             "option stack=8k",
+             # The build gate reads the map to find the alignment gaps wcc386
+             # leaves uncleared (tools/build_gate/lepad.py); it changes nothing
+             # in the image.
+             r"option map=%s:\OUT\%s" % (w, MAP)]
     lines += ["alias %s=%s" % (a, b) for a, b in aliases]
     lines += [r"file %s:\OUT\OBJ\%s.OBJ" % (w, stem)
               for _, stem in C_SOURCES + ASM_SOURCES]
@@ -169,7 +174,7 @@ def do_build(dosbox, watcom, disc, timeout, aliases=None, quiet=False):
     if aliases is None:
         aliases = ALIASES
     OBJ.mkdir(parents=True, exist_ok=True)
-    for parent, name in ((OUT, "AILSMOK.EXE"), (OUT, "BUILD.DON"),
+    for parent, name in ((OUT, "AILSMOK.EXE"), (OUT, MAP), (OUT, "BUILD.DON"),
                          (OUT, "BUILD.OUT"), (OUT, "HB.TXT"),
                          (WORK, "dosbox.log"), (WORK, "stdio.log")):
         p = bm.find_ci(parent, name)

@@ -121,7 +121,8 @@ def fixup_records(data):
     """Walk the Fixup Record Table; yield one dict per record.
 
     Keys: page, start, end (file offsets of the record itself), sites (list of
-    (file_offset, width) it relocates).
+    (file_offset, width) it relocates), target ((object, offset) of an
+    internal reference, else None).
 
     The table is a stream of variable-length records with no length prefix, so
     each record's target data has to be skipped exactly or the next record is
@@ -168,10 +169,17 @@ def fixup_records(data):
                 pos += 2
 
             ttype = trg & 0x03
+            target = None
             if ttype == 0:                                  # internal reference
-                pos += 2 if (trg & 0x40) else 1             # object number
+                wide_obj = bool(trg & 0x40)
+                obj = (struct.unpack_from("<H", data, pos)[0] if wide_obj
+                       else data[pos])
+                pos += 2 if wide_obj else 1                 # object number
                 if stype not in NO_TARGET_OFFSET:
-                    pos += 4 if (trg & 0x10) else 2         # target offset
+                    wide_off = bool(trg & 0x10)
+                    target = (obj, struct.unpack_from(
+                        "<I" if wide_off else "<H", data, pos)[0])
+                    pos += 4 if wide_off else 2             # target offset
             elif ttype == 1:                                # import by ordinal
                 pos += 2 if (trg & 0x40) else 1             # module ordinal
                 # 8-bit ordinal flag wins, then the 32-bit target offset flag,
@@ -199,6 +207,10 @@ def fixup_records(data):
                 "end": pos,
                 "sites": [(page_file_off + off, width) for off in offsets
                           if width],
+                # (object number, offset) the record points at, for an
+                # internal reference; None for imports and selector fixups.
+                # lepad.py reads these as the starts of referenced data.
+                "target": target,
             }
         if pos != end:
             raise LeError("fixup records for page %d ended at 0x%x, expected 0x%x"
@@ -231,11 +243,22 @@ def blank(data):
     return bytes(out)
 
 
-def profile(data):
-    """The relocation-aware fingerprint of one image."""
+def pad_mask_digest(pad):
+    """sha256 of the gap positions themselves, so a moved gap is a difference."""
+    return sha(";".join("%x+%x" % r for r in sorted(pad)).encode("ascii"))
+
+
+def profile(data, pad=None):
+    """The relocation-aware fingerprint of one image.
+
+    `pad` is the list of (file offset, length) alignment gaps lepad.py proved
+    for this image.  When given, the profile also carries the gaps' positions
+    and the residual with those bytes zeroed as well, which is what the `pad`
+    verdict compares.
+    """
     lo, hi = fixup_bounds(data)
     table = data[lo:hi]
-    return {
+    out = {
         "size": len(data),
         "sha256": sha(data),
         "fixup_lo": lo,
@@ -246,12 +269,21 @@ def profile(data):
         "fixup_multiset_sha256": sha(bytes(sorted(table))),
         "residual_sha256": sha(blank(data)),
     }
+    if pad is not None:
+        blanked = bytearray(blank(data))
+        for off, length in pad:
+            blanked[off:off + length] = bytes(length)
+        out["pad_bytes"] = sum(length for _, length in pad)
+        out["pad_mask_sha256"] = pad_mask_digest(pad)
+        out["pad_residual_sha256"] = sha(bytes(blanked))
+    return out
 
 
 # Verdicts, worst last.  `identical` and `size` are decided by their own field;
-# the middle three are the relocation-aware tiers.
-VERDICTS = ("identical", "strict", "reloc", "different", "size")
-PASSING = ("identical", "strict", "reloc")
+# the middle four are the relocation-aware tiers, `pad` adding the alignment
+# gaps wcc386 leaves uncleared (lepad.py).
+VERDICTS = ("identical", "strict", "reloc", "pad", "different", "size")
+PASSING = ("identical", "strict", "reloc", "pad")
 
 
 def compare(base, got):
@@ -261,8 +293,15 @@ def compare(base, got):
         identical   the same bytes
         strict      differs only by a permutation of the fixup record table
         reloc       differs only by relocation values plus that permutation
-        different   a code or data byte outside every fixup site changed
+        pad         additionally differs inside alignment gaps, which sit at
+                    the same positions in both images
+        different   a code or data byte outside every fixup site and every
+                    alignment gap changed, or the gaps themselves moved
         size        different sizes, so nothing finer is comparable
+
+    `pad` needs the gap fingerprint on both sides; a profile taken without it
+    (a target with no map, or a baseline recorded before it existed) can never
+    read as `pad`.
     """
     detail = {
         "size_equal": got["size"] == base["size"],
@@ -280,4 +319,10 @@ def compare(base, got):
         return "strict", detail
     if detail["residual_equal"]:
         return "reloc", detail
+    if "pad_residual_sha256" in base and "pad_residual_sha256" in got:
+        detail["pad_mask_equal"] = got["pad_mask_sha256"] == base["pad_mask_sha256"]
+        detail["pad_residual_equal"] = (got["pad_residual_sha256"]
+                                        == base["pad_residual_sha256"])
+        if detail["pad_mask_equal"] and detail["pad_residual_equal"]:
+            return "pad", detail
     return "different", detail

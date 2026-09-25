@@ -93,7 +93,7 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 | 連結 | 一次；任何未解符號都是錯誤 | 兩次，第一次的未解符號是清單（[`emit_pipeline.md`](emit_pipeline.md)） |
 | 輸出 | `FDE.EXE` 與 `FDE.MAP` | `EMITTEST.EXE` 與 `EMITTEST.MAP` |
 
-連結指令檔照 [`build_flags.md`](build_flags.md) 的連結指令：`system dos4g`、`option stack=8k`、輸出命名為 `FDE.EXE`、含 `main` 的目的檔排在第一個，三個 CRT 程式庫明列在 AIL 程式庫之後。map 一律寫出，它是實機偏差定位的依據（[`playtest.md`](playtest.md)）。
+連結指令檔照 [`build_flags.md`](build_flags.md) 的連結指令：`system dos4g`、`option stack=8k`、輸出命名為 `FDE.EXE`、含 `main` 的目的檔排在第一個，三個 CRT 程式庫明列在 AIL 程式庫之後。map 一律寫出，它是實機偏差定位的依據（[`playtest.md`](playtest.md)），也是回歸閘證明對齊空隙的依據（[`build_gate.md`](build_gate.md)）；`ailsmoke` 的連結同樣寫出 `AILSMOK.MAP`，理由是後者。map 不改變映像的任何一個 byte。
 
 兩個映像由不同的目的檔集合連結，連結器擺放全域與組語 routine 的位置因此不同，**在測試映像上成立的佈局約束不代表在遊戲映像上成立**。全域資料的逐 byte 比對與 RLE 組語的指令比對因此對兩個映像各跑一次，都登記在 build gate（[`build_gate.md`](build_gate.md)）。
 
