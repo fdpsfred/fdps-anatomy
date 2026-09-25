@@ -249,8 +249,10 @@ int fdps_map_actor_score_best_attack(int unit_index, int side_select)
    unit record +0xb + slot*2, which is inventory_slots[slot * 2 + 1] -- and
    never re-tests the flag byte at +0xa that fdps_unit_item_count counted with.
    The obvious defensive loop, walk all eight entries and skip the empty ones,
-   picks a different item set and publishes a different bag slot the moment a
-   bag has a hole in it (rebuild_info/pitfalls.md).
+   would pick a different item set and publish a different bag slot if a bag
+   ever had a hole in it.  None does: fdps_unit_remove_item shifts the entries
+   above the removed one down and fdps_unit_add_item fills the first empty
+   entry, so every bag stays packed and the two loops agree on shipped data.
 
    use_distance is read twice, and the two reads are not the same value.  The
    aim search at 00013101 takes the byte and clamps a line item down to reach 1

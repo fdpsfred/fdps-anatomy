@@ -47,17 +47,26 @@ def _newline(text):
 
 
 def apply_pitfalls(text, verdicts):
+    """Adds first, then links: a link may target a row added in the same batch.
+
+    An added row counts as present in its own form or in the form a link in the
+    same batch turns it into, so re-applying a batch changes nothing.
+    """
     nl = _newline(text)
     lines = text.split(nl)
     results = []
-    for v in verdicts:
+    relinked = {v.get("old_line"): v.get("new_line") for v in verdicts
+                if v.get("outcome") == "linked"}
+    ordered = [v for v in verdicts if v.get("outcome") == "added"] \
+        + [v for v in verdicts if v.get("outcome") != "added"]
+    for v in ordered:
         vid, outcome = v.get("id", "?"), v.get("outcome")
         if outcome == "added":
             row = v.get("row", "")
             if not row.startswith("|"):
                 results.append((vid, "error", "row is not a table row"))
                 continue
-            if row in lines:
+            if row in lines or relinked.get(row) in lines:
                 results.append((vid, "already_present", ""))
                 continue
             heading = "## " + v.get("section", "")
@@ -140,6 +149,16 @@ def selftest():
     expect("an unknown section is refused", r6[0][1] == "error")
     out7, r7 = apply_pitfalls(page, [{"id": "e", "outcome": "rejected_below_threshold"}])
     expect("a rejection changes nothing", out7 == page and r7[0][1] == "no_change")
+    batch = [{"id": "link-b", "outcome": "linked", "old_line": "| B | b | y |",
+              "new_line": "| B | b | y；[bug](../program_info/known_bugs.md) |"},
+             {"id": "b", "outcome": "added", "section": "不能修的原版 bug", "row": "| B | b | y |"}]
+    out9, r9 = apply_pitfalls(page, batch)
+    expect("a link to a row added in the same batch is applied after the add, whatever the file order",
+           "| B | b | y；[bug](../program_info/known_bugs.md) |" in out9 and "| B | b | y |" not in out9
+           and sorted(x[1] for x in r9) == ["inserted", "relinked"])
+    out10, r10 = apply_pitfalls(out9, batch)
+    expect("re-applying that batch changes nothing: the added row is recognised in its linked form",
+           out10 == out9 and sorted(x[1] for x in r10) == ["already_present", "link_already_present"])
     crlf = page.replace("\n", "\r\n")
     out8, r8 = apply_pitfalls(crlf, [{"id": "b", "outcome": "added", "section": "不能修的原版 bug",
                                       "row": "| B | b | y |"}])

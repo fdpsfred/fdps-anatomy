@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | `src/` | — | 逆向重建的完整 C 原始碼，解析遊戲資訊時的主要依據，Ghidra 為輔 | ✓ |
 | `tests/` | — | 單元測試，一個檔鏡像一個 `src/` 子檔；連結生產程式碼但不修改它（[ADR-0003](docs/adr/0003-manual-playtest-over-automated-golden.md)） | ✓ |
-| [`program_info/`](program_info/_index.md) | 程式 | `FDPS.LE` 現在做什麼，一檔對應一個子系統與 `src/` 模組 | ✓ |
+| [`program_info/`](program_info/_index.md) | 程式 | `FDPS.LE` 現在做什麼、遊戲怎麼運作，一檔對應一個子系統或跨子系統的專題 | ✓ |
 | [`resource_info/`](resource_info/_index.md) | 檔案 | 每個資源檔的二進位格式是什麼 | ✓ |
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
 | [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼 | ✓ |

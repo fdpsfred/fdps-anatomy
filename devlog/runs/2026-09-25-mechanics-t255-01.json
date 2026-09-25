@@ -1,0 +1,1088 @@
+{
+  "date": "2026-09-25",
+  "halted": false,
+  "haltReason": "",
+  "pagesRequested": [
+    "battle",
+    "map_ai",
+    "movement",
+    "spell",
+    "chapter",
+    "cutscene",
+    "dialog",
+    "village",
+    "save"
+  ],
+  "drafted": [
+    {
+      "doc": "battle",
+      "confidence": "high",
+      "open": 0,
+      "bugs": 4,
+      "pitfalls": 10
+    },
+    {
+      "doc": "map_ai",
+      "confidence": "high",
+      "open": 3,
+      "bugs": 5,
+      "pitfalls": 15
+    },
+    {
+      "doc": "movement",
+      "confidence": "high",
+      "open": 0,
+      "bugs": 0,
+      "pitfalls": 9
+    },
+    {
+      "doc": "spell",
+      "confidence": "high",
+      "open": 2,
+      "bugs": 1,
+      "pitfalls": 6
+    },
+    {
+      "doc": "chapter",
+      "confidence": "high",
+      "open": 0,
+      "bugs": 4,
+      "pitfalls": 6
+    },
+    {
+      "doc": "cutscene",
+      "confidence": "high",
+      "open": 1,
+      "bugs": 1,
+      "pitfalls": 11
+    },
+    {
+      "doc": "dialog",
+      "confidence": "high",
+      "open": 1,
+      "bugs": 0,
+      "pitfalls": 3
+    },
+    {
+      "doc": "village",
+      "confidence": "high",
+      "open": 1,
+      "bugs": 2,
+      "pitfalls": 11
+    },
+    {
+      "doc": "save",
+      "confidence": "high",
+      "open": 0,
+      "bugs": 2,
+      "pitfalls": 4
+    }
+  ],
+  "knownBugs": {
+    "doc": "known_bugs",
+    "wrote_file": true,
+    "gate_clean": true,
+    "confidence": "high",
+    "open_questions": 3,
+    "bugs": 19,
+    "pitfalls": 2,
+    "ghidra_responding": true,
+    "note": "Page unchanged; srand question settled (timer tick draws rand, per battle.md/src/audio.c); keyboard-ring question refined; indicator overrun and duel heap byte stay open."
+  },
+  "rescanned": [
+    "battle: confidence high, 0 open",
+    "map_ai: confidence high, 3 open",
+    "movement: confidence high, 0 open",
+    "spell: confidence high, 2 open",
+    "cutscene: confidence high, 1 open",
+    "dialog: confidence high, 1 open",
+    "village: confidence high, 1 open",
+    "known_bugs: confidence high, 3 open"
+  ],
+  "land": {
+    "results": [
+      {
+        "doc": "battle",
+        "status": "new"
+      },
+      {
+        "doc": "map_ai",
+        "status": "new"
+      },
+      {
+        "doc": "movement",
+        "status": "new"
+      },
+      {
+        "doc": "spell",
+        "status": "new"
+      },
+      {
+        "doc": "chapter",
+        "status": "new"
+      },
+      {
+        "doc": "cutscene",
+        "status": "new"
+      },
+      {
+        "doc": "dialog",
+        "status": "new"
+      },
+      {
+        "doc": "village",
+        "status": "new"
+      },
+      {
+        "doc": "save",
+        "status": "new"
+      },
+      {
+        "doc": "known_bugs",
+        "status": "new"
+      }
+    ],
+    "landed_gate_errors": 0,
+    "pending_links": [
+      "spell: ../cut_content/_index.md (line 299)",
+      "cutscene: ../cut_content/_index.md (line 208)",
+      "village: ../cut_content/_index.md (line 117)",
+      "village: ../cut_content/_index.md (line 316)",
+      "known_bugs: ../cut_content/_index.md (line 5)",
+      "known_bugs: ../cut_content/_index.md (line 111)",
+      "known_bugs: ../cut_content/_index.md (line 177)",
+      "known_bugs: ../cut_content/_index.md (line 187)"
+    ],
+    "ok": true,
+    "problems": "All 10 pages landed as new. Landed gate: 0 errors. The 8 pending-link warnings all point to ../cut_content/_index.md, which does not exist yet. That folder belongs to ticket 25.10."
+  },
+  "pitfallVerdicts": [
+    {
+      "id": "ch28-reinforcement-wave-halving",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms 0x39550 sets the wave to the turn counter halved with a signed shift. MAP27.DAT fires slot 44 on turns 2,4,6,7,10,..., so turn 7 repeats wave 3 and wave 4 never deploys; no pitfalls row covers this, so a new row goes under 不能修的原版 bug."
+    },
+    {
+      "id": "password-table-index-minus-one",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x357a0 that the secret-code row is chapter id minus 1 and that the last village reads past the table onto its own stack frame, and no existing pitfalls row or earlier verdict covers it, so one new row goes under 不能修的原版 bug linking program_info/village.md."
+    },
+    {
+      "id": "cutscene-opcode-0x61-not-debug",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x21650 and in src/icon.c, but pitfalls.md already has an opcode 0x61 row, and it links resource_info/cutscene_script.md, the page program_info/cutscene.md names as this fact's owner."
+    },
+    {
+      "id": "double-strike-two-rand-draws",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra (0x196d0 draws twice around the item+9 == 2 test, 0x1c3a0 once before it, all unconditional) and src/cmbblow.c and src/unitatk.c confirm it; the pattern spans two functions, and folding it into one || condition changes the double-strike rate and how many times rand() is called; neither the srand row nor any earlier verdict covers this trap, so one row was added under 不能換的型別與寫法, linking ../program_info/battle.md."
+    },
+    {
+      "id": "weapon-ailment-rolled-before-hit",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: both 0x19f80 and 0x1c520 roll the weapon's poison or paralysis chance and duration, and write the timer, before the accuracy rand(); no pitfalls row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "physical-xp-credit-assigned-not-added",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: 0x19f80 and 0x1c520 assign the XP credit on each blow, while 0x28460 adds to it, and src/ matches; no existing pitfalls row or earlier verdict covers assignment versus accumulation, so one row is added under 不能換的型別與寫法 linking program_info/battle.md."
+    },
+    {
+      "id": "timer-tick-consumes-rand",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: at 0x30790 the handler increments the tick counter, then calls rand and throws the result away. fdps_audio_init installs it on every run, with or without a sound card. No existing pitfalls row or earlier verdict covers this rand call from the timer interrupt, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "growth-equal-pair-draws-no-rand",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x1e370: when max - min is 0, a JZ skips both the rand() call and the IDIV, and src/unitstat.c matches; the existing growth-range row only says max is exclusive, and no row or earlier verdict covers the missing rand() draw."
+    },
+    {
+      "id": "stat-buff-double-multiply-chop",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x24d70: two double constants at 0x61b1c and 0x61b24, both 0x3FF2666666666666, go through FILD, FMUL, CALL __CHP and FISTP after the equipment sum; src/unit.c already cites pitfalls.md for this, yet no existing row or earlier verdict covers it."
+    },
+    {
+      "id": "counter-check-asked-twice",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra that 0x18d60 calls fdps_check_can_counter_attack at 00018f73 and again at 000190ed after the blow, and 0x12e50 re-asks the same way on the map path; the same pattern shows in src/combat.c and src/aiact.c, so it covers two functions, and no existing row or earlier verdict covers the re-asked gate, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "death-is-hp-exactly-zero",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the check at 0x1d6c0 is JZ (HP == 0) while 0x26180 and 0x274e0 use a signed JLE (HP <= 0), no existing row or earlier verdict covers this, so one row was added under 不能換的型別與寫法 linking program_info/battle.md."
+    },
+    {
+      "id": "two-physical-resolvers-not-mergeable",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that 0x19f80 uses the full fdps_unit_is_ailment_immune check while 0x1c520 checks only class 0x19, and they differ on the experience condition and the HP write-back; existing rows already cover the signedness and the experience split, but no row or earlier verdict covers the immunity difference or warns against merging the two resolvers."
+    },
+    {
+      "id": "award-early-return-keeps-credit",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the entry gates skip the clear and the cap tests are equality, but every path that adds to the accumulator zeroes it first and the only multi-award caller (opcode 0x61) assigns 99 before each call, so clearing on every exit changes no observable award."
+    },
+    {
+      "id": "default-end-check-defeat-overrides-victory",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed read-only in Ghidra at 0x3a2e0 and in src/btlend.c that the defeat store runs after the enemy sweep with no test of the current code, so writing it as else-if would flip a simultaneous outcome from defeat to victory; no pitfalls row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "duel-challenger-hardcoded-index",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that the chapter 19 and 24 duel checks test fixed unit indices 0x4d and 0x52 rather than the challenger the game just added, and that the two retire sweeps use different bounds; the natural rewrite would fix the shipped softlock and forfeit, and no existing row or earlier verdict covers it."
+    },
+    {
+      "id": "deploy-nearest-tile-tie-takes-last",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "The assembly at 0x233e6 (a JLE compare against the best distance) confirms that ties go to the last tile scanned and that the chosen tile is written only when a candidate is accepted; the chapter 30 revive handler has the same pattern, and no existing row covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "revive-fee-no-affordability-check",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra (0x39e70) and src/roster.c that the fee is subtracted from signed gold for every fallen member unchecked and clamped to 0 only after the panel closes; no existing row or earlier verdict covers it, so a row was drafted under 不能加的檢查 linking ../program_info/chapter.md."
+    },
+    {
+      "id": "writeback-mp-restored-for-retired",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra at 0x23980 (MP restored after the HP branch rejoins, no break, every map unit walked, exp read unsigned, only retired id 0 skipped); no existing pitfalls row or earlier verdict covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "destroy-enemies-16bit-hp-store",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the 16-bit store and the single death-sweep call outside the loop. A rebuild using the struct's short field is already correct, and the claimed 0-max-HP restore never happens, since chapter 24 heals before the sweep. This is a single-function detail, and src/btlend.c already records it."
+    },
+    {
+      "id": "cutscene-clears-acted-bit-on-entry",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that fdps_icon_script_run calls fdps_units_clear_status_bit7 on entry, before fdps_vfs_open, and never on exit, and that fdps_chapter_15_init clears the flag again after the script; no pitfalls row or earlier verdict covers this, so one row goes into the section on original bugs that must not be fixed (不能修的原版 bug)."
+    },
+    {
+      "id": "cutscene-hud-flags-forced-not-restored",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra (0x22100 forces both flags to 0 then literal 1; 0x224f0 saves/restores only the panel flag) and src/icon.c for 0x01/0x09/interpreter; a cross-function pattern not covered by any existing row or earlier verdict, added under 不能換的型別與寫法."
+    },
+    {
+      "id": "cutscene-fades-asymmetric",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x22410/0x22480 confirm the fade out stops one level short of black while the fade in starts fully black and runs one extra step; no existing row or earlier verdict covers it, so a new row goes under 不能換的型別與寫法 linking program_info/cutscene.md."
+    },
+    {
+      "id": "cutscene-scroll-truncated-increments",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x21e30 confirms the once-computed truncating IDIV increments, the final snap to the target, and zero frames under one tile; no existing row or earlier verdict covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "cutscene-shake-offsets-from-entry-origin",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x224f0 and src/icon.c confirm each step sets the origin to saved origin + (dx, dy) and then restores it, and no pitfalls row or earlier verdict covers this, so it is added under 不能換的型別與寫法 with a link to program_info/cutscene.md."
+    },
+    {
+      "id": "cutscene-blink-assigns-whole-flags-byte",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that opcode 0x09 (0x221e0) stores phase & 1 as the whole byte at record+5, while 0x0B/0x0C (0x21650) only OR 0x1 / AND 0xfe; the existing pitfalls row on the +5 status byte (retiring assigns the whole byte, and rewriting it as |= / &= ~ leaves the acted bit set) already covers this error, but its canon column did not link program_info/cutscene.md, so the verdict adds that link."
+    },
+    {
+      "id": "random-blocks-transition-consumes-rand",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x2fb80 and src/transit.c: the save/load mosaic transition shuffles with two ordered shared rand() draws per cell (row then column). No existing row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "turn-banner-slide-out-from-index-10",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra (0x1e840 slides in over 0..12 but slides out from 10; 0x1ea80 indexes digits as char - 0x2f) and in src/anim.c, and no existing pitfalls row or earlier verdict covers either detail, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "attack-gauge-fill-rounds-up",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "In Ghidra, the function at 0x1ef40 rounds both attack-animation HP bars up: (hp*0x29 + max - 1) IDIV max, or 0 when max <= 0, using HP read once before the frame loop. No existing row or earlier verdict warns against the floor division a rebuild would naturally write, so this adds one row under 不能換的型別與寫法."
+    },
+    {
+      "id": "effect-animation-fixed-two-ticks",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x26e00 confirms a fixed 2-tick inner loop per frame with no read of the frame duration and the sound flag set only for unit 0 on tick 0; no existing pitfalls row or earlier verdict covers it, so a row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "zoom-center-division-truncates",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x31780 shows both centre interpolations using the SAR/SHL/SBB/SAR signed divide-by-8 that truncates toward zero; the village signboard caller passes centres on both sides of screen centre, and no pitfalls row or earlier verdict covers it."
+    },
+    {
+      "id": "message-wait-has-timeout",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra at 0x203d0 confirms a bounded loop. It exits on a make code, or when the pass count, decremented once per pass and paced by one timer tick each pass, reaches zero. The text interpreter calls it with 100 passes and the death scripts with 30 or 50. No existing pitfalls row or earlier verdict covers this, so the verdict adds a new row under 不能換的型別與寫法 that links program_info/dialog.md."
+    },
+    {
+      "id": "dialog-key-read-order-and-flush",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the opposite key-read order in fdps_message_window_wait_key (read before draw, no flush) and fdps_prompt_two_choice (flush on entry, read after a frame), and fdps_draw_text flushes only at the page break; no existing row or earlier verdict covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "message-close-rebuilds-scene",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "I checked the function at 0x20820 in Ghidra and the behaviour is real: it redraws the scene onto a zeroed page, slides out an empty Message.cel panel, and never reads the village flag. But the trap sits in a single function, and pitfalls.md's own rule says single-function traps belong in that function's plate comment, whose Rebuild note (like the comment in src/msgwin.c) already describes this trap."
+    },
+    {
+      "id": "holy-water-use-target-zero",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms 0x13040 and 0x27180 flip use_target to (use_target == 0) on the enemy phase and use it as-is on the NPC phase, and ITEM.DAT gives C2 a use_target of 0 against 5 for B4-B6; no existing row or earlier verdict covers this, so one row is added under 不能修的原版 bug."
+    },
+    {
+      "id": "ch20-farlena-fail-text-unenforced",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed three ways: FDETXT20 entry 3 decodes to 蘭迪斯死亡／法蓮娜死亡, fdps_chapter_20_post_action (0x3b150) always calls the shared end check at 0x3a2e0, and that check watches slot 3 only for chapter ids 0x10/0x15 (chapter 20 is 0x13); the existing row covers only chapter 14 and the guide, so this adds a new row under 不能照字面理解的資料 that links program_info/chapter.md and known_bugs.md."
+    },
+    {
+      "id": "ai-side-select-truth-value",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms at 0x12230 and 0x127c0, and the source files agree, that the AI treats side_select only as zero or non-zero across the attack, straight-line, spell and item paths; no existing row or earlier verdict covers this rule, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-take-best-action-five-compares",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra and in src/mapai.c: at 0x12c10 the function runs five signed compares, and when none of them holds it still falls through to clear the cursor and return 1; no existing pitfalls row or earlier verdict covers this, so a new row goes under 不能修的原版 bug, linking map_ai.md and known_bugs.md."
+    },
+    {
+      "id": "ai-attack-score-publishes-tier",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra at 0x12230 and in src/aiscore.c: the search ranks on the damage estimate but writes only the tier to 0x63f78, and neither pitfalls.md nor any earlier verdict in this run covers it, so one new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-heal-thresholds-differ",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the two heal-scoring paths differ: the item path (0x132b0) reads HP signed, uses <=, and weights bit 0x80 by x3, while the spell path (0x13920) reads HP unsigned, uses <, and weights bit 0x01 by x2; no existing row or earlier verdict covered this, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-blessing-score-overwrite",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x13920 and in src/aiscore.c: the 0x14 branch throws away the 0x22 and 0x23 results and keeps only the 0x24 one; no existing pitfalls row or earlier verdict covers this, so one new row goes under 不能修的原版 bug, linking program_info/map_ai.md."
+    },
+    {
+      "id": "ai-spell-cast-distance-raw",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra (0x13420 passes spell +0x03 raw to the flood fill at 0x10de0) and in src/aiscore.c, but it is a single-function detail already in that function's comment and no shipped AI unit knows a line-shaped spell, so decoding it changes no observable behaviour."
+    },
+    {
+      "id": "ai-line-collector-opposite-polarity",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x13788-0x137a4 that the line collector keeps side != 0 on flag 0 and side 0 otherwise, the reverse of the range collector's mode 0 = side 0 under the same caller-fed value; not covered by pitfalls.md or the earlier side_select verdict, so a new row goes in 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-range-collector-edges",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra and src/aitarget.c. At 0x11e50, the outer reach includes its end tile and min_dist removes only tiles strictly below it; the cross shape (range_code of 0x10 or more) skips min_dist, and mode 2 takes side 1. At 0x109f0 the distance test is strictly less-than, and mode 2 takes side 2 units that have already acted. No existing pitfalls row or earlier verdict covers this split, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-counter-check-twins",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra (0x125c0 and 0x137e0 return only 1 or -1; 0x125c0 accepts range_min <= 1 while 0x137e0 requires range_min == 1) and every caller in src compares == 1; no existing row or earlier verdict covers this, so a new row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-double-action-behaviors-10-11",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra (0x10010) and src/mapai.c both show behaviours 10 and 11 always run the attack scoring and then move-and-attack or move/rest, even after using an item or casting; six shipped deployment records use behaviour 11, no existing row covers this, so one new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-behavior-8-skips-turn-tail",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra 0x10010: at 000104c1, behaviour 8 jumps straight to the epilogue, while 6 and 12-15 match no arm and fall through to the turn tail (tile event, acted bit, frame redraw); src/mapai.c agrees, and no existing pitfalls row or earlier verdict covers it, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "ai-spell-death-script-killer",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x13c90 and src/aiact.c:305, but the pitfall is limited to one function whose plate comment already records it, and map_ai.md shows no shipped AI spell can reach the only handlers that read the argument, so this does not meet the table's cross-function bar."
+    },
+    {
+      "id": "ai-item-bag-walk-loop-counter",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x13040 and in src/aiscore.c, but add/remove keep every bag packed, so the natural walk-all-eight-skip-empty loop yields the same item set and slot; there is no observable divergence, the fact already sits in the function's Rebuild note, and src/aiscore.c:253 now cites pitfalls.md for a row that does not exist."
+    },
+    {
+      "id": "ai-chest-kind-equality",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra shows AND AL,0x60 then CMP EAX,0x20 at 00013e7d-00013e84, an equality test, and no existing pitfalls row or earlier verdict covers it, so a new row goes under 不能照字面理解的資料 linking map_ai.md and terrain.md."
+    },
+    {
+      "id": "ai-beam-trail-clamp",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra (0x27180) and src/aiact.c: the beam trail's end point is clamped against the two .MPL magic words, not the map size; no pitfalls row or earlier verdict covers this, so I added one to 不能修的原版 bug."
+    },
+    {
+      "id": "zoc-stop-cell-stores-allowance",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Verified in Ghidra at 0x10de0 and in src/movegrid.c: when a zone-of-control cell is accepted, the fill stores the move allowance in it, not the real cost, and still queues it. Writing it as an impassable cell, or storing the real cost without queueing, changes the range or the path fdps_move_path_trace takes. No existing row or earlier verdict covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "side-select-truth-value-opposite-polarity",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra and src/movegrid.c both confirm that 0x10b90 and 0x118f0 test side_select only as a truth value, and with opposite polarity; no existing pitfalls row or earlier verdict covers these two movement-grid passes (the AI side_select verdict names only the AI functions), so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "path-codes-inverted-and-reversed",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra and src: the path tracer at 0x11460 records its direction codes as the reverse of what the walker at 0x2d2d0 and the retarget replay play back, the walker sends every value other than 0/1/2 right, and no existing row or earlier verdict covers this, so one row was added under 不能照字面理解的資料."
+    },
+    {
+      "id": "move-toward-four-grid-rounds",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x119e0 and in src/movegrid.c. The four grid rebuilds each use a different reset/zone-of-control/allowance/block combination, the same per-rebuild choice recurs in fdps_battle_unit_turn, and the retarget keeps the last tile that is not 0xff. A shared build-range helper or a retarget that stops at the first failure would change where units walk and stop, and no existing row or earlier verdict covers this, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "collect-marked-tiles-unbounded",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms 0x11da0 writes one (x,y) pair per marked cell with no capacity check and 0x13420 passes a 0x190-byte malloc straight in; no existing pitfalls row or earlier verdict covers it, so a new row goes under 不能加的檢查."
+    },
+    {
+      "id": "cursor-move-minor-axis-accumulator",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x2d7c0 and src/mapcur.c confirm the minor-axis accumulator (acc/n, re-seeded as minor_delta + acc % n) and the absence of any post-loop snap, a plain per-step quotient would leave the cursor permanently short on ordinary tile-aligned moves, and no existing row or earlier verdict covers it."
+    },
+    {
+      "id": "walk-scroll-start-pixel-measured-once",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "I checked the four walk-step routines in Ghidra (0x2d360, 0x2d480, 0x2d590, 0x2d6a0) against src/walk.c: each reads the unit's starting pixel position once before the six sub-steps and compares that fixed value to the moving view origin, so recomputing it inside the loop scrolls the view a different number of times per tile; no pitfalls.md row or earlier verdict covers this, so the verdict adds a row under 不能換的型別與寫法."
+    },
+    {
+      "id": "cursor-mode6-marks-grid-while-rendering",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x2c6a0 confirms mode 6 draws nothing and zeroes the grid marker under the cursor, coupling the marked set to the frames fdps_map_cursor_move_to draws; no existing row or earlier verdict covers it, so a row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "cursor-diamond-call-lists",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra 0x2c6a0 confirms mode 5 skips the four orthogonally adjacent tiles and gives sprite 0x11 to the lower-left and 0x10 to the lower-right diagonal; pitfalls.md and earlier verdicts have no row for this, so a new row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "slot-load-lottery-flag-conditional",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x245fa and in src/save.c: the load path restores the lottery flag only when village_mode_flag is 0, a rebuild that restores every field like the save side would behave differently, and no existing row or earlier verdict covers this, so a new row was written for the 不能換的型別與寫法 section."
+    },
+    {
+      "id": "title-skip-save-prompt-set-on-cancel",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: the title-screen store at 0x2a8c8 runs before the result==1 check, and the only other write is the clear at 0x31513. Moving the store inside the load-accepted branch, the tidy-up a rebuild would naturally make, would stop the original's skipped save prompt, and no existing row or earlier verdict covers this."
+    },
+    {
+      "id": "slot-cursor-back-step-plus-two",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Ghidra and src/save.c confirm the back step is (slot + 2) % 3, but the original only does a correct 0..2 wrap that any correct rebuild reproduces, and writing (slot - 1) % 3 is an ordinary C remainder bug rather than a departure from an original quirk."
+    },
+    {
+      "id": "slot-select-extra-frame-after-decision",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the extra frame at 0x24650, but confirm and Esc never move the slot, so returning straight from the key branch would still leave the highlight on the chosen slot; the only difference is one tick of highlight-animation and palette phase, and this one-function detail is already recorded in program_info/save.md and in src/save.c."
+    },
+    {
+      "id": "item-aim-select-mode-vs-use-target",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra and src/aiact.c: the player's item use (0x252b0) filters by select_mode and the AI filters by use_target. An existing pitfalls row already covers this, but its 正典 column did not link program_info/spell.md, so the verdict adds that link."
+    },
+    {
+      "id": "effect-popup-shows-roll",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra shows that 0x28460, 0x27070 and 0x275a0 each return the roll before the clamp, and every caller floats that value over the target, so a natural rebuild that returns the real HP/MP change shows different numbers; no existing pitfalls row or earlier verdict covers this, so it is added under 不能換的型別與寫法."
+    },
+    {
+      "id": "rng-draw-before-immunity-tests",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra shows the draw-before-test order in all three functions (rand at 000283ee before the flying test at 00028416, at 00028f12 before immunity at 00028f2e, and hit, then timer, then immunity, then duration at 0x28f70); src/ agrees, and no existing row or earlier verdict covers this pattern, so it goes in as a new row under 不能換的型別與寫法."
+    },
+    {
+      "id": "promoted-level-bonus-two-spans",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra that the heal credit's +30 covers only portrait ids 0x0f..0x21 of the healed unit, while the spell divisor uses caster portrait > 8; the existing kill-experience row separates the spell and physical thresholds but never mentions the heal span, so the verdict adds a new row under 不能照字面理解的資料."
+    },
+    {
+      "id": "player-spell-ignores-animation-toggle",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms fdps_battle_spell_command always calls the full-screen spell presentation while only fdps_map_actor_cast_chosen_spell branches on the animation toggle; no existing row or earlier verdict covers this, so a new row goes under 不能修的原版 bug."
+    },
+    {
+      "id": "mp-cost-no-afford-check-no-floor",
+      "outcome": "rejected_below_threshold",
+      "wrote_file": true,
+      "reason": "The unguarded subtraction is confirmed at 0x285c0 and inline in 0x288f0, but both the player menu and the AI spell scorer (src/aiscore.c line 568) require mp_current >= mp_cost before any cast, so a guard or zero clamp in the deduction can never fire and a rebuild with one behaves the same."
+    },
+    {
+      "id": "secret-code-row-is-chapter-minus-one",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "I confirmed this at 0x357a0 (the table is copied from 0x310c0 and read as row chapter id - 1), but an existing pitfalls.md row (line 41) already covers it and links program_info/village.md: the minus-one index, the auto-array versus static issue and the out-of-range row that lands on the stack frame."
+    },
+    {
+      "id": "secret-code-match-position-is-global",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x357a0 that 0x601c0 is reset only on a mismatch, but pitfalls.md already has a row for data_fdps_secret_code_match_pos persisting across villages, chapters and completed codes, and that row already links program_info/village.md."
+    },
+    {
+      "id": "church-eligibility-reads-portrait-id",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra: the check at 0003462e compares the portrait id (+0x07) against 9, not the class code, and RankUp.dat is read by character id (+0x08). Testing the class code instead (the obvious approach) would shut out 法蓮娜 and others, let 蘭斯洛特 and already-promoted units promote, and read RankUp.dat out of bounds. No existing pitfalls row or earlier verdict in this run covers it."
+    },
+    {
+      "id": "promotion-bonus-is-raw-growth-max-byte",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed at 0x345a0: the promotion looks up the new form's FRILEVUP row (route byte 0) and adds its raw bytes +1/+3/+5/+7/+9 to AP/DP/DX base and HP/MP current and max. No existing row or verdict covers this, and the existing *_max row covers only level-up and pushes a rebuild to normalise the field, so a new row goes under 不能照字面理解的資料."
+    },
+    {
+      "id": "promotion-badge-consumed-only-if-form-differs",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "Ghidra shows fdps_church_promote_loop (0x345a0) removes the badge only when the route is not 0 and its new portrait differs from route 0's, which the existing pitfalls row already states, but that row linked only assets/characters.md, so the verdict adds program_info/village.md to its 正典 column."
+    },
+    {
+      "id": "roster-slot-3-lock-is-literal",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms that 0x336d0, 0x32c40 and 0x36af0 all check the literal pair chapter index >= 0x17 and slot 3, that the ghosting separately checks character id 1, and that the church never reads the chapter index; no existing pitfalls row or earlier verdict covers this."
+    },
+    {
+      "id": "buy-bag-full-check-after-trade-in",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms fdps_shop_buy_loop checks the bag-full refusal (0x33d89-0x33d9e) only after the trade-in prompt and only if the offer was declined; no existing row or earlier verdict covers it, so a new row goes under 不能加的檢查 linking program_info/village.md."
+    },
+    {
+      "id": "buy-zero-balance-takes-refund-path",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra confirms the zero-balance case goes to the refund prompt: at 0x33dd9 fdps_shop_buy_loop compares the balance with 0 and branches on less-or-equal (JLE) to the refund prompt 0x1f9; no existing row or earlier verdict covers this, so one row was added under 不能換的型別與寫法."
+    },
+    {
+      "id": "village-picker-cursors-persist",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Checked in Ghidra: the member-grid and buy-target cursor and scroll globals are never set back to 0, the shared shop pair is cleared only when the cursor is at or past the stock count, and the church picker's cursor and scroll are locals set to 0; this covers three pickers and nothing in pitfalls.md or the earlier verdicts covers it, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "village-transfer-moves-bare-item-id",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Ghidra (0x34210) and src confirm that only the bare item id reaches the receiver's first empty slot unequipped, only the giver is recomputed, and nothing stops giving to oneself; no existing row or earlier verdict covers this, so a new row goes under 不能換的型別與寫法."
+    },
+    {
+      "id": "village-existence-rechecked-after-bar",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "Confirmed in Ghidra at 0x3142d-0x31463 and in src/village.c: after the bar returns, the five signed chapter compares run again and force the selection to 0, so a rebuild that tests only on entry would put a bar load of a no-village chapter back on that village's signboard; no pitfalls row or earlier verdict covers this, so one row was added under 不能換的型別與寫法, linking ../program_info/village.md."
+    },
+    {
+      "id": "link-physical-xp-last-blow-only",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "The earlier verdict physical-xp-credit-assigned-not-added adds a row about this exact bug whose canon column links only battle.md, so the verdict appends the known_bugs link to that column and leaves the rest of the row unchanged."
+    },
+    {
+      "id": "link-gaia-exp-carry-reset-at-40",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "No existing row or earlier verdict in pitfalls.md covers this bug, and a natural rebuild would give the leftover test the same per-unit level cap as the entry check, which quietly fixes it, so a row is added under 不能修的原版 bug that links known_bugs.md for the mechanism."
+    },
+    {
+      "id": "link-animation-off-ailment-immunity",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "An earlier verdict, two-physical-resolvers-not-mergeable, adds a row about this bug that links only to battle.md in its 正典 column, so I added the known_bugs link after it and left the row's text alone, even though it restates the immunity mechanism at some length."
+    },
+    {
+      "id": "link-enemy-side-roster-portrait-xp",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "This bug already has a pitfalls.md row (\"「敵方陣營」不等於「肖像編號 ≥ 0x3C」\"), but its canon column links only resource_info/map.md, so the verdict appends the known_bugs.md link; the row re-explains the out-of-range ENEMYDAT.DAT read at some length, and its text is left unchanged."
+    },
+    {
+      "id": "link-holy-water-heals-opponents",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Earlier verdict holy-water-use-target-zero.json adds a 不能修的原版 bug row on this exact bug whose 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-ai-equal-scores-idle",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "The earlier verdict ai-take-best-action-five-compares adds a 不能修的原版 bug row covering the all-equal no-action case, and that row's 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-nearest-reachable-wrong-class-row",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "This bug already has a row in the 不能修的原版 bug section of pitfalls.md (the 0x126b0 lookup that leaves out the class+1 increment), but its 正典 column linked only assets/tables/classes.md, so the verdict adds the known_bugs link and leaves the row's short text unchanged."
+    },
+    {
+      "id": "link-nearest-reachable-hardcoded-side",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "No pitfalls row or earlier verdict covers the hard-coded 0 side filter that 0x126b0 passes to fdps_move_path_trace mode 2, and a rebuild would naturally pass side_select there and fix the friendly-NPC behaviour, so a new row in the 不能修的原版 bug section links known_bugs.md."
+    },
+    {
+      "id": "link-beam-trail-clamp-wrong-bounds",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Earlier verdict ai-beam-trail-clamp adds a 不能修的原版 bug row for this .MPL-magic clamp bug whose 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-item-use-select-mode-4-5",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "The pitfalls.md row on the player item-use select mode (4/5 for 大地之劍/白銀之槍 in fdps_battle_item_menu) already links ../program_info/known_bugs.md in its 正典 column."
+    },
+    {
+      "id": "link-ch14-ch20-farlena-fail-condition-unenforced",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "The chapter-14 row in pitfalls.md (不能照字面理解的資料) covers this bug, but its 正典 column cites only src/chpost1.c, so the verdict adds the known_bugs link there and leaves the row's own chapter-14 mechanism text unchanged; the pending chapter-20 row from the earlier ch20-farlena-fail-text-unenforced verdict already links known_bugs."
+    },
+    {
+      "id": "link-ch19-duel-early-clear-unendable",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "Earlier verdict duel-challenger-hardcoded-index adds a 不能修的原版 bug row for the ch19 hard-coded duel challenger index whose 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-ch24-duel-early-clear-auto-forfeit",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "The earlier verdict duel-challenger-hardcoded-index adds a 不能修的原版 bug row that covers the ch24 hard-coded challenger index 0x52 and the early-clear forfeit, and its 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-revive-panel-blank-at-seven",
+      "outcome": "added",
+      "wrote_file": true,
+      "reason": "No pitfalls row or earlier verdict covers the revive panel's total-count row guard (the revive-fee verdict only covers the missing affordability check), and a natural rebuild would test the row index or drop the guard, which would turn the original's blank panel into one that shows rows, so a row goes into 不能修的原版 bug and links to known_bugs.md."
+    },
+    {
+      "id": "link-ch08-door-cutscene-refreshes-acted-units",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "The earlier verdict cutscene-clears-acted-bit-on-entry already adds a row to the \"不能修的原版 bug\" section about this bug. That row names the chapter 8 prison-door bug that lets acted units move again, and its 正典 column already links ../program_info/known_bugs.md."
+    },
+    {
+      "id": "link-title-load-gated-on-battle-save",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "pitfalls.md row 35 already covers this bug but its 正典 column links only resource_info/save.md, so the verdict adds the known_bugs.md link; the row's short restatement of the mechanism stays as it is."
+    },
+    {
+      "id": "link-stale-skip-save-prompt-flag",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "The earlier verdict title-skip-save-prompt-set-on-cancel adds a 不能修的原版 bug row about this exact flag whose 正典 column links only program_info/save.md, so the known_bugs.md link is appended there with the rest of the row unchanged."
+    },
+    {
+      "id": "link-bonus-lottery-prize-uninitialized",
+      "outcome": "linked",
+      "wrote_file": true,
+      "reason": "The existing 不能修的原版 bug row on the bar lottery's uninitialised stack slot (pitfalls.md line 34) lacked a known_bugs.md link, so only its 正典 column gains one; the row briefly restates the stack-slot mechanism but needs it for its frame-layout warning, so its text is left alone."
+    },
+    {
+      "id": "link-secret-code-table-chapter-25-out-of-range",
+      "outcome": "already_covered",
+      "wrote_file": true,
+      "reason": "pitfalls.md already has the secret-code table row (fdps_check_secret_code_key, chapter index 25 reading outside the table) whose 正典 column already links ../program_info/known_bugs.md."
+    }
+  ],
+  "apply": {
+    "pitfalls_errors": 4,
+    "index_errors": 0,
+    "link_gate_errors": 0,
+    "ok": false,
+    "problems": "apply_kb.py pitfalls: errors=4, all with \"the row changed since it was read\" (the linked verdict's old_line was not found). The four IDs: item-aim-select-mode-vs-use-target, link-animation-off-ailment-immunity, link-physical-xp-last-blow-only, link-stale-skip-save-prompt-flag.\n\nCause of three of them: each link-* verdict points at a row that another verdict in the same run adds: two-physical-resolvers-not-mergeable, physical-xp-credit-assigned-not-added and title-skip-save-prompt-set-on-cancel. The verdict files are applied in sorted-ID order, so every \"link-*\" runs before its row has been inserted. In the first run all three links were refused and the three rows went in without the known_bugs link.\n\nitem-aim-select-mode-vs-use-target is a real mismatch. Its old_line is not in rebuild_info/pitfalls.md, either before or after its link.\n\nScript bug (apply_kb.py): the pitfalls step is NOT idempotent when a link targets a row added in the same batch. On a rerun the link rewrites the added row X into the linked N. Then the \"added\" check no longer finds X and inserts X again, so every rerun adds one more copy.\n\nMy own mistake, now undone: while trying to get back the output that got cut off, I ran the pitfalls step twice more. One was a PowerShell pipe whose JSON parse failed on the BOM, but apply_kb had already written. That added two extra copies of each of the three rows, in two forms: linked (N) and unlinked (X). I put rebuild_info/pitfalls.md back to its exact state after the first run, using a mechanical, assertion-checked script. It set the linked copies at lines 56, 156 and 165 back to the verdict's row text and deleted the 6 extra lines (57, 58, 174-177). I made no content judgement and edited no verdict. An in-memory re-application now shows 1 error (item-aim), 3 relinks and 3 re-inserts. That confirms the duplication bug and means nobody should rerun this step until apply_kb.py is fixed.\n\nFor the three link-* items, the intended linked text is the new_line in the verdict JSON; it is not applied yet. apply_kb.py index: errors=0 (10 rows inserted: battle, map_ai, movement, spell, chapter, cutscene, dialog, village, save, known_bugs). Link gate (check_mechanics.py --links): errors=0, no broken links on any of the three pages."
+  },
+  "originalBugs": [
+    {
+      "id": "physical-xp-last-blow-only",
+      "doc": "battle",
+      "title": "物理攻擊的經驗只算最後一擊，連擊的前一擊白打",
+      "blocks_content": false
+    },
+    {
+      "id": "gaia-exp-carry-reset-at-40",
+      "doc": "battle",
+      "title": "蓋亞升到 40 級時經驗餘數被清成 0",
+      "blocks_content": false
+    },
+    {
+      "id": "animation-off-ailment-immunity",
+      "doc": "battle",
+      "title": "戰鬥動畫關閉時，武器附加的中毒與麻痺只對機兵免疫",
+      "blocks_content": false
+    },
+    {
+      "id": "enemy-side-roster-portrait-xp",
+      "doc": "battle",
+      "title": "打陣營 0 但肖像編號小於 0x3C 的單位時，經驗值讀自 ENEMYDAT.DAT 之前的記憶體",
+      "blocks_content": false
+    },
+    {
+      "id": "ch14-ch20-farlena-fail-condition-unenforced",
+      "doc": "chapter",
+      "title": "第 14、20 章失敗條件寫著法蓮娜死亡，程式卻不判定",
+      "blocks_content": false
+    },
+    {
+      "id": "ch19-duel-early-clear-unendable",
+      "doc": "chapter",
+      "title": "第 19 章提早過關接受決鬥後戰鬥無法結束",
+      "blocks_content": false
+    },
+    {
+      "id": "ch24-duel-early-clear-auto-forfeit",
+      "doc": "chapter",
+      "title": "第 24 章提早過關接受決鬥時挑戰者自動認輸",
+      "blocks_content": false
+    },
+    {
+      "id": "revive-panel-blank-at-seven",
+      "doc": "chapter",
+      "title": "章節結束時陣亡 7 人以上，復活面板一列都不畫",
+      "blocks_content": false
+    },
+    {
+      "id": "ch08-door-cutscene-refreshes-acted-units",
+      "doc": "cutscene",
+      "title": "第 8 章牢門格觸發過場時，當下階段已行動的單位被清成未行動",
+      "blocks_content": false
+    },
+    {
+      "id": "physical-xp-last-blow-only",
+      "doc": "known_bugs",
+      "title": "連擊的經驗只算最後一擊",
+      "blocks_content": false
+    },
+    {
+      "id": "gaia-exp-carry-reset-at-40",
+      "doc": "known_bugs",
+      "title": "蓋亞升上 40 級時經驗餘數歸零",
+      "blocks_content": false
+    },
+    {
+      "id": "animation-off-ailment-immunity",
+      "doc": "known_bugs",
+      "title": "關掉戰鬥動畫時，武器附加的異常幾乎無人免疫",
+      "blocks_content": false
+    },
+    {
+      "id": "enemy-side-roster-portrait-xp",
+      "doc": "known_bugs",
+      "title": "陣營 0、肖像編號小於 0x3c 的單位給的經驗讀自 ENEMYDAT.DAT 之外",
+      "blocks_content": false
+    },
+    {
+      "id": "holy-water-heals-opponents",
+      "doc": "known_bugs",
+      "title": "神聖之水補錯邊：敵人補我方，友軍 NPC 補敵人",
+      "blocks_content": false
+    },
+    {
+      "id": "ai-equal-scores-idle",
+      "doc": "known_bugs",
+      "title": "三種行動分數完全相同時，AI 原地不動",
+      "blocks_content": false
+    },
+    {
+      "id": "nearest-reachable-wrong-class-row",
+      "doc": "known_bugs",
+      "title": "「走得到的最近對手」用錯職業的地形消耗",
+      "blocks_content": false
+    },
+    {
+      "id": "nearest-reachable-hardcoded-side",
+      "doc": "known_bugs",
+      "title": "友軍 NPC 的「走得到的最近對手」找到的是自己",
+      "blocks_content": false
+    },
+    {
+      "id": "beam-trail-clamp-wrong-bounds",
+      "doc": "known_bugs",
+      "title": "敵人的光束道具軌跡畫出地圖",
+      "blocks_content": false
+    },
+    {
+      "id": "item-use-select-mode-4-5",
+      "doc": "known_bugs",
+      "title": "大地之劍、白銀之槍在玩家手上「使用」無效",
+      "blocks_content": true
+    },
+    {
+      "id": "ch14-ch20-farlena-fail-condition-unenforced",
+      "doc": "known_bugs",
+      "title": "第 14、20 章的法蓮娜死亡不算敗北",
+      "blocks_content": false
+    },
+    {
+      "id": "ch19-duel-early-clear-unendable",
+      "doc": "known_bugs",
+      "title": "第 19 章提早清場後接受決鬥，戰鬥結束不了",
+      "blocks_content": false
+    },
+    {
+      "id": "ch24-duel-early-clear-auto-forfeit",
+      "doc": "known_bugs",
+      "title": "第 24 章提早清場後接受決鬥，挑戰者自動認輸",
+      "blocks_content": false
+    },
+    {
+      "id": "revive-panel-blank-at-seven",
+      "doc": "known_bugs",
+      "title": "陣亡 7 人以上時，復活面板是空的",
+      "blocks_content": false
+    },
+    {
+      "id": "ch08-door-cutscene-refreshes-acted-units",
+      "doc": "known_bugs",
+      "title": "第 8 章牢門過場讓已行動的單位重新可動",
+      "blocks_content": false
+    },
+    {
+      "id": "title-load-gated-on-battle-save",
+      "doc": "known_bugs",
+      "title": "只存過 slot 的玩家，從標題進不了讀檔畫面",
+      "blocks_content": false
+    },
+    {
+      "id": "stale-skip-save-prompt-flag",
+      "doc": "known_bugs",
+      "title": "標題讀檔畫面取消後，可能跳過一次章節之間的存檔畫面",
+      "blocks_content": false
+    },
+    {
+      "id": "bonus-lottery-prize-uninitialized",
+      "doc": "known_bugs",
+      "title": "酒館抽獎永遠只發藥草",
+      "blocks_content": true
+    },
+    {
+      "id": "secret-code-table-chapter-25-out-of-range",
+      "doc": "known_bugs",
+      "title": "第 26 章前的神秘商店進不去",
+      "blocks_content": true
+    },
+    {
+      "id": "holy-water-heals-opponents",
+      "doc": "map_ai",
+      "title": "神聖之水在敵人手上補我方、在 NPC 手上補敵人",
+      "blocks_content": false
+    },
+    {
+      "id": "ai-equal-scores-idle",
+      "doc": "map_ai",
+      "title": "攻擊、法術、道具三個分數完全相等時敵人原地不動",
+      "blocks_content": false
+    },
+    {
+      "id": "nearest-reachable-wrong-class-row",
+      "doc": "map_ai",
+      "title": "AI 找路徑最近的對手時用了前一個職業的地形消耗",
+      "blocks_content": false
+    },
+    {
+      "id": "nearest-reachable-hardcoded-side",
+      "doc": "map_ai",
+      "title": "友軍 NPC 的路徑最近搜尋永遠找到自己",
+      "blocks_content": false
+    },
+    {
+      "id": "beam-trail-clamp-wrong-bounds",
+      "doc": "map_ai",
+      "title": "AI 使用光束道具時的軌跡夾限讀錯邊界",
+      "blocks_content": false
+    },
+    {
+      "id": "title-load-gated-on-battle-save",
+      "doc": "save",
+      "title": "標題選單的「讀檔」要有戰鬥存檔才解鎖，只存過 slot 的玩家從標題讀不到自己的存檔",
+      "blocks_content": false
+    },
+    {
+      "id": "stale-skip-save-prompt-flag",
+      "doc": "save",
+      "title": "標題選單進讀檔畫面後取消，之後一次章節之間的存檔畫面可能被跳過",
+      "blocks_content": false
+    },
+    {
+      "id": "item-use-select-mode-4-5",
+      "doc": "spell",
+      "title": "大地之劍與白銀之槍被玩家「使用」時無效：前者打不到任何人卻用掉回合，後者的瞄準永遠無法確認",
+      "blocks_content": true
+    },
+    {
+      "id": "bonus-lottery-prize-uninitialized",
+      "doc": "village",
+      "title": "酒館抽獎依未初始化的堆疊變數發獎，永遠只發藥草",
+      "blocks_content": true
+    },
+    {
+      "id": "secret-code-table-chapter-25-out-of-range",
+      "doc": "village",
+      "title": "第 26 章前的村莊查暗號表越界，神秘商店沒有可用的暗號",
+      "blocks_content": true
+    }
+  ],
+  "cutContentCandidates": [
+    {
+      "doc": "battle",
+      "what": "「移動後在行動選單取消即結束該單位回合」的規則分支（fdps_battle_unit_turn 內由 data_fdps_battle_action_cancel_ends_turn_flag 控制）",
+      "why": "旗標 0x60004 初值 0，映像中沒有任何寫入指令，分支永遠走不到，取消一律是退回原地重選。"
+    },
+    {
+      "doc": "chapter",
+      "what": "Chapter event handler slot 2, fdps_chapter_event_set_game_over (0x36cd0), which only sets the battle-end code to 1",
+      "why": "No turn event, cell event, searchable-cell record or death script in the shipped MAPnn.DAT files names slot 2."
+    },
+    {
+      "doc": "chapter",
+      "what": "Deployment records tagged wave 0xFF in MAP03, MAP04, MAP07, MAP08, MAP23 and MAP27",
+      "why": "Only a deploy call with wave 255 matches them; the only caller passing 0xFF is MAP11's opening-cutscene three-way choice, and no turn-computed wave reaches 255."
+    },
+    {
+      "doc": "cutscene",
+      "what": "Cut-scene opcode 0x08 (play Icon%04d.wav, up to 20 per script): the interpreter supports it, but no shipped script uses it and ICONANI.VFS holds no .wav member.",
+      "why": "Implemented in fdps_icon_script_run but unreachable from any shipped data."
+    },
+    {
+      "doc": "cutscene",
+      "what": "Screen transitions fdps_transition_box (0x2f410, close-in / open-out) and fdps_transition_slide (0x2f6d0, eight slide styles).",
+      "why": "Neither function has any caller or reference anywhere in FDPS.LE."
+    },
+    {
+      "doc": "known_bugs",
+      "what": "大地之劍 (0C) earth damage and 白銀之槍 (22) ice damage use effects, from the player's side",
+      "why": "Original bug item-use-select-mode-4-5: select_mode 4 hits nobody, select_mode 5 never confirms."
+    },
+    {
+      "doc": "known_bugs",
+      "what": "Tavern lottery grand prizes: party-wide 斬鐵劍 (0xbf + chapter/10), ten 水晶粒 (0xb9) each, 20000 gold",
+      "why": "Original bug bonus-lottery-prize-uninitialized: the prize is chosen from an unwritten stack slot, always 藥草."
+    },
+    {
+      "doc": "known_bugs",
+      "what": "SHOP25.DAT secret-shop stock (B7, B8, B9, D2-D4, D6-D9)",
+      "why": "Original bug secret-code-table-chapter-25-out-of-range: the code for chapter index 25 is read past the 24-row table."
+    },
+    {
+      "doc": "save",
+      "what": "FDE.SAV's fourth chapter slot (+0x4fa3): the file carries four 0xa28-byte slots but both save/load screens take the cursor modulo 3, so slot 3 is never written or read except its chapter byte stamped 0xff by the battle save on a fresh file.",
+      "why": "Storage the format reserves that no code path reaches; possibly a cut fourth save slot."
+    },
+    {
+      "doc": "spell",
+      "what": "大地之劍 (0C) earth damage 400 and 白銀之槍 (22) ice damage 140 use effects, from the player's side",
+      "why": "Their select_mode values 4 and 5 make the player's use hit nobody / never confirm (original bug item-use-select-mode-4-5)."
+    },
+    {
+      "doc": "spell",
+      "what": "Use-effect codes 05 (空白道具), 06 (光之水晶, 空之魔石), 0D (精靈之劍), 1B (封咒手套) carried by ITEM.DAT records",
+      "why": "fdps_apply_item_effect_to_targets has no branch for them; using those items does nothing."
+    },
+    {
+      "doc": "spell",
+      "what": "The destination-tile pick for use-effect codes 0x19 and 0x1c in fdps_battle_item_menu",
+      "why": "No ITEM.DAT record carries either code, and the effect dispatch has no arm for them."
+    },
+    {
+      "doc": "spell",
+      "what": "fdps_spell_heal_unit (0x28570)",
+      "why": "Compiled in with no caller or reference anywhere in the image."
+    },
+    {
+      "doc": "village",
+      "what": "酒館抽獎的斬鐵劍（0xbf/0xc0/0xc1）、每人十個水晶粒、兩萬金三種獎",
+      "why": "fdps_run_bonus_lottery 以未初始化的堆疊變數選獎，原版恆發藥草"
+    },
+    {
+      "doc": "village",
+      "what": "SHOP25.DAT 神秘商店列（魔法草、魔法水、水晶粒、三種魔石、生命之實、魔力水晶、力量藥水、耐力藥水等）",
+      "why": "章節索引 25 的村莊查暗號表越界，沒有可用的暗號"
+    }
+  ],
+  "pendingLinks": [
+    "spell: ../cut_content/_index.md (line 299)",
+    "cutscene: ../cut_content/_index.md (line 208)",
+    "village: ../cut_content/_index.md (line 117)",
+    "village: ../cut_content/_index.md (line 316)",
+    "known_bugs: ../cut_content/_index.md (line 5)",
+    "known_bugs: ../cut_content/_index.md (line 111)",
+    "known_bugs: ../cut_content/_index.md (line 177)",
+    "known_bugs: ../cut_content/_index.md (line 187)"
+  ],
+  "index": {
+    "written": [
+      "C:\\Users\\fdpsf\\Documents\\fdps-anatomy\\workspace\\game_mechanics\\index_rows.json"
+    ],
+    "summary": "I wrote 10 index rows (battle, map_ai, movement, spell, chapter, cutscene, dialog, village, save, known_bugs) to workspace/game_mechanics/index_rows.json. The JSON loads cleanly as UTF-8. Each row follows the existing _index.md style: a link, then one line in Traditional Chinese listing what the page answers, built from its title, its verification scope and its section headings. I did not edit _index.md, README.md or rebuild_info/_index.md.\n\nOne statement these pages make false:\n- README.md line 17 says program_info/ has \"一檔對應一個子系統與 `src/` 模組\" (each file maps to one subsystem and one src/ module). program_info/_index.md line 3 says the same thing (\"一個檔對應一個子系統，之後也對應一個 `src/` 模組\"). Two of the new pages break this. known_bugs.md is a cross-cutting list of bugs spanning more than a dozen src/ files and has no subsystem or module of its own. battle.md (combat.c, cmbblow.c, unitatk.c, unitstat.c, btlturn.c, death.c, unit.c, btlact.c) and spell.md each cover many src/ files. Some pages also split ownership of one src/ file: spell.md claims only some functions in unitstat.c and unit.c, and movement.md hands part of maptile.c to resource_info/map.md. The wording should become something like \"one file per subsystem or cross-cutting topic, which may span several src/ files\". The same fix applies to line 3 of program_info/_index.md, which the script does not touch.\n\nI found nothing false in rebuild_info/_index.md. Its line 3 (\"program_info/ 回答遊戲現在做什麼\") still holds. The pitfalls.md row's \"不能修的原版 bug\" does not conflict with known_bugs.md: known_bugs.md owns the cause of each bug, and pitfalls.md owns how a rebuild would get it wrong. pitfalls.md already links to known_bugs.md and village.md."
+  },
+  "unfinished": [
+    "apply: apply_kb.py pitfalls: errors=4, all with \"the row changed since it was read\" (the linked verdict's old_line was not found). The four IDs: item-aim-select-mode-vs-use-target, link-animation-off-ailment-immunity, link-physical-xp-last-blow-only, link-stale-skip-save-prompt-flag.\n\nCause of three of them: each link-* verdict points at a row that another verdict in the same run adds: two-physical-resolvers-not-mergeable, physical-xp-credit-assigned-not-added and title-skip-save-prompt-set-on-cancel. The verdict files are applied in sorted-ID order, so every \"link-*\" runs before its row has been inserted. In the first run all three links were refused and the three rows went in without the known_bugs link.\n\nitem-aim-select-mode-vs-use-target is a real mismatch. Its old_line is not in rebuild_info/pitfalls.md, either before or after its link.\n\nScript bug (apply_kb.py): the pitfalls step is NOT idempotent when a link targets a row added in the same batch. On a rerun the link rewrites the added row X into the linked N. Then the \"added\" check no longer finds X and inserts X again, so every rerun adds one more copy.\n\nMy own mistake, now undone: while trying to get back the output that got cut off, I ran the pitfalls step twice more. One was a PowerShell pipe whose JSON parse failed on the BOM, but apply_kb had already written. That added two extra copies of each of the three rows, in two forms: linked (N) and unlinked (X). I put rebuild_info/pitfalls.md back to its exact state after the first run, using a mechanical, assertion-checked script. It set the linked copies at lines 56, 156 and 165 back to the verdict's row text and deleted the 6 extra lines (57, 58, 174-177). I made no content judgement and edited no verdict. An in-memory re-application now shows 1 error (item-aim), 3 relinks and 3 re-inserts. That confirms the duplication bug and means nobody should rerun this step until apply_kb.py is fixed.\n\nFor the three link-* items, the intended linked text is the new_line in the verdict JSON; it is not applied yet. apply_kb.py index: errors=0 (10 rows inserted: battle, map_ai, movement, spell, chapter, cutscene, dialog, village, save, known_bugs). Link gate (check_mechanics.py --links): errors=0, no broken links on any of the three pages."
+  ]
+}
