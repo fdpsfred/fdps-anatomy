@@ -11,6 +11,7 @@
 | `cuttrace.py` | 不做判斷的部分：`show` 印出單一條痕跡（judge agent 看到痕跡的唯一途徑）、`pending` 列出每條的狀態、`check` 是判定檔的 gate、`rescan` 列出需要第二位 agent 重讀的條目、`report` 產出收尾報告與判定彙整到 `devlog/runs/` |
 | `traces_ticket25_10.js` | 票 25.10 的 workflow：一條痕跡一個 agent，每輪跑 gate、失敗重試一次、回掃、收尾報告 |
 | `traces_ticket25_11.js` | 票 25.11 的 workflow（28 條，落點是 `units.md`）：形狀同上，`cuttrace.py` 的每次呼叫都帶 `--ticket 25.11`；落點說明改成角色、敵人、職業，並提示轉交 25.12–25.14 與 `kb_fix` 的分界 |
+| `traces_ticket25_13.js` | 票 25.13 的 workflow：同一個形狀，判 `T13-01`…`T13-11`，主題檔是 `battle_assets.md`，所有 `cuttrace.py` 呼叫帶 `--ticket 25.13`。落點沒有 `code.md` 的 route 值，屬於程式痕跡的一律以 `kb_fix` 交出、`route_note` 以「code.md:」開頭 |
 | `test_cuttrace.py` | 單元測試：`python -m unittest tools/cut_traces/test_cuttrace.py` |
 
 ## 跑法
@@ -18,6 +19,7 @@
 ```
 Workflow({ scriptPath: "tools/cut_traces/traces_ticket25_10.js", args: { date: "YYYY-MM-DD" } })
 Workflow({ scriptPath: "tools/cut_traces/traces_ticket25_11.js", args: { date: "YYYY-MM-DD" } })
+Workflow({ scriptPath: "tools/cut_traces/traces_ticket25_13.js", args: { date: "YYYY-MM-DD" } })
 ```
 
 中斷後原樣再跑一次即可續跑：已有判定檔且通過 gate 的條目不重判；已經有第二次閱讀記號（`_supersedes` 或 `_reread`）的判定不再回掃。

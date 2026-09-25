@@ -77,6 +77,8 @@ header 35 byte，緊接 `entry_count` 筆 26 byte 的 entry，再緊接成員內
 
 巢狀容器內另有 12 個 entry：SAF 3、WAV 9
 
+哪些成員永遠不會被載入，本檔不另列：戰鬥與一般資源見 [`cut_content/battle_assets.md`](../cut_content/battle_assets.md)，地圖、場景與角色的檔案依內容分在同一資料夾的其他主題檔，全部條目見 [`cut_content/_index.md`](../cut_content/_index.md) 的總表。
+
 ### `BACKGRND.VFS`
 
 | 檔名 | 大小 |

@@ -156,6 +156,8 @@ magic 的檢查（`0x144e0` 與 `0x14550` 各一份）是 `p[0] == 'S' || p[1] =
 
 17 個檔只有 66 byte：一個沒有任何 layer 的 frame，三個空 section。它們是編號有缺口的特效表裡補位用的空殼，播起來是一格什麼都不畫的動畫。全部在 `MISC.VFS`：`EE05`、`EE06`、`EE07`、`EE23`、`ME03`–`ME07`、`ME26`–`ME28`、`ME30`、`ME31`、`ME34`、`ME35`、`ME39`。
 
+它們各是哪個法術的第三段、哪些會被載入，以及其他永遠不會被載入或播放的 SAF 與內嵌音效，見 [`cut_content/battle_assets.md`](../cut_content/battle_assets.md)。
+
 ## 與前作的對應關係
 
 前作 FD2 沒有對應的格式。唯一相通的是最底層的像素編碼——tile 的 4-op RLE 就是前作 `fd2_rle_blit_sprite` 的那一種，經由 `.CEL` 一路傳下來。上面三層（frame 腳本、tilemap 拼圖、內嵌音效）在前作沒有對應物。
