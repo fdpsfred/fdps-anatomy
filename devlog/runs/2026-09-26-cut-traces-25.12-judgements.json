@@ -1,0 +1,1008 @@
+[
+ {
+  "id": "T12-01",
+  "trace_sha1": "97b9283995322be5b88349119012b8df1049bcba",
+  "from": "I01",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I01",
+  "topic": "",
+  "category": "stub",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`43` 封咒手套的使用效果碼 `1B` 非 0，放在背包裡時使用視窗選得到它；但它的使用距離與範圍都是 0、選取模式是 0，瞄準掃描只標記使用者自己那一格，而確認時該格上只有陣營 2 的使用者、選取模式 0 只收陣營 0，確認永遠不成立，只能取消。這件事已由 I01 的「`43` 的使用距離是 0，玩家選單的瞄準游標永遠確認不了」陳述；而且 `43` 本身沒有任何途徑拿得到（I03），此事只在假設持有時才有意義。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "ITEM.DAT@0x605",
+    "observation": "物品 43 的 23 byte 記錄：+0x0D 效果 1B、+0x10 使用距離 0、+0x11 對象 05、+0x12 範圍 0、+0x15 選取模式 0。"
+   },
+   {
+    "source": "src",
+    "location": "src/item.c:962",
+    "observation": "fdps_battle_item_menu 的使用分支：draw mode = use_radius + 2（43 為 2）；以 use_distance（0）、最小距離 0、select_mode（0）呼叫 fdps_collect_targets_in_range，再把 select_mode 交給 fdps_map_cursor_select_loop；只有 pick_result 非取消才呼叫 fdps_apply_item_effect_to_targets（1026 行）。"
+   },
+   {
+    "source": "src",
+    "location": "src/movegrid.c:392",
+    "observation": "fdps_move_grid_flood_fill_range 先把起點格的 marker 設 0；範圍 0 時只有使用者所在格被標記，其餘格保持 fdps_map_grid_reset 留下的 0xff。"
+   },
+   {
+    "source": "src",
+    "location": "src/aitarget.c:285",
+    "observation": "fdps_collect_targets_in_range 的 select_mode 0 只收 side 0（敵方）；使用者是我方 side 2，所以候選數為 0，游標不會 snap。"
+   },
+   {
+    "source": "src",
+    "location": "src/mapcur.c:803",
+    "observation": "fdps_map_cursor_select_loop（0x2b4f0）：target_max_dist = draw mode 2 減一 = 1；確認時要求游標格 marker != 0xff（877 行），再以 fdps_collect_targets_in_area（dist < 1、select_mode 0）判定（882 行）。只有使用者格被標記，而該格只有 side 2 的使用者，select_mode 0 要 side 0，確認永遠不成立；ESC／Delete 才能離開（837 行）。"
+   },
+   {
+    "source": "src",
+    "location": "src/aitarget.c:56",
+    "observation": "fdps_collect_targets_in_area 的 select_mode 0 條件是 unit->side == 0，距離測試為 dist >= max_dist 即跳過。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I01、I03",
+    "observation": "I01 的「為什麼沒有內容」已寫「`43` 的使用距離是 0，玩家選單的瞄準游標永遠確認不了，連這一步都走不到」；I03 列 43 封咒手套為拿不到、沒有任何部署記錄攜帶的物品。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "使用距離為 0 的 43 封咒手套在玩家的道具選單中選得到，但瞄準游標永遠無法確認，只能取消。"
+ },
+ {
+  "id": "T12-02",
+  "trace_sha1": "a8db6b6697e98bbe2410b9ed304b5ea0a71c0d2b",
+  "from": "I01",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "敵方／NPC AI 的物品計分 fdps_score_targets_for_item（0x132b0）只對 use_effect 0x0b 與 0x1e 走目標計分，其他碼（含 05、06、0D、1B）總分為 0；呼叫端 fdps_map_actor_score_best_item 以 0 起算、嚴格大於才取代，所以這些物品在 AI 手上永遠不會被選用。這是 AI 對所有非 0x0b／0x1e 物品的一般行為，不是刪減內容，而且 program_info/map_ai.md 的物品評分段落已完整記載（「只認兩種 use_effect，其餘一律 0 分」「AI 只會用補 HP 的消耗品與兩種光束道具」），無需再落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/aiscore.c:421",
+    "observation": "fdps_score_targets_for_item：if (use_effect == 0x0b) 走 HP 門檻計分，else if (use_effect == 0x1e) 走擊殺計分，其餘碼不進任何迴圈，total 維持 0 回傳。"
+   },
+   {
+    "source": "ghidra",
+    "location": "000132e7",
+    "observation": "CMP [EBP-0x8],0xb / JNZ 000133a1；000133a1 CMP [EBP-0x8],0x1e / JNZ 00013402，00013402 直接回傳初值 0 的總分；use_effect 在 000132dc 以 XOR EAX,EAX／MOV AL 零延伸讀入。整支函式沒有其他效果碼比較。"
+   },
+   {
+    "source": "src",
+    "location": "src/aiscore.c:300",
+    "observation": "fdps_map_actor_score_best_item 先把 data_fdps_battle_ai_best_item_score 清成 0，364 行以 score_tier > best 才取代，所以 0 分的物品永遠不會被選上；324 行另先略過 use_effect 為 0 的物品。"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/map_ai.md 物品評分段",
+    "observation": "已寫明 0x132b0 只認 0x0b 與 0x1e、其餘一律 0 分，以及 AI 只會用補 HP 消耗品與兩種光束道具，其他道具在 AI 手上永遠不會被使用；cut_content/items.md 的 I01 不需要重複這個一般行為。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "敵方 AI 的物品評分（src/aiscore.c:421）只對 0x0b 與 0x1e 兩個效果碼走目標評分，其他效果碼（含 05、06、0D、1B）不走任何評分。"
+ },
+ {
+  "id": "T12-03",
+  "trace_sha1": "b0b88f67f9e59efa3f7e497d25f69695c9b43dd5",
+  "from": "I02",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I02",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "FD2 的戰鬥道具選單在效果碼 0x17 時，若使用者不是角色 0x18 或 MP 上限小於 0x14 就把瞄準結果改成取消；FDPS 的 fdps_battle_item_menu 在效果碼 0x19／0x1C 的對應分支只取一次單位記錄（結果存進 [EBP-0x1c] 後不再讀），隨即只看瞄準是否取消就開目的地游標，沒有這項角色與 MP 檢查。這件事已由 items.md 的 I02「來歷」一條寫明。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/item.c:1003",
+    "observation": "use_effect 為 USE_EFFECT_DEST_TILE_1C 或 USE_EFFECT_DEST_TILE_19 時呼叫 fdps_get_unit_record(unit_index) 而不使用回傳值，接著只以 pick_result != SELECT_CANCELLED 決定是否開 DESTINATION_SELECT_MODE 游標（item.c:1003-1024），沒有角色編號或 MP 上限的比較"
+   },
+   {
+    "source": "ghidra",
+    "location": "00025602",
+    "observation": "000255e9 CMP EAX,0x1c／000255f9 CMP EAX,0x19 進入分支；00025606 CALL 0x0002d210（fdps_get_unit_record）、0002560e 存進 [EBP-0x1c]，00025611 直接 CMP [EBP-0x44],-0x1，00025624 CALL 0x0002b4f0 開模式 6 游標，中間沒有任何讀取單位記錄欄位的比較"
+   },
+   {
+    "source": "fd2",
+    "location": "C:\\Users\\fdpsf\\Documents\\fd2-anatomy\\src\\ui_menu\\status.c:740",
+    "observation": "item_entry[0xd] == 0x17 時，rc[char_idx].char_id != 0x18 || rc[char_idx].mp_max < 0x14 就把 target_result 設為 -1（status.c:740-745），之後才開 mode 6 目的地游標"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I02",
+    "observation": "「來歷」已寫：FDPS 拿掉了 FD2 那一支「使用者是角色 0x18 且 MP 上限 ≥ 0x14」的檢查"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "FD2 的道具傳送分支另檢查使用者 char_id 0x18 且 mp_max≥0x14，FDPS 的對應分支拿掉了這個檢查。"
+ },
+ {
+  "id": "T12-04",
+  "trace_sha1": "af27b8c32acff77a893fd66ae4cc546e7da18b5a",
+  "from": "I02",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "I02",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "被拿掉的檢查留下了痕跡：目的地分支一開頭仍呼叫 `fdps_get_unit_record` 取施用者的單位記錄（`0x25606`），存進區域變數後沒有任何指令讀它——FD2 在同一位置讀這份記錄做角色與 MP 上限檢查，FDPS 刪了檢查、留下了讀取。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "fdps_battle_item_menu 在效果碼 0x1C／0x19 的目的地分支開頭（0x25602 起的序列，CALL 0x2d210 在 0x25606）呼叫 fdps_get_unit_record(unit_index)，結果以 0x2560e 的 MOV [EBP-0x1c],EAX 存下，整支函式再沒有任何指令引用 [EBP-0x1c]。FD2 的戰鬥道具選單在同一位置（效果碼 0x17 分支開頭、目的地游標之前）讀施用者的執行期記錄，檢查角色 0x18 與 MP 上限 ≥ 0x14；這次沒被讀的記錄取得就是 I02 所說被拿掉的檢查的殘跡。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/item.c:1003",
+    "observation": "use_effect 為 0x1C 或 0x19 時進入目的地分支，item.c:1007 呼叫 fdps_get_unit_record(unit_index) 並丟棄回傳值，註解（item.c:870-874）說明 [EBP-0x1c] 從未被讀"
+   },
+   {
+    "source": "ghidra",
+    "location": "00025602",
+    "observation": "MOV EAX,[EBP+0x14] / PUSH EAX / CALL 0x0002d210 (00025606) / ADD ESP,0x4 / MOV dword ptr [EBP-0x1c],EAX (0002560e)，接著直接 CMP [EBP-0x44],-0x1"
+   },
+   {
+    "source": "ghidra",
+    "location": "000252b0",
+    "observation": "search_instructions 在 fdps_battle_item_menu 全部 527 條指令中找 -0x1c 只有 0002560e 一處寫入，沒有任何讀取或 LEA"
+   },
+   {
+    "source": "src",
+    "location": "src/unit.c:15",
+    "observation": "0x0002d210 是 fdps_get_unit_record，單位陣列的元素存取函式"
+   },
+   {
+    "source": "fd2",
+    "location": "C:\\Users\\fdpsf\\Documents\\fd2-anatomy\\src\\ui_menu\\status.c:740",
+    "observation": "FD2 效果碼 0x17 分支開頭取 data_fd2_battle_runtime_char_array_ptr[char_idx]，檢查 char_id != 0x18 或 mp_max < 0x14 就把 target_result 設 -1，之後才開模式 6 的目的地游標"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "FD2 那邊是透過全域陣列指標直接索引，不是函式呼叫；FDPS 當初的原始碼是不是「取記錄、再檢查」而後只刪掉檢查，只能從形狀推論，無法由二進位直接證明。",
+  "_reread": "第二讀確認：Ghidra 中 fdps_battle_item_menu 對 [EBP-0x1c] 只有 0x2560e 一處寫入、無讀取，CALL 0x2d210 在 0x25606；src/unit.c fdps_get_unit_record 為無副作用的純存取；FD2 status.c 的 0x17 分支在同一位置讀 rc 做角色 0x18 與 MP 上限檢查；I02 未寫這次殘留讀取，T12-03 只吸收了檢查被拿掉一事，addendum 不重複。",
+  "trace": "fdps_battle_item_menu 在 00025602 呼叫 fdps_get_unit_record 並把結果存進 [EBP-0x1c] 後從未讀取，對應 FD2 同位置那次用來做角色檢查的記錄讀取。"
+ },
+ {
+  "id": "T12-05",
+  "trace_sha1": "2844ecdff8eddd19eedd89b10607ac2f048749af",
+  "from": "I03",
+  "verdict": "needs_correction",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "過場腳本 opcode `0x11` `SWITCH_MAP`（`fdps_icon_script_run`，寫入點 `0x21c26`）把章節索引 `data_fdps_chapter_current_chapter_id` 直接改成運算元，再呼叫 `fdps_chapter_state_reset`。開場腳本與第 8 章事件腳本自己以最後一個 `SWITCH_MAP` 切回本章地圖；只有 11 支停在過場地圖上的勝利腳本，是靠 end 處理函式最後寫入的下一章字面值蓋掉章節索引。這是遊戲運作方式的事實，`resource_info/cutscene_script.md`「結束時停在哪張地圖」與 `program_info/chapter.md`「章節結束」都已寫明，也不是刪減內容，所以不另外落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:1053",
+    "observation": "case SCRIPT_OP_SWITCH_MAP：data_fdps_chapter_current_chapter_id = script[offset+1]; fdps_chapter_state_reset(); offset += 2（在 1053–1058 行，不是 trace 寫的 1046 行；1046 行屬於 FADE_IN）"
+   },
+   {
+    "source": "src",
+    "location": "src/chend1b.c:106",
+    "observation": "fdps_chapter_12_end 的順序是清殘敵、名冊寫回、fdps_icon_script_run(\"Win11.dat\")、陣亡者復活，最後寫入 data_fdps_chapter_current_chapter_id = 12；其他 end 處理函式也是這個形狀"
+   },
+   {
+    "source": "ghidra",
+    "location": "00021c26",
+    "observation": "0x69cf4 的 xref 顯示 fdps_icon_script_run 內只有這一個 WRITE；其他寫入點是 29 個 fdps_chapter_NN_end、標題畫面、兩處讀檔與展示關"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003aa59",
+    "observation": "fdps_chapter_12_end 對 0x69cf4 的 WRITE，是 handler 的最後一步，在呼叫腳本之後"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/cutscene_script.md",
+    "observation": "「結束時停在哪張地圖」一節已寫明：開場腳本與第 8 章事件腳本都結束在本章地圖；WIN00、WIN03、WIN05、WIN08、WIN09、WIN11、WIN16、WIN18、WIN22、WIN24、WINGA26 停在過場地圖，接著由 end 處理函式寫入下一章；WIN26、WIN29 會切回來"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/chapter.md",
+    "observation": "「章節索引由誰改寫」與「章節結束」第 3、5 步已記下 SWITCH_MAP 改寫章節索引，以及 end 處理函式最後寫入下一章字面值"
+   }
+  ],
+  "corrected_trace": "過場腳本 opcode `0x11` `SWITCH_MAP`（src/icon.c 的 fdps_icon_script_run，`0x21c26`）把 data_fdps_chapter_current_chapter_id 直接改成運算元，再呼叫 fdps_chapter_state_reset。開場腳本與第 8 章事件腳本以自己最後一個 SWITCH_MAP 切回本章地圖；只有停在過場地圖上的 11 支勝利腳本（WIN00、03、05、08、09、11、16、18、22、24、WINGA26）靠 end 處理函式最後寫入的下一章字面值蓋掉章節索引。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二次判讀確認：src/icon.c 的 SWITCH_MAP 分支（fdps_icon_script_run，0x69cf4 在腳本內唯一的 WRITE 是 0x21c26）與 chend1.c 各 end 處理函式最後寫入下一章字面值都相符；resource_info/cutscene_script.md「結束時停在哪張地圖」、program_info/chapter.md「章節結束」已寫明此事，items.md I03 也已寫過場地圖部署不寫回名冊，非刪減內容，維持 drop。",
+  "trace": "SWITCH_MAP 腳本 opcode（src/icon.c:1046）直接改寫 data_fdps_chapter_current_chapter_id，過場地圖靠結束 handler 之後的賦值才切回正確章節。"
+ },
+ {
+  "id": "T12-06",
+  "trace_sha1": "1d400a0c1170d90cf7d947af4ad0d7bcb9a09d2f",
+  "from": "I03",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I03",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`60` 水晶球是 `ITEM.DAT` 唯一的類型 `12` 物品，64 張地圖的部署記錄裡只有第 22 章 `MAP21` 第 7 筆（`+0x139`，陣營 0 的敵兵）帶著它，且不掉落；`PROEQU.DAT` 職業 `0F` 巫師准許類型 `12`。這件事 items.md 的 I03「沒有一件拿得到的裝備類型」與表列 `60` 一行已經寫明，無須另落地。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "ITEM.DAT@0x8a0",
+    "observation": "物品 0x60 記錄首 byte（類型）為 0x12；251 筆中類型 0x12 只有 0x60 一件"
+   },
+   {
+    "source": "data",
+    "location": "PROEQU.DAT@0x5a",
+    "observation": "職業 0x0F 六格為 04 12 1E 1F 20 21，含類型 12；其他職業都不含 12"
+   },
+   {
+    "source": "data",
+    "location": "MAP21.DAT@0x139",
+    "observation": "部署記錄第 7 筆（0 起算）：00 49 00 00 14 60 87 ...，陣營 0、角色 0x49，裝備 60 與 87；+0x16/+0x17 為 02 20，不是掉落。掃過所有 MAPnn.DAT 的部署記錄，裝備／攜帶／掉落欄出現 0x60 的只有這一筆"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:308",
+    "observation": "部署時持有物直接抄自部署記錄的裝備欄，敵兵身上的 60 只存在於該敵兵單位"
+   },
+   {
+    "source": "src",
+    "location": "src/item.c:796",
+    "observation": "戰鬥中轉交的選取模式 3 只收陣營 2，拿不到敵兵身上的物品"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cut_items/acquisition.py table",
+    "observation": "`60` 水晶球列為拿不到，唯一出處「第 22 章的敵兵」"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "物品 60 水晶球（類型 12）只有 MAP21 第 7 筆敵人帶著，巫師職業可以裝備。"
+ },
+ {
+  "id": "T12-07",
+  "trace_sha1": "25b79dbf2ef366e73b7ce252d0e57f969a159e2a",
+  "from": "I04",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "I04",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "`MAP06` 的碼 1–4 沒有格子引用，是因為 `M06.DTL` 的事件碼層整層都是 0：四根柱子旁的五個埋藏格 (8, 10)、(16, 10)、(8, 16)、(16, 16)、(8, 17) 全帶碼 0，共用記錄 0 的 `DD` 風精之羽與同一個旗標，任一格搜到後其餘四格在 `fdps_battle_search_cell_at_cursor`（`0x184f0`）的旗標檢查就直接返回、毫無反應，而埋藏格不會被重繪（`fdps_map_apply_triggered_cell_changes` 只處理類別 `0x20`／`0x60`），外觀也不變。五個埋藏格恰好對上碼 0–4 五筆有內容的記錄，像是事件碼層沒有填上，但資料本身證實不了。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "屬實：`M06.DTL` 事件碼層 64×64 格全為 0，第 0 層類別為埋藏（`0x40`）的五格因此全讀到碼 0，共用 `MAP06.DAT` 記錄 0（`DD` 風精之羽）與旗標 0；成功取走後旗標設為 1，其餘四格在旗標檢查處直接返回，埋藏格也不會被重繪。這解釋了 I04 表中 `MAP06` 碼 1–4 為何沒有格子引用，值得補進 I04。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/btlact.c:208-219",
+    "observation": "fdps_battle_search_cell_at_cursor 取游標格的事件碼與類別；類別 0x00／0x60 返回，data_fdps_map_cell_event_triggered_flags[碼] 非 0 也直接返回，不開任何視窗"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:269-274",
+    "observation": "物品放進背包成功後才把該碼旗標設 1 並呼叫 fdps_map_apply_triggered_cell_changes；背包滿而交換的路徑（:311-332）不設旗標"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:194-205",
+    "observation": "fdps_map_apply_triggered_cell_changes 只對類別 0x20 或 0x60 且旗標已設的格子把圖磚 +1、把 DTL 清 0；埋藏格 0x40 不動"
+   },
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:186-196",
+    "observation": "struct fdps_map_cell_code_layer 的 cells 從 +0x10 起一格一 byte"
+   },
+   {
+    "source": "data",
+    "location": "M06.DTL@0x10",
+    "observation": "檔長 4112 = 0x10 + 64×64，+0x10 起 4096 byte 全為 0：整層事件碼都是 0"
+   },
+   {
+    "source": "data",
+    "location": "MAP06.DAT@0x53",
+    "observation": "記錄 0：種類 0、內容 0xDD（風精之羽）；記錄 1–3：B8、B5、B8；記錄 4：種類 1 金額 3000；記錄 5 起全 0"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/map_decode tile_info（地圖 6 第 0 層與其 ATTR）",
+    "observation": "以 tools/map_decode 的 tile_info 讀出 (8,10)、(16,10)、(8,16)、(16,16)、(8,17) 的圖磚 173、175、189、191、214 屬性 flags 皆 0x40（埋藏）、事件碼 0；整張圖可搜尋格只有這 5 格"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:282",
+    "observation": "進場時旗標表整張清 0；src 中沒有以 0 為常數的事件旗標 slot，第 7 章沒有別的寫入者先占用旗標 0"
+   },
+   {
+    "source": "investigation",
+    "location": "chapters/ch07.md「風精之羽埋在四根柱子旁的五個格子」",
+    "observation": "章節頁已寫五格共用記錄 0 與同一旗標、只拿得到一次、外觀不變；但 cut_content/items.md 的 I04 沒有說明 MAP06 碼 1–4 無引用的原因"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "確認無誤：M06.DTL 自 +0x10 起 4096 byte 全為 0、五個埋藏格（類別 0x40）全讀到碼 0，MAP06.DAT +0x53 記錄 0 為 DD 風精之羽、記錄 1–4 有內容；src/btlact.c fdps_battle_search_cell_at_cursor 在旗標已設時不開視窗直接返回、取走物品與金錢才設旗標（交換路徑不設），src/maptile.c fdps_map_apply_triggered_cell_changes 不動類別 0x40；旗標 0 沒有章節事件使用；I04 未說明 MAP06 碼 1–4 無引用的成因，addendum 成立。",
+  "trace": "第 7 章 MAP06 的五個埋藏格全部帶碼 0、共用同一個旗標與同一筆記錄（風精之羽），第一格搜到後其餘四格因旗標已設而搜尋直接無反應。"
+ },
+ {
+  "id": "T12-08",
+  "trace_sha1": "035afd7d1c01773a7a30512d760df012f2506abc",
+  "from": "I04",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I05",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`MAP51.DAT` `+0x53` 的可搜尋格記錄 0–6 是金錢 12000 與物品 `B7`、`DA`、`CF`、`B8`、`88`、`111`（`0x111` 超出 `ITEM.DAT`），其餘 9 筆全 0，這組內容在所有 `MAP` 檔中獨有（`88` 只出現在這裡）；`M51.DTL` 表頭之後 4096 byte 全是 0，沒有任何格子帶事件碼，記錄無從取得。這個事實已由 items.md 的 I05 完整陳述。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP51.DAT@0x53",
+    "observation": "記錄 0：種類 1、內容 12000；記錄 1–6：種類 0、內容 0xB7、0xDA、0xCF、0xB8、0x88、0x111；記錄 7–15 全 0"
+   },
+   {
+    "source": "data",
+    "location": "M51.DTL@0x10",
+    "observation": "檔長 4112 = 0x10 表頭 + 64×64；表頭後 4096 byte 全為 0，沒有任何格子帶事件碼"
+   },
+   {
+    "source": "investigation",
+    "location": "FIELD.VFS MAP*.DAT@0x53",
+    "observation": "掃描所有 MAP*.DAT，前 7 筆記錄與 MAP51 相同的檔案不存在，物品 0x88 只出現在 MAP51.DAT"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:108",
+    "observation": "SEARCH_CELL_KIND_AT 0x53／SEARCH_CELL_PAYLOAD_AT 0x54：玩家搜尋依格子事件碼 ×3 取記錄（對應 00018600、00018617）"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:319",
+    "observation": "事件碼層從 Field1.vfs 的 M%02d.dtl 載入，是格子事件碼的唯一來源"
+   },
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:185",
+    "observation": "DTL 格式：0x10 byte 表頭後接 width*height 的每格一 byte 事件碼"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "過場用地圖 MAP51 的可搜尋格記錄是一組獨特內容（金錢 12000、物品 B7、DA、CF、B8、88 與超出 ITEM.DAT 的 111），但 M51.DTL 沒有任何可搜尋格。"
+ },
+ {
+  "id": "T12-09",
+  "trace_sha1": "fc9023612934870ed5750f165868497c7899966b",
+  "from": "I04",
+  "verdict": "needs_correction",
+  "disposition": "exclude",
+  "entry": "",
+  "topic": "items",
+  "category": "excluded",
+  "route": "none",
+  "title": "過場地圖 `MAP31`、`MAP32`、`MAP34`–`MAP50`、`MAP52`–`MAP55`、`MAP57`–`MAP64` 共 31 個 `MAP` 檔共用的可搜尋格記錄（碼 0 金錢 500、碼 1 與碼 2 `B4` 藥草、碼 3 `DE` 解毒劑）",
+  "kb_text": "地圖檔的預設範本，不是做好沒放的寶物：31 個檔的 `+0x53` 逐 byte 相同，四筆都是別處拿得到的一般物品；這些地圖的 `DTL` 全為 0、第 0 層沒有寶箱或埋藏格，`fdps_battle_search_cell_at_cursor`（`0x184f0`，`src/btlact.c`）與 AI 行為 5 都讀不到它們。另外有內容的只有 `MAP51` 的獨有一份（I05），`MAP56` 全為 0。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "過場地圖 31、32、34–50、52–55、57–64 的 `MAPnn.DAT` `+0x53` 是同一份範本（金錢 500、`B4` 藥草、`B4` 藥草、`DE` 解毒劑），但它不是 `MAP00` 的那份（`MAP00` 是藥草、藥草、金錢 1000）；`MAP51` 是獨有的一份（I05）、`MAP56` 全為 0、`MAP33` 不存在。這些地圖的 `DTL` 全為 0，第 0 層也沒有任何類別 `0x20`／`0x40` 的格子，所以記錄沒有讀取路徑；範本內容別處都拿得到，屬排除而非殘留內容。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP00.DAT@0x53",
+    "observation": "碼 0 種類 0 物品 B4、碼 1 種類 0 物品 B4、碼 2 種類 1 金錢 1000，其餘 0——與過場地圖的範本不同"
+   },
+   {
+    "source": "data",
+    "location": "MAP31.DAT@0x53",
+    "observation": "碼 0 種類 1 金錢 500、碼 1 B4、碼 2 B4、碼 3 DE，其餘 0；MAP32、34–50、52–55、57–64 共 31 個檔的 48 byte 記錄區逐 byte 相同"
+   },
+   {
+    "source": "data",
+    "location": "MAP51.DAT@0x53",
+    "observation": "金錢 12000、B7、DA、CF、B8、88、111，不是範本（I05）"
+   },
+   {
+    "source": "data",
+    "location": "MAP56.DAT@0x53",
+    "observation": "16 筆全為 0"
+   },
+   {
+    "source": "data",
+    "location": "M31.DTL@0x10",
+    "observation": "M31–M64.DTL 的格子 byte 全為 0（檔頭後沒有一個非 0 byte）；FIELD.VFS 沒有 MAP30、MAP33"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/map_decode searchable_cells",
+    "observation": "地圖 31–64 第 0 層以 ATTR 查出的類別沒有任何 0x20 或 0x40 格，可搜尋格數 0（與事件碼無關）"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:208-253",
+    "observation": "fdps_battle_search_cell_at_cursor 在類別 0x00／0x60 時直接返回，記錄以事件碼 ×3 從 +0x53／+0x54 取；類別取自游標格的圖磚屬性"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:66-89",
+    "observation": "fdps_map_load_tile_info 以第 0 層圖磚編號查 ATTR 得類別，事件碼取自 DTL 以其自身寬度索引的一格"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md 格子事件一節",
+    "observation": "知識庫已正確寫明過場地圖的記錄多數共用 500 元、藥草、藥草、解毒劑這一份，不是 MAP00 的那份，MAP51、MAP56 各自不同"
+   }
+  ],
+  "corrected_trace": "過場地圖 31、32、34–50、52–55、57–64 共 31 個 `MAP` 檔的可搜尋格記錄是同一份範本（金錢 500、`B4` 藥草、`B4` 藥草、`DE` 解毒劑），與 `MAP00` 的那份（藥草、藥草、金錢 1000）不同；`MAP51` 有獨有的一份、`MAP56` 全為 0、`MAP33` 不存在。這些地圖的事件碼層全為 0，第 0 層也沒有寶箱或埋藏格，記錄沒有讀取路徑。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：重算 63 個 MAPnn.DAT 的 +0x53，31 個過場地圖檔共用金錢 500／B4／B4／DE，MAP00 是 B4／B4／金錢 1000，MAP51 獨有、MAP56 全 0；M31–M64.DTL 檔頭後全為 0，map_decode report 顯示地圖 31–64 寶箱與埋藏格皆 0；B4、DE 在 SHOP01 有賣；items.md 與排除清單都沒有涵蓋，判為排除成立。",
+  "trace": "MAP31–MAP63 各過場地圖的記錄都是與 MAP00 相同的範本（金錢 500、B4、B4、DE），事件碼層沒有可搜尋格。"
+ },
+ {
+  "id": "T12-10",
+  "trace_sha1": "8a09b47d23a07852253fd409d44de02328abc655",
+  "from": "I04",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I04",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MAP07.DAT +0x53 的碼 6、7 是種類 2、內容 0 的記錄（種類 2 以內容 word 索引章節事件處理函式表）；M07.DTL 裡碼 6 只出現在 4 個重繪格（類別 0x60），碼 7 出現在 6 個重繪格與 3 個類別 0x00、格子事件沒有處理函式的格，沒有任何寶箱或埋藏格帶這兩個碼。這件事 cut_content/items.md 的 I04 末條已經寫明（不是寶物、不在上表），沒有新內容要落地；resource_info/map.md 說「那兩格是重繪格」略不精確（碼 7 另有 3 個類別 0x00 格），但不影響本條。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP07.DAT@0x65",
+    "observation": "碼 6、7 兩筆記錄的 bytes 為 02 00 00 02 00 00：種類 2、內容 0；碼 0–5 是物品 D6、76、07、E1、C3 與金錢 2000，碼 8–15 全 0"
+   },
+   {
+    "source": "data",
+    "location": "M07.DTL@0x12f",
+    "observation": "DTL 寬 64、格子從 +0x10 起；碼 6 只在 (31,4)(32,4)(31,5)(32,5) 四格，第 0 層屬性都是類別 0x60（重繪格）"
+   },
+   {
+    "source": "data",
+    "location": "M07.DTL@0xe4",
+    "observation": "碼 7 在 (20–22,3)(20–22,4) 六格為類別 0x60 重繪格，(20–22,5) 三格（M07.DTL@0x164 起）為類別 0x00；MAP07.DAT 格子事件表碼 7 的處理函式 byte 是 0xFF（沒有處理函式）"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:214",
+    "observation": "fdps_battle_search_cell_at_cursor 在類別 0x00 或 0x60 時直接返回，只有寶箱 0x20／埋藏 0x40 會讀記錄"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:367-375",
+    "observation": "種類 2 以內容 word 索引 data_fdps_chapter_event_handler_table 呼叫處理函式，不設旗標也不重繪"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I04",
+    "observation": "I04 末條：「MAP07 碼 6、7 是種類 2（章節事件）內容 0 的記錄，不是寶物，不在上表。」；resource_info/map.md 統計表 M07 列的未引用非空記錄為 6, 7"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "第 8 章 MAP07 碼 6、7 是種類 2（章節事件）內容 0 的記錄，那兩個碼只出現在重繪格與事件格上，沒有可搜尋格引用。"
+ },
+ {
+  "id": "T12-11",
+  "trace_sha1": "ad9b929747c1858511c157c76b4d129437d01818",
+  "from": "I05",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I05",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MAP51.DAT 唯一的部署記錄是陣營 0（敵方）、角色編號 0x43、等級 20、AI 行為 2、波次 0，死亡腳本 opcode 1 運算元 5000（金錢 5000）。地圖 51 只由 WIN20、WIN24 以 SWITCH_MAP 載入，這名單位在 WIN20 裡當演員（u11，被擺放、行走、反覆退場與復歸），腳本在同一段內切回地圖 20 並重建單位陣列；死亡腳本只由戰鬥中的攻擊、法術、道具路徑收集執行，過場沒有這些路徑，所以這 5000 元永遠發不出來。I05 已寫明這筆部署記錄與它的死亡腳本，且說明玩家從未在這張圖上取得操控，事實已被 I05 涵蓋。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP51.DAT@0x83",
+    "observation": "00 43 00 00 14 .. 02(+0x11) 00 00 00(+0x14) 00(+0x15) 01(+0x16) 88 13(+0x17)：陣營 0、角色 0x43、等級 20、AI 行為 2、波次 0、死亡腳本 opcode 1 運算元 0x1388=5000；檔頭 +0x01 我方 slot 11、+0x02 部署 1 筆，檔長 157。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1053",
+    "observation": "SWITCH_MAP 設章節編號後呼叫 fdps_chapter_state_reset，後者（src/chapter.c:280）以 fdps_build_map_unit_array 重建單位陣列並部署波次 0，因此這名單位只在切入地圖 51 的過場中存在。"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/WIN20.DAT@0x0421",
+    "observation": "PLACE_UNIT u11=MAP51#0（角色 0x43），之後行走、在 0x04d8–0x0580 反覆 RETIRE_UNIT/REVIVE_UNIT，0x05e6 SWITCH_MAP 20 切走；WIN24 在地圖 51 上不動用 u11。"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:502",
+    "observation": "fdps_run_death_scripts 的呼叫者只有 src/btlact.c:610、src/aiact.c:201/305、src/item.c:705、src/spellmnu.c:918，全是戰鬥中的行動路徑；過場腳本直譯器不會觸發死亡腳本。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I05",
+    "observation": "I05 的「是什麼」已寫唯一部署記錄是陣營 0、角色編號 0x43、等級 20、AI 行為 2、帶死亡腳本「金錢 5000」，「為什麼到不了」寫玩家從未在這張圖上取得操控。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "MAP51.DAT 唯一的部署記錄（角色編號 0x43、等級 20）帶死亡腳本「金錢 5000」，但它只在過場裡出場，無法被擊倒。"
+ },
+ {
+  "id": "T12-12",
+  "trace_sha1": "843f3fa7a1af14fdda93a6b2aa7547fb8a14ed8d",
+  "from": "I05",
+  "verdict": "needs_correction",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "資料面的敘述成立：地圖 31 以後的 MAP 檔除 MAP51、MAP56 外共用一份可搜尋格記錄（金錢 500、B4 藥草、B4 藥草、DE 解毒劑），MAP00 是（B4、B4、金錢 1000），MAP51 另有獨有的一份、MAP56 全 0；格子事件表 MAP51 與 MAP56 全為 (FF,00)，其餘與 MAP00 相同。但 resource_info/map.md 的那一段已經改寫成這個正確的內容，痕跡指出的文件錯誤不存在了；MAP51 的寶物表由 cut_content/items.md 的 I05 擁有，共用那份記錄的物品別處都拿得到，沒有要新增的條目。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MAP00.DAT@0x53",
+    "observation": "非空記錄：(0,0xB4)、(0,0xB4)、(1,1000)。"
+   },
+   {
+    "source": "data",
+    "location": "MAP31.DAT@0x53",
+    "observation": "非空記錄：(1,500)、(0,0xB4)、(0,0xB4)、(0,0xDE)；MAP32、MAP34–MAP50、MAP52–MAP55、MAP57–MAP64 的 +0x53 48 byte 與此逐筆相同（FIELD.VFS 沒有 MAP33）。"
+   },
+   {
+    "source": "data",
+    "location": "MAP51.DAT@0x53",
+    "observation": "(1,12000)、(0,0xB7)、(0,0xDA)、(0,0xCF)、(0,0xB8)、(0,0x88)、(0,0x111)，獨有一份。"
+   },
+   {
+    "source": "data",
+    "location": "MAP56.DAT@0x53",
+    "observation": "16 筆全為 (0,0)。"
+   },
+   {
+    "source": "data",
+    "location": "MAP51.DAT@0x33",
+    "observation": "16 筆格子事件全為 (FF,00)；MAP56.DAT@0x33 也是。MAP00 與其餘 31 以後的檔為 (00,00)、(00,01)、其後 14 筆 (FF,00)。"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md「格子事件（+0x33）」段",
+    "observation": "現行文字已寫明：格子事件表除 MAP51、MAP56 全為 (FF,00) 外與 MAP00 相同；可搜尋格記錄多數共用（500 元、藥草、藥草、解毒劑），MAP00 是（藥草、藥草、1000 元），MAP51 與 MAP56 各自不同。舊文「與 MAP00 相同的格子事件與可搜尋格記錄」已在 git 5aa2252 改掉。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I05",
+    "observation": "MAP51 的獨有寶物表已由 I05 擁有。"
+   }
+  ],
+  "corrected_trace": "resource_info/map.md 曾寫地圖 31 以後的 MAP 檔帶著與 MAP00 相同的格子事件與可搜尋格記錄；實際上可搜尋格記錄多數共用另一份（500 元、B4、B4、DE），MAP00 是（B4、B4、1000 元），MAP51 與 MAP56 各自不同；格子事件表 MAP51 與 MAP56 全為 (FF,00)，其餘與 MAP00 相同。map.md 現行文字已照此更正。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "已確認：重新解碼 FIELD.VFS 的 MAP00 與 MAP31–MAP64 的 +0x33、+0x53，共用表（500 元、B4、B4、DE）、MAP00（B4、B4、1000 元）、MAP51 獨有表與 MAP51／MAP56 格子事件全 (FF,00) 皆相符；git 顯示 map.md 那段已在 5aa2252 改成正確內容，MAP51 的表由 I05 擁有、共用表的物品別處拿得到，維持 drop。",
+  "trace": "resource_info/map.md:81 寫地圖 31 以後的 MAP 檔帶著與 MAP00 相同的可搜尋格記錄，實際上多數是另一份共用表（500 元、B4、B4、DE），MAP00 的是（B4、B4、1000 元），MAP51 與 MAP56 又各不相同；MAP51 的格子事件表也不是 MAP00 的那份而是全為 (FF,00)。"
+ },
+ {
+  "id": "T12-13",
+  "trace_sha1": "e3c901ed61e5a20470e62dc5420816750d4bf6af",
+  "from": "I05",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MAP56.DAT 的可搜尋格記錄表（+0x53 起 48 byte）全為 0；地圖 31 以後的 32 個 MAP 檔中只有 MAP51 與 MAP56 不帶共用的那份（500 元、B4、B4、DE），陳述成立。全 0 的表沒有任何內容可到達或被封住，不是刪減內容；這個格式事實已由 resource_info/map.md 的格子事件一節寫明（「MAP56（全 0）各自不同」），無需再落地。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD/MAP56.DAT@0x53",
+    "observation": "+0x53 起 48 byte（16 筆 3-byte 記錄）全為 0。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD/MAP31.DAT@0x53",
+    "observation": "01 f4 01 / 00 b4 00 / 00 b4 00 / 00 de 00：金錢 500、B4、B4、DE；MAP31、32、34–50、52–55、57–64 共 31 檔的 +0x53 表逐 byte 相同（MAP30、MAP33 不存在）。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD/MAP51.DAT@0x53",
+    "observation": "另一份獨有表（金錢 12000 起），即 I05；地圖 31 以後不帶共用表的只有 MAP51、MAP56 兩檔。"
+   },
+   {
+    "source": "investigation",
+    "location": "resource_info/map.md:81",
+    "observation": "知識庫已寫：過場地圖的可搜尋格記錄多數共用（500 元、藥草、藥草、解毒劑），MAP51 與 MAP56（全 0）各自不同。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "MAP56.DAT 的可搜尋格記錄表全為 0，是地圖 31 以後唯一不帶共用表的檔案之一。"
+ },
+ {
+  "id": "T12-14",
+  "trace_sha1": "f62d7b693b213cb59f83ef9c8d86f50bcbb31030",
+  "from": "I06",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "program_info/village.md 抽獎一節類別 0 那一列只寫「並播 Bonus.wav 等它播完」，應補上載入的 Bonus.wav（128,216 byte）在函式結尾不釋放（結尾只 free 另外四塊），這個遺漏只在從不執行的斬鐵劍分支裡發生；這是程式行為的事實，不是刪減內容。",
+  "confidence": "high",
+  "conclusion": "fdps_run_bonus_lottery 只在斬鐵劍分支（0x36920）以 fdps_vfs_load_entry 載入 Bonus.wav 存進 [EBP-0x28]，函式結尾的四次 free 只釋放 [EBP-0x24]、[EBP-0x14]、[EBP-0x6c]、[EBP-0x20]，Bonus.wav 那塊從不釋放。因為原版的判獎恆不走斬鐵劍分支（I06、B7），這個記憶體洩漏實際上從不發生；它是程式行為的細節，不是刪減或未用內容，已由 I06／B7 涵蓋的封住事實之外沒有新的刪減面向。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/vilbar.c:529",
+    "observation": "函式註解 NOTHING IS CHECKED 段寫明 Bonus.wav image is never freed"
+   },
+   {
+    "source": "src",
+    "location": "src/vilbar.c:744",
+    "observation": "fanfare_wav = fdps_vfs_load_entry(BONUS_ARCHIVE, BONUS_FANFARE_WAV) 只在 prize_class == BONUS_PRIZE_SWORD 分支內"
+   },
+   {
+    "source": "src",
+    "location": "src/vilbar.c:792",
+    "observation": "結尾只 free stopped_reel_screen、reel_clip、request[DEST_BASE]、saved_screen，沒有 fanfare_wav"
+   },
+   {
+    "source": "ghidra",
+    "location": "00036934",
+    "observation": "MOV [EBP-0x28],EAX 存 fdps_vfs_load_entry(0x60128, 0x61fec 'Bonus.wav') 的回傳，位於 0003691a CMP [EBP-0xc],0 之後的斬鐵劍分支"
+   },
+   {
+    "source": "ghidra",
+    "location": "00036aac",
+    "observation": "結尾四個 CALL 0x3d478（free）的參數依序是 [EBP-0x24]、[EBP-0x14]、[EBP-0x6c]、[EBP-0x20]；[EBP-0x28] 在 0003693d 被讀去給 fdps_audio_start_wav 之後再無引用"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS BONUS.WAV@0x0",
+    "observation": "resource_info/vfs.md 記 BONUS.WAV 128,216 byte，即每次走到此分支會洩漏的大小"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "抽獎載入的 Bonus.wav 影像從不 free（src/vilbar.c:529 註解），只在發劍分支才會發生。"
+ },
+ {
+  "id": "T12-15",
+  "trace_sha1": "fcbcb1b69366f1bda571d1b031372bb101e19be2",
+  "from": "I06",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "抽獎已抽旗標 `0x64110` 的存取點正是抽獎本身（讀 `0x3648a`、寫 `0x36ad8`）、fdps_title_screen 清 0（`0x2a2ec`）、fdps_load_game_screen 寫回（`0x24609`，只在不處於村莊階段時）與 fdps_save_game_screen 讀出（`0x2435b`）。這是遊戲運作的一般事實而非刪減內容，且 program_info/village.md 的抽獎一節、program_info/save.md 與 resource_info/save.md 的 `+0x9ec` 欄已完整記載，無須落地。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "00064110",
+    "observation": "xrefs: 0002a2ec fdps_title_screen WRITE; 00024609 fdps_load_game_screen WRITE; 0002435b fdps_save_game_screen READ; 0003648a / 00036ad8 fdps_run_bonus_lottery READ / WRITE; no other references"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:833",
+    "observation": "data_fdps_bonus_lottery_drawn_flag = 0; in the title screen"
+   },
+   {
+    "source": "src",
+    "location": "src/save.c:455",
+    "observation": "load restores the flag from slot_record->bonus_lottery_drawn_flag only when data_fdps_village_mode_flag == 0"
+   },
+   {
+    "source": "src",
+    "location": "src/save.c:272",
+    "observation": "save stores the flag into slot_record->bonus_lottery_drawn_flag"
+   },
+   {
+    "source": "src",
+    "location": "src/vilbar.c:588",
+    "observation": "lottery returns without drawing when the flag is set; vilbar.c:796 sets it to 1 after a draw"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/village.md, program_info/save.md, resource_info/save.md",
+    "observation": "the flag's reset at the title, its save-record field +0x9ec and the village-mode condition on load are already documented"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "抽獎旗標 0x64110 除抽獎本身外，由 fdps_title_screen（0002a2ec）與 fdps_load_game_screen（00024609）寫入、fdps_save_game_screen 讀出。"
+ },
+ {
+  "id": "T12-16",
+  "trace_sha1": "ef626802b53f9fbb866775eafa0c5c3852c31d6b",
+  "from": "I06",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "I06",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "fdps_roster_add_item_to_all（0x36af0）對名冊每名成員先跳過背包恰好 8 件者，再於章節索引 >= 0x17 時跳過名冊第 3 格，章節沒有上限、也不看該格是誰；這是抽獎發獎機制的一個細節，items.md 的 I06 已寫明「章節索引 0x17 以後另跳過 slot 3」，program_info/village.md 與 pitfalls 也已記載，無需新落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/roster.c:533",
+    "observation": "if (fdps_unit_item_count(roster_index) != INVENTORY_FULL_COUNT && (data_fdps_chapter_current_chapter_id < CHAPTER_INDEX_SLOT_3_LEAVES(0x17) || roster_index != 3)) 才呼叫 fdps_unit_add_item；沒有章節上限"
+   },
+   {
+    "source": "ghidra",
+    "location": "00036b29",
+    "observation": "CMP dword ptr [0x00069cf4],0x17 / JL；00036b32 CMP [EBP-0x4],0x3 / JZ 跳過；前面 00036b24 CMP EAX,0x8 / JZ 跳過背包滿者；整支函式沒有其他章節比較"
+   },
+   {
+    "source": "src",
+    "location": "src/vilbar.c:749",
+    "observation": "唯一呼叫端是抽獎 fdps_run_bonus_lottery 的三個發獎分支（749、756、761）"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I06",
+    "observation": "I06「為什麼到不了」已寫：發獎走 fdps_roster_add_item_to_all，每名成員只在背包未滿 8 格時加一件，章節索引 0x17 以後另跳過 slot 3"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/village.md",
+    "observation": "法蓮娜鎖定段落與全隊發獎段落已記載同一組「章節索引 >= 0x17 且名冊第 3 格」判斷無上限"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "fdps_roster_add_item_to_all 從章節 id 0x17 起無上限地跳過 slot 3（src/roster.c:506）。"
+ },
+ {
+  "id": "T12-17",
+  "trace_sha1": "8a0efb072a86280df670620903587f54be0f97cf",
+  "from": "I07",
+  "verdict": "needs_correction",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 10 章回合事件 fdps_chapter_10_event_deploy_wave_for_turn（`0x37780`）的中段分支確實只有 `CMP [0x69ce8],0xd / JG` 一道帶號上界、沒有下界，回合 3 以外、13 以下的回合都會進去以（回合−4）為波次部署並移動兩次鏡頭；但這條路在原版資料裡走不到：回合計數從 1 起算，處理器表 slot 15 只由 `MAP09.DAT` 的回合表在回合 3、6–13、19 呼叫，沒有其他地圖指到這個 slot，所以負波次呼叫從未發生。這不是刪減內容（沒有殘留內容、空殼或被封住的東西），機制已完整寫在 src/chevt2b.c 與 chevt2b.h 的註解裡，無需再落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chevt2b.c:274",
+    "observation": "else if (data_fdps_battle_turn_counter <= CH10_LAST_DOOR_TURN) 為中段分支，無下界；L275–277 以 turn - CH10_DOOR_WAVE_TURN_BIAS(4) 為波次呼叫 fdps_deploy_wave，L280–293 兩次 fdps_map_cursor_move_to 與各 12 格畫面"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt2b.c:205",
+    "observation": "註解已寫明兩道測試不是區間、回合 0 會要波次 -4、回合 2 會要 -2，並說明限制在波次 2–9 的是 map09.dat 的回合表"
+   },
+   {
+    "source": "ghidra",
+    "location": "000377d0",
+    "observation": "CMP dword ptr [0x00069ce8],0xd / JG 0x00037856；000377e0 MOV EAX,[0x69ce8] / SUB EAX,0x4 / PUSH EAX 後 CALL 0x00023830，之後 000377fe 與 0003782e 兩次 CALL 0x0002d7c0，各接 12 次 CALL 0x0002beb0"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:109",
+    "observation": "回合計數 data_fdps_battle_turn_counter 從 1 起算、每輪加一，回合 0 的事件不可達；fdps_battle_run_turn_events（L123）是唯一以回合呼叫此 slot 的分派者"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:103",
+    "observation": "處理器表第 15 格（0x0F）為 fdps_chapter_10_event_deploy_wave_for_turn"
+   },
+   {
+    "source": "data",
+    "location": "MAP09.DAT@0x3",
+    "observation": "回合表 16 筆 ×3 byte：(回合,slot,陣營) = (3,15,0)(6,15,0)…(13,15,0)(19,15,0)，其餘 6 筆為 FF；掃過所有 MAP*.DAT，只有 MAP09.DAT 指到 slot 15"
+   }
+  ],
+  "corrected_trace": "第 10 章回合事件 fdps_chapter_10_event_deploy_wave_for_turn 的中段分支只有「回合 ≤ 13」一道帶號上界、沒有下界，若在回合 1、2 被呼叫會以負波次（-3、-2）呼叫 fdps_deploy_wave 且照樣移動兩次鏡頭、若在回合 4、5 被呼叫會重複部署波次 0、1；但回合計數從 1 起算，而 `MAP09.DAT` 的回合表只在回合 3、6–13、19 呼叫此 slot，沒有其他地圖指到它，所以這些情形在原版中都不會發生（src/chevt2b.c，`0x377d0`）。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：chevt2b.c 的 fdps_chapter_10_event_deploy_wave_for_turn 中段分支只有帶號上界（0x377d0 JG），btlturn.c 的回合計數從 1 起算、fdps_battle_run_turn_events 以等值比對回合，重掃所有 MAP*.DAT 回合表只有 MAP09.DAT 指到 slot 15 且只在回合 3、6–13、19，負波次從不發生；非刪減、機制已在 src 註解中，drop 成立。",
+  "trace": "第 10 章回合事件中段分支沒有下界，回合 0 與 2 會以負波次呼叫 fdps_deploy_wave 並仍執行兩次鏡頭移動（src/chevt2b.c:274）。"
+ },
+ {
+  "id": "T12-18",
+  "trace_sha1": "af278a08f516f2dc9f0a2dec948a1746457c1748",
+  "from": "I08",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "I03",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "- **沒有隊員能裝備的類型**：`63` 光束砲的類型 `15` 不在 `PROEQU.DAT` 任何一筆的准許清單裡；`5B` 鐮刀（`0D`）、`5C` 地獄之門（`0E`）、`1D` 牙與 `5D` 爪（`0F`）、`5E` 斧（`10`）、`5F` 靈擊（`11`）、`61` 武士刀（`13`）的類型只由職業 `1A` 魔神、`20` 妖魔、`21` 守護獸、`22` 將軍、`23` 傭兵准許，而隊員的職業碼最大 `0x19`。`fdps_unit_can_equip_item`（`0x25fe0`，`src/unititem.c`）只拿物品類型（`+0x00`）比對該職業的六格，所以這八件就算到了隊員手上也裝不上；敵兵的裝備由部署記錄直接寫入背包，不經這項檢查。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`ITEM.DAT` 裡類型 `15` 只有 `63` 光束砲一件，`PROEQU.DAT` 36 筆沒有一筆含 `15`，`fdps_unit_can_equip_item` 對它一律回 0，任何職業都裝不上。與它同屬 I03 的 `5B`、`5C`、`1D`、`5D`、`5E`、`5F`、`61` 的類型只由隊員不會有的職業 `1A`、`20`–`23` 准許，這是 I03「哪些原本就是敵人專用」一點的直接資料，值得補進 I03。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "ITEM.DAT@0x08E5",
+    "observation": "物品 0x63 記錄（0x63×23）為 15 10 27 00 …，+0x00 類型 = 0x15；226 筆有內容的記錄裡類型 0x15 只有這一筆"
+   },
+   {
+    "source": "data",
+    "location": "PROEQU.DAT@0x0000",
+    "observation": "216 byte = 36 筆 × 6；沒有任何一筆含 0x15。0D 只在 0x20，0E 只在 0x1A，0F 在 0x20、0x21，10 在 0x21–0x23，11 在 0x20，13 在 0x22；0x00–0x19 各筆都不含 0D、0E、0F、10、11、13、15"
+   },
+   {
+    "source": "src",
+    "location": "src/unititem.c:750",
+    "observation": "fdps_unit_can_equip_item（00025fe0）以物品記錄 +0x00 為類型，逐一比對 PROEQU 該職業六格，相等回 1、否則回 0，沒有其他欄位或特例"
+   },
+   {
+    "source": "src",
+    "location": "src/unititem.c:55",
+    "observation": "WEAPON_TYPE_MAX 0x15：類型 0x15 屬武器區間的最後一個值"
+   },
+   {
+    "source": "data",
+    "location": "FRIAPRDA.DAT@0x0001",
+    "observation": "60 筆 24 byte 記錄的職業 byte 最大 0x19；RANKUP.DAT 轉職職業最大 0x18（I08 已記），隊員職業到不了 0x1A 以上"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/items.md I03",
+    "observation": "表中列 63 光束砲類型 15、第 15 章的敵兵，但未提沒有職業能裝備；I08 只談類型空號 0A–0C、14 與 2D"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：重新傾印 PROEQU.DAT 36 筆與 ITEM.DAT，類型 15 只有 63 光束砲且無任何一筆准許，0D/0E/0F/10/11/13 各自只有所列物品、只見於職業 1A、20–23 的准許列；fdps_unit_can_equip_item（0x25fe0）只比類型 byte、四個呼叫點都在隊員端；I03 表列了這八件但沒寫無職業可裝備，I08 只談 0A–0C、14 與 2D，補進 I03 成立。",
+  "trace": "物品 `63` 光束砲的類型 `15` 不在 `PROEQU.DAT` 任何一筆的准許清單裡，沒有職業能裝備它。"
+ },
+ {
+  "id": "T12-19",
+  "trace_sha1": "f9c1973d16544ec6e903b48c1f11950e66d48976",
+  "from": "I08",
+  "verdict": "holds",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "residual",
+  "route": "25.11",
+  "title": "",
+  "kb_text": "",
+  "route_note": "請在 cut_content/units.md 決定 `PROEQU.DAT` 第 `0x1A`–`0x23` 列的歸屬：`PROEQU.DAT` 唯一的讀取端 `fdps_unit_can_equip_item`（`0x25fe0`，`src/unititem.c`）只由我方隊員的裝備視窗與商店呼叫，我方職業碼只來自 `FRIAPRDA.DAT`（最大 `0x19`）與 `RANKUP.DAT`（最大 `0x18`），所以敵方專用職業 `1A`、`1B`、`1D`、`1F`、`20`、`21`、`22` 的可裝備類型列（例如 `1B` 是 `04 1E 1F 20 21`）填了內容卻從不被查詢，`1C`、`1E`、`23` 三列已由 U05 涵蓋、`20`／`21` 的 `2D` 已由 items.md I08 提到，應併入 U05 或另立一條殘留內容（或判為排除）而不要重複這兩處。",
+  "confidence": "high",
+  "conclusion": "成立：單位職業碼只在部署、入隊、轉職三處寫入，能走到 `fdps_unit_can_equip_item` 的只有我方隊員（戰場上 side 2 的回合與村莊選單、商店），它們的職業碼只有 `00`–`19`，所以 `PROEQU.DAT` 第 `0x1A`–`0x23` 列在遊戲中從不被讀取；其中 `1A`、`1B`、`1D`、`1F`–`22` 是敵方實際使用的職業，`1C`、`1E`、`23` 無人使用。這是職業表列的事，屬 25.11 的 units 頁，不屬物品頁。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unititem.c:750",
+    "observation": "fdps_unit_can_equip_item 以單位記錄 +0x20 的職業碼原值呼叫 fdps_get_class_equip_record，是 PROEQU.DAT 唯一的讀取路徑（table.c:246 的取值函式只有 unititem.c:759 一個呼叫端）"
+   },
+   {
+    "source": "src",
+    "location": "src/unititem.c:701",
+    "observation": "四個呼叫點之一在 fdps_unit_equip_window；另三個在 shop.c:956、shop.c:981、shopdraw.c:540，服務商店購買對象（隊員）"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:1180",
+    "observation": "戰場上 fdps_battle_unit_turn 只對 side == PLAYER_PHASE_SIDE 的單位呼叫；其下 btlact.c:627 fdps_battle_item_menu → item.c:1101 fdps_unit_equip_window；村莊側入口為 vilmenu.c:1102"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:279",
+    "observation": "職業碼寫入點只有 deploy.c:279（FRIAPRDA）、deploy.c:289（ENEMYDAT）、roster.c:347（FRIAPRDA）、church.c:244（RANKUP），全 src 沒有其他 clazz 寫入"
+   },
+   {
+    "source": "ghidra",
+    "location": "00025ffb",
+    "observation": "src 註解引用的原版指令 MOV AL,byte ptr [EAX+0x20] / AND EAX,0xff：職業碼以零延伸原值傳入，無 +1 偏置"
+   },
+   {
+    "source": "data",
+    "location": "FRIAPRDA.DAT@0x0001",
+    "observation": "60 筆（stride 0x18）的職業 byte 取值 00 03 04 06 07 08 0A 0D 0E 10 13 16 19，最大 0x19"
+   },
+   {
+    "source": "data",
+    "location": "RANKUP.DAT@0x0001",
+    "observation": "9 筆 × 4 條路線的職業 byte 取值最大 0x18"
+   },
+   {
+    "source": "data",
+    "location": "MAP%02d.DAT@0x83",
+    "observation": "63 個地圖的全部部署記錄：side 2 的職業只有 08 0A 0D 0E，side 1 只有 00 02 03 06 08 0D；職業 1A、1B、1D、1F、20、21、22、24–26 只出現在 side 0（敵方）"
+   },
+   {
+    "source": "data",
+    "location": "PROEQU.DAT@0x9C",
+    "observation": "第 0x1A–0x23 列：1A=0E；1B=04 1E 1F 20 21；1C=02 16 17 18；1D=02 1A 1B 1C；1E=02 16 17 18；1F=03 1A 1B 1C；20=02 0D 0F 11 1A 2D；21=0F 10 2D；22=03 04 10 13 16；23=10 16（其餘填 FF）"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "_reread": "第二次判讀確認：Ghidra 顯示 `0x63fe4` 只由 `fdps_get_class_equip_record` 讀取、`0x25fe0` 只有裝備視窗與商店的四個呼叫點，戰場回合只給 side 2；全部地圖的 side 2 部署角色是 1、5、0xA、0xB（職業 0D、0A、0E、08），FRIAPRDA 與 RANKUP 的職業碼聯集恰為 00–19，ENEMYDAT 用到 1A、1B、1D、1F–22、24–26，結論與轉交 25.11 不變；另注意 src/table.c `fdps_get_class_equip_record` 註解稱職業 24–27 越界「reachable」與此相矛盾，屬另案的註解錯誤。",
+  "open_question": "敵方實際使用的職業（1A、1B、1D、1F–22）其可裝備類型列填了內容卻無人讀取，應歸殘留內容（做好但無路徑）還是排除（資料表為完整性填寫、敵方本不需要裝備檢查），需由 25.11 依 units 頁的既有判準決定；本判定暫以殘留內容標記。",
+  "trace": "知識庫 assets/tables/classes.md 記載能走到 fdps_unit_can_equip_item 的單位職業碼最大 0x19，若屬實則 PROEQU.DAT 第 0x1A–0x23 筆（含妖魔、守護獸的 2D）在遊戲中從未被查詢。"
+ }
+]
