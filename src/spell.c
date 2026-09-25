@@ -327,10 +327,16 @@ void fdps_spell_deduct_mp_cost(int unit_index, int spell_id)
  * or letting the fade-in stop at the end of the clip each changes what the
  * player sees (rebuild_info/pitfalls.md).
  *
- * The flag handed to fdps_draw_composite_sprite is 0 in both phases, so the
- * two sound effects Mag11.saf carries -- frame 0's sound 0 and frame 15's
- * sound 1 -- are never played; the audio for this spell is started by the
- * caller.  Every CALL in the body returns void or has its answer discarded
+ * THE CLIP'S OWN SOUNDS NEVER PLAY.  The flag handed to
+ * fdps_draw_composite_sprite is 0 in both phases -- XOR EAX,EAX / PUSH EAX at
+ * 0002871e and 000287cf -- and that function reaches fdps_sfx_play only for a
+ * non-zero flag, so the two sound effects Mag11.saf carries (frame 0's sound 0
+ * and frame 15's sound 1) stay silent for the whole animation.  What the player
+ * hears for this spell comes afterwards and from the caller: EarQu.wav under
+ * the screen shake, then Emg10.saf's own sounds over the targets.  Passing 1
+ * here, the way the map-animation player does for its first target, is the
+ * natural reading of a clip that has sounds, and it adds two sounds the
+ * original never plays (cut_content/battle_assets.md).  Every CALL in the body returns void or has its answer discarded
  * except fdps_vfs_load_entry's, the two malloc's, inp's inside the four spins
  * and the fdps_saf_advance_tick at 000287e5 whose EAX is stored into the
  * loop's flag at 000287ed. */

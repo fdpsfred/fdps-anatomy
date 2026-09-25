@@ -1186,10 +1186,10 @@
 
 /* What the chapter state reset puts on the board, and what the cut-scene adds.
    MAP22.DAT tags twenty-one of its eighty records wave 0 and every one of them
-   carries side 1, the guest side -- characters 36 to 39, FRIAPRDA.DAT template
-   rows and not named party members (assets/characters.md) -- so the reset's
-   own opening deploy appends twenty-one guests behind the eleven player slots
-   and no enemy at all.  The opposition is the member's two DEPLOY_WAVEs: wave
+   carries side 1, the guest side -- characters 36 to 39, nameless one-HP
+   FRIAPRDA.DAT rows and not named party members (assets/characters.md) -- so
+   the reset's own opening deploy appends twenty-one guests behind the eleven
+   player slots and no enemy at all.  The opposition is the member's two DEPLOY_WAVEs: wave
    2 at script offset 469 is MAP22.DAT's single 死神 record and wave 1 at
    offset 604 is ten records, both placed on the nearest free tile.  Eleven
    plus twenty-one plus one plus ten is forty-three. */

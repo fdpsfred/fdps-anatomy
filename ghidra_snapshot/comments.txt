@@ -5851,6 +5851,8 @@ The dword both frame loops compare against DAT_00069d64 is never initialised: on
 
 The fade-in's 31 ticks against Mag11.saf's 22 are also not to be reconciled. The cursor is deliberately not reset between the two phases, so the main phase picks the clip up mid-way at frame 9; resetting it, or shortening the fade-in to the clip's length, or letting the fade-in stop at the end of the clip, each changes what the player sees.
 
+The draw flag stays 0 in both phases (XOR EAX,EAX / PUSH EAX at 0002871e and 000287cf), so Mag11.saf's two embedded sound effects never play. Passing 1, the way fdps_play_vfs_animation_over_units does for its first target, is the natural reading of a clip that carries sounds, and it adds two sounds the original never makes; the spell's audible sound is EarQu.wav and Emg10.saf's sounds, both started by the caller after this animation.
+
 === 000288e4 [EOL]
 Alignment padding: two 6-byte lea-form NOPs between fdps_play_spell_11_cutscene and fdps_cast_spell_on_targets.
 

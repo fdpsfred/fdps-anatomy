@@ -20,7 +20,7 @@ calling convention 是 `__cdecl` 503 個、`__watcall` 11 個。`__watcall` 那 
 
 其餘 831 個是 vendor 程式碼（`crt` 與 `ail`），命名依 [`rebuild_info/naming.md`](../rebuild_info/naming.md) 只用程式庫原名，判不出 PUBDEF 的就保留預設名稱，不硬湊。
 
-全域資料的名稱、型別與 struct 佈局由 [`data_structures.md`](data_structures.md) 擁有。不少 plate comment 仍以 `DAT_xxxxxxxx` 的位址寫法指稱全域資料，那只是位址記法，符號的名稱以 Ghidra 的 label 為準。
+全域資料的名稱、型別與 struct 佈局由 [`data_structures.md`](data_structures.md) 擁有。plate comment 裡以 `DAT_xxxxxxxx` 指稱全域資料的寫法是位址記法，符號的名稱以 Ghidra 的 label 為準。
 
 ## 啟動鏈
 

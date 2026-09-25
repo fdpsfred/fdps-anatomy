@@ -22,21 +22,26 @@ Exit status 0: every differing byte is literal padding.  1: some runs need the
 manual check above.  2: bad arguments or the files differ in size.
 """
 import bisect
+import os
 import re
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lefixup  # noqa: E402  (same folder; owns the LE header parsing)
 
-def padding_byte(a, b, i):
+
+def is_literal_padding(a, b, i):
+    """True when byte i follows a NUL shared by both images, before the next 4-byte boundary."""
     for k in range(i - 1, max(i - 4, -1), -1):
         if a[k] == 0 and b[k] == 0:
             return i < ((k + 1 + 3) // 4) * 4
     return False
 
 
-def objects(data):
+def le_objects(data):
     """(number, linear base, file start, file end) of every LE object."""
-    le = data.find(b"LE\x00\x00")
+    le = lefixup.le_base(data)
     page = struct.unpack_from("<I", data, le + 0x28)[0]
     table = le + struct.unpack_from("<I", data, le + 0x40)[0]
     count = struct.unpack_from("<I", data, le + 0x44)[0]
@@ -68,19 +73,19 @@ def main(argv):
         print("size differs: %d vs %d" % (len(a), len(b)))
         return 2
     syms = map_symbols(argv[3]) if len(argv) == 4 else {}
-    objs = objects(b)
+    le_objs = le_objects(b)
     diff = [i for i in range(len(a)) if a[i] != b[i]]
-    other = [i for i in diff if not padding_byte(a, b, i)]
-    print("differing bytes: %d, not literal padding: %d" % (len(diff), len(other)))
+    unexplained = [i for i in diff if not is_literal_padding(a, b, i)]
+    print("differing bytes: %d, not literal padding: %d" % (len(diff), len(unexplained)))
     runs = []
-    for i in other:
+    for i in unexplained:
         if runs and i == runs[-1][1] + 1:
             runs[-1][1] = i
         else:
             runs.append([i, i])
     for s, e in runs:
         where = "file 0x%x..0x%x" % (s, e)
-        for n, base, start, end in objs:
+        for n, _base, start, end in le_objs:
             if start <= s < end:
                 off = s - start
                 where += "  obj %d +0x%x" % (n, off)
@@ -91,7 +96,7 @@ def main(argv):
                 if j + 1 < len(table):
                     where += "  before %s (+0x%x)" % (table[j + 1][1], table[j + 1][0])
         print("  " + where + "  old " + a[s:e + 1].hex() + "  new " + b[s:e + 1].hex())
-    return 1 if other else 0
+    return 1 if unexplained else 0
 
 
 if __name__ == "__main__":

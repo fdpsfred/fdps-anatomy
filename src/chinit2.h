@@ -332,10 +332,9 @@ extern void fdps_chapter_22_init(void);
    the guest side: characters 36 to 39, nameless one-HP FRIAPRDA.DAT rows,
    the scene's own cast.  The opposition arrives in the member's two
    DEPLOY_WAVEs, both placed on the nearest free tile: wave 2 at script
-   offset 469, the single
-   LV23 死神 (character 72), and wave 1 at offset 604, ten units.  That makes
-   forty-three units when the handler returns -- eleven player slots,
-   twenty-one guests, and eleven enemies.
+   offset 469, the single LV23 死神 (character 72), and wave 1 at offset 604,
+   ten units.  That makes forty-three units when the handler returns --
+   eleven player slots, twenty-one guests, and eleven enemies.
 
    THE ORDER OF THE TWO DEPLOYS IS LOAD-BEARING.  Wave 2 first puts the 死神 at
    map unit 32, which is the index fdps_chapter_23_event_boss_defeat and
