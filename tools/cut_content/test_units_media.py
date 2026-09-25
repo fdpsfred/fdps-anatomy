@@ -67,6 +67,8 @@ class GenerateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
             units_media.generate(Path(a), GAME)
             units_media.generate(Path(b), GAME)
+            self.assertEqual(sorted(p.name for p in Path(a).iterdir()),
+                             sorted(p.name for p in Path(b).iterdir()))
             for path in sorted(Path(a).iterdir()):
                 self.assertEqual(path.read_bytes(), (Path(b) / path.name).read_bytes(), path.name)
 

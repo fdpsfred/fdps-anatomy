@@ -40,22 +40,25 @@ ICONS_PER_GROUP = 12
 TRANSPARENT = bytes((0, 0, 0, 0))
 SHEET_MAX_WIDTH = 2048
 
+# U01's four never-deployed enemies: 傭兵戰士, 禁衛隊, 寶箱怪, 寶箱妖精.
+U01_ENEMIES = (87, 92, 110, 111)
+
 # entry -> portrait ids.  U03's portraits 57 and 58 are blank, so U03 has none.
 FACES = {
-    "u01": (87, 92, 110, 111),   # 傭兵戰士, 禁衛隊, 寶箱怪, 寶箱妖精
+    "u01": U01_ENEMIES,
     "u02": (52,),
     "u04": (131, 140),
 }
 # entry -> icon groups
 ICONS = {
-    "u01": (87, 92, 110, 111),
+    "u01": U01_ENEMIES,
     "u02": (52,),
     "u03": (57, 58),
 }
 # entry -> (container, member prefix, portrait id)
 ANIMATIONS = {
     "u01": tuple((container, prefix, portrait)
-                 for portrait in (87, 92, 110, 111)
+                 for portrait in U01_ENEMIES
                  for container, prefix in (("FIGHT.VFS", "STAND"), ("FIGACT.VFS", "ACT"))),
 }
 
