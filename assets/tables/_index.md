@@ -12,6 +12,7 @@
 | --- | --- |
 | [`items.md`](items.md) | `ITEM.DAT` 的 23 byte record |
 | [`spells.md`](spells.md) | `MAGICDAT.DAT` 的 7 byte record，以及執行期的 40 bit 法術遮罩 |
-| [`characters.md`](characters.md) | `FRIAPRDA.DAT`／`FRILEVUP.DAT`／`GETMGTAB.DAT` 三張表的 record |
+| [`characters.md`](characters.md) | `FRIAPRDA.DAT`／`FRILEVUP.DAT`／`GETMGTAB.DAT`／`RANKUP.DAT` 四張表的 record |
 | [`classes.md`](classes.md) | `PROMAP.DAT` 的 10 byte record 與 `PROEQU.DAT` 的 6 byte record |
 | [`enemies.md`](enemies.md) | `ENEMYDAT.DAT` 的 10 byte record |
+| [`shops.md`](shops.md) | `FIELD.VFS` 的 `SHOPnn.DAT`：三列各 12 格的物品編號 |

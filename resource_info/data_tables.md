@@ -18,9 +18,11 @@
 | `PROMAP.DAT` | 410 | 10 | 41 | `0x18b70` | 職業代碼 + 1 | [`assets/classes.md`](../assets/classes.md) |
 | `ENEMYDAT.DAT` | 910 | 10 | 91 | `0x18b10` | 肖像編號減 60 | [`assets/enemies.md`](../assets/enemies.md) |
 | `PROEQU.DAT` | 216 | 6 | 36 | `0x18ba0` | 職業代碼 | [`assets/classes.md`](../assets/classes.md) |
-| `RANKUP.DAT` | 108 | 12 | 9 | `0x18c30` | 肖像編號 | 尚未解讀 |
+| `RANKUP.DAT` | 108 | 12 | 9 | `0x18c30` | 角色編號（單位記錄 `+0x08`） | [`assets/characters.md`](../assets/characters.md) |
 
 `ITEM.DAT` 的 251 筆裡只有前 226 筆有內容；`PROMAP.DAT` 的第 0 筆是預設值而非職業 `00`。兩者的細節在各自的正典檔。
+
+另有一組不在 `MISC.VFS`、也不在啟動時載入的數值表：村莊商店的貨品 `SHOPnn.DAT`，放在 `FIELD.VFS`，每次進村莊才依章節索引載入，佈局見 [`assets/tables/shops.md`](../assets/tables/shops.md)，內容見 [`assets/shops.md`](../assets/shops.md)。
 
 ## 攻略站給的偏移對得上，職業表除外
 

@@ -4,7 +4,7 @@
 
 ## 來源
 
-數值全部出自 `MAGICDAT.DAT` 的實際 byte。名稱出自攻略站 `modify2` 頁的法術編號對照。
+數值全部出自 `MAGICDAT.DAT` 的實際 byte。名稱出自遊戲內文字：法術 `n` 是 `FDETXT00.TXT` 的第 `0x1BE + n` 條（[`text/global_text.md`](text/global_text.md)），40 個與攻略站 `modify2` 頁的法術編號對照逐字相同。
 
 攻略站法術頁列的距離、範圍、MP、最大傷害與命中率與資料檔逐筆比對過，兩處不符：
 

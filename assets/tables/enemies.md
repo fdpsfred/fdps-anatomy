@@ -4,7 +4,7 @@
 
 | 偏移 | 型別 | 欄位 | 內容 |
 | ---: | --- | --- | --- |
-| `0x00` | `u8` | `race_id` | 種族代碼（0..6，名稱見 [`resource_info/text.md`](../../resource_info/text.md)） |
+| `0x00` | `u8` | `race_id` | 種族代碼（0..6，名稱見 [`assets/races.md`](../races.md)） |
 | `0x01` | `u8` | `class_id` | 職業代碼（見 [`assets/classes.md`](../classes.md)） |
 | `0x02` | `u16` | `hp` | HP 係數 |
 | `0x04` | `u8` | `mp` | MP 係數 |
