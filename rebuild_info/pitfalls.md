@@ -61,7 +61,7 @@
 | 「敵方陣營」不等於「肖像編號 ≥ `0x3C`」：`MAP%02d.DAT` 部署記錄的陣營 byte 與角色編號是兩個獨立欄位，`MAP12.DAT`（第 13 章）第 20 筆就是陣營 0、角色編號 `0D`、開場波次出場的單位，`MAP14`／`MAP18`／`MAP23` 另有陣營 0、編號 `23` 的單位。`fdps_combat_compute_hit_outcome` 與 `fdps_unit_apply_damage` 只看陣營就把「肖像編號 − `0x3C`」交給 `fdps_get_enemy_record`，對這種單位會讀到 `ENEMYDAT.DAT` 緩衝區前方的堆積記憶體當經驗值倍率；`fdps_unit_resolve_attack_hit` 與 `fdps_deploy_unit` 另外測了編號 | 把四處的判斷統一成「陣營 0 且編號 ≥ `0x3C`」，或在 accessor 裡加下界。兩者都會改變打這類單位時得到的經驗值；四個呼叫端各自的判斷要照原樣保留 | [`resource_info/map.md`](../resource_info/map.md) |
 | WAV header 的解析結果被忽略，非 RIFF 的緩衝區會以未初始化的 14-byte 堆疊描述子播放出去；chunk 走訪也沒有 RIFF 的偶數對齊與邊界檢查 | 補上「解析失敗就回 -1」與正確的 RIFF 走訪 | plate comment 的 `Rebuild note` |
 | `PROEQU.DAT` 的職業可裝備表是變長集合，用到的類型碼由小到大排在前面、空位填 `0xFF`，而 `fdps_unit_can_equip_item` **六格全掃、完全不測 sentinel** | 看到「變長集合」就補一個終止判斷。用 `0x00` 當終止值會提早收手——`0x00` 本身就是一個活的物品類型碼；用 `0xFF` 終止則會讓類型碼剛好是 `0xFF` 的物品不再撞上空位。原版兩種都不做 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
-| `SHOP%02d.DAT` 每列十二格的 `0xFF` 是**空位**不是列尾，兩者之間還會再有貨：`SHOP01.DAT` 的武器列是 `02 71 FF FF 72 73 FF …`、`SHOP03.DAT` 的是 `FF 03 FF 1E 1F 30 …`，`fdps_shop_collect_stock_items` 固定跑滿十二格、遇到就跳過 | 寫成 `for (i = 0; i < 12 && row[i] != 0xff; i++)`。多數商店的貨會被砍掉，`SHOP03.DAT` 那種第一格就是空位的整間店變成沒東西賣 | plate comment 的 `Rebuild note` |
+| `SHOP%02d.DAT` 每列十二格的 `0xFF` 是**空位**不是列尾，兩者之間還會再有貨：`SHOP01.DAT` 的武器列是 `02 71 FF FF 72 73 FF …`、`SHOP03.DAT` 的是 `FF 03 FF 1E 1F 30 …`，`fdps_shop_collect_stock_items` 固定跑滿十二格、遇到就跳過 | 寫成 `for (i = 0; i < 12 && row[i] != 0xff; i++)`。多數商店的貨會被砍掉，`SHOP03.DAT` 那種第一格就是空位的整間店變成沒東西賣 | [`assets/tables/shops.md`](../assets/tables/shops.md) |
 
 ## 不能換的型別與寫法
 
@@ -69,7 +69,7 @@
 | --- | --- | --- |
 | `.VFS` 成員查找是**單向**轉大寫：把傳入的名稱就地轉大寫，entry 名稱原樣取用，兩者 `strcmp` | 寫成 `stricmp(entry, query)`。遇到非全大寫的 entry 名稱行為就不同，而且原版會就地改寫呼叫端的緩衝區，這個副作用是可見的 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
 | `.VFS` 的 entry 筆數以 8-bit 讀入，第 256 筆以後走不到；entry table 偏移以帶號 16-bit seek，上限 `0x7FFF` | 用 `u32` 讀筆數、用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 | [`resource_info/vfs.md`](../resource_info/vfs.md) |
-| `SHOP%02d.DAT` 的商品編號列必須以 `unsigned char` 取值——原版是 `XOR EAX,EAX` / `MOV AL,[EDX]` 的零延伸，而 `0x80` 以上的編號是正常的貨（`SHOP01.DAT` 的道具列是 `B4 DE`） | 宣告成 `char *`。`0xFF` 變成 `-1`、跳過空位的判斷永遠不成立，空位會被當成物品編號 255 擺上架，`0x80` 以上的貨也全部變成負數編號 | plate comment 的 `Rebuild note` |
+| `SHOP%02d.DAT` 的商品編號列必須以 `unsigned char` 取值——原版是 `XOR EAX,EAX` / `MOV AL,[EDX]` 的零延伸，而 `0x80` 以上的編號是正常的貨（`SHOP01.DAT` 的道具列是 `B4 DE`） | 宣告成 `char *`。`0xFF` 變成 `-1`、跳過空位的判斷永遠不成立，空位會被當成物品編號 255 擺上架，`0x80` 以上的貨也全部變成負數編號 | [`assets/tables/shops.md`](../assets/tables/shops.md) |
 | 狀態視窗物品清單的游標環繞是拿 `count - 1` 比大小，不是取餘數，而那個 count 可以是 0：`fdps_unit_equip_window` 開這個清單之前不問單位身上有沒有東西 | 統一寫成 `*selected_slot = (*selected_slot + 1) % occupied_count`——存檔槽位的游標（`00024650`）確實是取餘數的，照著統一過來，空背包的單位一走進裝備畫面就除以零。原版讓索引走出 0..7，那種列不畫游標條，呼叫端等迴圈結束才呼叫 `fdps_unit_item_count` | plate comment 的 `Rebuild note`（`00025b20`） |
 | `.SAF` 的 tilemap 格子編號是 `i16`（`short *` 取值、`-1 < index` 擋下界），但 layer 的 tilemap 編號是零延伸的 `u16` | 兩個都寫成同一種索引型別 | [`resource_info/saf.md`](../resource_info/saf.md) |
 | `.SAF` 的 layer 半透明程度以 16-bit `MOVSX` 讀 `+0x07`，連 `+0x08` 的保留 byte 一起讀進來 | 宣告成 `u8`。保留 byte 恆為 0，所以目前無差別，但欄位的實際寬度是 2 | [`resource_info/saf.md`](../resource_info/saf.md) |
@@ -116,6 +116,11 @@
 | `FRIAPRDA.DAT` 的 `level` 欄位不是人物實際出場的等級 | 直接拿它當出場等級。實際等級寫在地圖單位記錄裡，法蓮娜的欄位是 3 而她以 8 級加入 | [`assets/characters.md`](../assets/characters.md) |
 | 成長範圍的 `*_max` 是「最大成長值加 1」 | 拿它當實際拿得到的最大成長，每一級都會多算 1 點 | [`assets/tables/characters.md`](../assets/tables/characters.md) |
 | `ITEM.DAT` 的 23 個 byte 不是物品行為的全部 | 假設把這張表搬過去物品就完整了。每回合回復、以及生命之實與三種藥水這類永久強化的**幅度**都不在 record 裡——它們的 `use_effect` 有值而 `use_amount` 是 0 | [`assets/items.md`](../assets/items.md) |
+| 每回合回復 MP 的三件裝備認的是**地圖單位的 slot** 而不是持有人：`fdps_battle_advance_turn` 只問 slot 4 有沒有裝備 `A6` 妖刀村正／`A7` 妖刀正宗、slot 8 有沒有裝備 `B1` 形見指環；只有 `B3` 魔精石碎片是每個單位帶著就算。回復的只有 MP | 寫成「裝備村正的單位每回合回復」或照攻略站寫成 HP／MP 都回復。換人裝備就會多出原版沒有的回復，裘娜、琴琴以外的人拿到這幾件也會開始回魔 | [`assets/items.md`](../assets/items.md) |
+| 地圖部署的單位，種族與職業一律取 `FRIAPRDA.DAT`／`ENEMYDAT.DAT`；部署記錄 `+0x02`、`+0x03` 兩個 byte 不讀，而攻略站 `modify2` 頁把它們標成「種族編號」「職業編號」，`+0x15` 標成「出場所在回合」而實際是波次 | 照攻略站的欄位說明從部署記錄取種族與職業，或把 `+0x15` 當成回合數比對。出貨資料 `+0x02` 全是 0，每個單位都會變成人類／劍士；波次當回合用，援軍會在錯的時機出現 | [`resource_info/map.md`](../resource_info/map.md) |
+| 擊殺經驗的三條發放路徑各算各的：物理攻擊是 `目標 LV × EXP ÷ 攻擊者 LV` 再 × 15 ÷ 10，攻擊者肖像編號 **> 10** 時除數加 30；法術是 `EXP × 目標 LV` 累加後 ÷ 施法者 LV，肖像編號 **> 8** 時才加 30；道具傷害打倒敵人**不給經驗**（基數在發放前被清成 0） | 抽一支共用的「擊殺經驗」函式讓三條路徑共用，或把兩個門檻統一。肖像編號 9、10 的蓋亞與珊用法術或用武器拿到的經驗會跟著變，道具也會開始給經驗 | [`assets/enemies.md`](../assets/enemies.md) |
+| 單位名字取單位記錄 `+0x08` 的**角色編號** + 1，不是 `+0x07` 的肖像編號；轉職只改肖像編號，而轉職型態 `0F`–`21` 的名稱條目全是空字串 | 以「肖像編號就是單位身分」的直覺拿 `+0x07` 查名字。轉職過的人物在狀態視窗、村莊選單裡名字全部變成空白 | [`assets/characters.md`](../assets/characters.md) |
+| 教會轉職不一定用掉徽章：只有選到的路線不是 0、而且它的型態與路線 0 不同時才移除那枚徽章；勇者徽章只對肖像編號 0 有效，其他人的路線 3 是全 0 的填充 | 寫成「有徽章就走徽章路線並消耗徽章」，或讓每個人都能用勇者徽章。前者讓蘭迪斯拿光之徽章、費塔加拿暗之徽章這類情況平白少一枚徽章；後者讓其他人轉成型態 `00`、職業 `00` | [`assets/characters.md`](../assets/characters.md) |
 | 職業表的魔抗欄位存的是 100 減去魔法抗性 | 直接當抗性用，抗性高低會完全顛倒 | [`assets/tables/classes.md`](../assets/tables/classes.md) |
 | 法術的威力欄位為負數時是攻擊力加乘率的百分比，不是傷害 | 宣告成 `u16` 或直接當傷害用。八個絕招全部靠這個負值表示加乘 | [`assets/tables/spells.md`](../assets/tables/spells.md) |
 | `Icon%02d.dat` 的編號是**章節索引**（0 起算），而章節處理函式以玩家看到的章號命名，兩者差 1——`fdps_chapter_12_init` 載入的是 `Icon11.dat` | 照 function 名稱裡的章號寫檔名。二十九支會播到下一章的開場動畫，第 30 章更糟：`ICONANI.VFS` 只到 `ICON29.DAT`，找不到成員會停在 `fdps_wait_any_key` 等玩家按鍵，接著開場沒有 boss——`MAP29.DAT` 沒有 wave 0，這隻 boss 是動畫裡的 `DEPLOY_WAVE` 放的。而且照樣編譯照樣跑 | [`CONTEXT.md`](../CONTEXT.md) |

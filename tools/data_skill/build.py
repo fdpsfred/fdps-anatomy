@@ -307,7 +307,8 @@ def build_items(records, check):
             raise SystemExit("hit effect %02X is labelled %s" % (code, sorted(labels)))
         hit_effect[code] = labels.pop()
 
-    names = {int(row[0], 16): row[1] for row in named}
+    # A name the game leaves blank is written （空白） in the table; it has no name.
+    names = {int(row[0], 16): (None if row[1].startswith("（") else row[1]) for row in named}
     out = []
     for code, rec in enumerate(records):
         row = {"code": code, "code_hex": "%02X" % code, "name": names.get(code)}
@@ -379,7 +380,7 @@ def build_classes(records, check):
 APPEARANCE_HEADER = ("索引", "人物／職業", "種族", "職業", "等級", "HP 基礎", "MP 基礎",
                      "移動力", "法術", "物品", "AP 基礎", "DP 基礎", "DX 基礎")
 LEVELUP_HEADER = ("索引", "人物／職業", "AP", "DP", "DX", "HP", "MP", "習得索引")
-LEARN_HEADER = ("習得索引", "人物／職業", "習得")
+LEARN_HEADER = ("人物", "型態", "職業", "習得索引", "出場時已會", "升級習得")
 
 
 def mask_to_spells(mask):
@@ -419,10 +420,14 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
             check.eq("character %02X %s" % (index, lo), parse_range(cell), (rec[lo], rec[hi]))
         check.eq("character %02X learn index" % index, int(row[7], 16), rec["learn_index"])
 
+    # The per-character spell table: one row per form, its learn index in column 3
+    # ("—" for a form that learns nothing) and the schedule as "Lv16 `01` name".
     for row in read_md_table(path, LEARN_HEADER):
-        index = int(row[0], 16)
+        if row[3] == "—":
+            continue
+        index = int(row[3], 16)
         pairs = [(int(lv), int(sp, 16))
-                 for lv, sp in re.findall(r"Lv(\d+)\s*→\s*`?([0-9A-F]{2})`?", row[2])]
+                 for lv, sp in re.findall(r"Lv(\d+)\s+`?([0-9A-F]{2})`?", row[5])]
         check.eq("learn %02X" % index, pairs,
                  [(p["level"], p["spell"])
                   for p in record_at(learn, index, "assets/characters.md 法術習得")
@@ -562,17 +567,17 @@ def main():
             },
             "spell": {
                 "canon": "assets/spells.md", "member": "MAGICDAT.DAT", "index": "法術編號",
-                "name_source": "guide", "value_source": "dump", "records": spells,
+                "name_source": "game_text", "value_source": "dump", "records": spells,
             },
             "character": {
                 "canon": "assets/characters.md",
                 "member": "FRIAPRDA.DAT + FRILEVUP.DAT + GETMGTAB.DAT",
                 "index": "肖像編號",
-                "name_source": "guide", "value_source": "dump", "records": characters,
+                "name_source": "game_text", "value_source": "dump", "records": characters,
             },
             "class": {
                 "canon": "assets/classes.md", "member": "PROMAP.DAT", "index": "職業代碼",
-                "name_source": "guide", "value_source": "dump", "records": classes,
+                "name_source": "game_text", "value_source": "dump", "records": classes,
             },
             "chapter": {
                 "canon": "chapters/_index.md", "member": None, "index": "章號",

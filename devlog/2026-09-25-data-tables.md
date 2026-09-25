@@ -50,4 +50,10 @@ PowerShell 裡用 `python -c` 帶多行字串兩次都被 PowerShell 的引號�
 
 ## 平行作業
 
-同一時間 25.6、25.15 也在改 `assets/items.md`、`characters.md`、`_index.md`、`pitfalls.md` 與 `data_skill/build.py`。25.15 寫的「非隊員角色與沒有讀取端的索引」一節正好涵蓋我原本打算加的 `FRIAPRDA` 客串列，於是放棄自己那一版，只補它沒有的「加入」、法術總表與轉職路線。commit 時只放自己改的那幾段。
+同一時間 25.6、25.15 也在改 `assets/items.md`、`characters.md`、`_index.md`、`pitfalls.md` 與 `data_skill/build.py`。25.15 寫的「非隊員角色與沒有讀取端的索引」一節正好涵蓋我原本打算加的 `FRIAPRDA` 客串列，於是放棄自己那一版，只補它沒有的「加入」、法術總表與轉職路線。
+
+commit 分兩段。第一段只放本票獨佔的檔；共用檔等 25.15 commit 之後，第二段以「HEAD 加上本票的段落」組出暫存內容（`items.md` 的一個 hunk 同時夾著 25.12 新增的 I08 段落，只能按段落抽，不能整個 hunk 套），不夾帶 25.12、25.13 等票還沒 commit 的改動。這段期間 25.11 已經把 `data_tables` 的未部署與沒人用的職業連結改指 `cut_content/units.md`（另開 `CUT_UNITS`）；第二段比照把使用效果碼的連結改指 `cut_content/items.md` 的 I01、I02，`characters.md` 的兩處改指 U06、U08，原本的 `CUT` 常數就沒有用處了，拿掉。
+
+## 審查
+
+兩軸審查（規範、票面）各跑一個 agent。規範那一邊指出的：勇者徽章路線的判斷 `route == 3 and owner != 0` 在三支產生函式各寫一次（抽成 `offered_routes`）、`range(0x28)` 寫死、`races.md` 重述了 `map.md` 擁有的部署記錄欄位（改成一句連過去）、`names.md` 的來源段夾了搜尋過程（刪掉）、兩列 SHOP 的 pitfalls 正典還指 plate comment、`（無名）`／`（空白）` 兩種寫法並存。沒照改的一條：它建議改 `data_skill/build.py` 的 `read_md_table` 讓兩支工具共用，但那支不在 `tools/_index.md` 的擁有者表裡，而且它剝反引號的行為是 `build.py` 自己的比對依賴的，改它的風險比兩份各四十行的讀表函式大。票面那一邊抓到擊殺經驗的錯（見上）與 `enemies.md` 說「前兩條只看陣營」與 pitfalls 矛盾（地圖上的物理攻擊其實有測肖像編號）。

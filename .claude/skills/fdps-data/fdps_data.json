@@ -11,7 +11,7 @@
     "game_text": "遊戲內文字 FDETXT00.TXT 的名稱，經知識庫 assets/ 轉錄",
     "rule": "兩者不一致時以 dump 為準，差異全部列在 discrepancies"
   },
-  "label_checks": 3190,
+  "label_checks": 3197,
   "enums": {
     "hit_effect": {
       "01": "麻痺",
@@ -5439,7 +5439,7 @@
         {
           "code": 204,
           "code_hex": "CC",
-          "name": "（空白）",
+          "name": null,
           "type": 40,
           "ap": 0,
           "hit": 0,
@@ -6664,7 +6664,7 @@
       "canon": "assets/spells.md",
       "member": "MAGICDAT.DAT",
       "index": "法術編號",
-      "name_source": "guide",
+      "name_source": "game_text",
       "value_source": "dump",
       "records": [
         {
@@ -7273,7 +7273,7 @@
       "canon": "assets/characters.md",
       "member": "FRIAPRDA.DAT + FRILEVUP.DAT + GETMGTAB.DAT",
       "index": "肖像編號",
-      "name_source": "guide",
+      "name_source": "game_text",
       "value_source": "dump",
       "records": [
         {
@@ -7979,9 +7979,9 @@
         {
           "code": 12,
           "code_hex": "0C",
-          "name": null,
-          "class": null,
-          "label": null,
+          "name": "索爾",
+          "class": "英雄",
+          "label": "索爾／英雄",
           "appearance_documented": false,
           "learn_index": 255,
           "learn": [],
@@ -8007,7 +8007,7 @@
           "hp_max": 1,
           "mp_min": 1,
           "mp_max": 1,
-          "blank": true
+          "blank": false
         },
         {
           "code": 13,
@@ -8939,7 +8939,7 @@
           "code_hex": "22",
           "name": null,
           "class": null,
-          "label": "（攻略站未列）",
+          "label": "（空白）",
           "appearance_documented": false,
           "learn_index": 34,
           "learn": [],
@@ -8970,9 +8970,9 @@
         {
           "code": 35,
           "code_hex": "23",
-          "name": null,
-          "class": null,
-          "label": "（攻略站未列）",
+          "name": "？？？？",
+          "class": "狂戰士",
+          "label": "？？？？／狂戰士",
           "appearance_documented": false,
           "learn_index": 0,
           "learn": [
@@ -10026,9 +10026,9 @@
         {
           "code": 59,
           "code_hex": "3B",
-          "name": null,
-          "class": null,
-          "label": "（攻略站未列）",
+          "name": "侍衛",
+          "class": "劍士",
+          "label": "侍衛／劍士",
           "appearance_documented": false,
           "learn_index": 255,
           "learn": [],
@@ -10062,7 +10062,7 @@
       "canon": "assets/classes.md",
       "member": "PROMAP.DAT",
       "index": "職業代碼",
-      "name_source": "guide",
+      "name_source": "game_text",
       "value_source": "dump",
       "records": [
         {
@@ -10809,7 +10809,7 @@
         {
           "code": 39,
           "code_hex": "27",
-          "name": "（無名）",
+          "name": "（空白）",
           "record_index": 40,
           "move_cost": [
             255,

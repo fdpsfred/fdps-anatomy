@@ -39,10 +39,11 @@ import map_decode  # noqa: E402  (owner of the MAPnn.DAT parse)
 
 DEFAULT_DUMP = ROOT / "workspace" / "vfs_dump"
 DEFAULT_OUT = ROOT / "workspace" / "data_tables"
-CUT = "../cut_content/_index.md"
 # Never-deployed enemies and classes nobody has are entries of the units
 # page (ticket 25.11).
 CUT_UNITS = "../cut_content/units.md"
+# Use-effect codes with no handler are entries of the items page (ticket 25.12).
+CUT_ITEMS = "../cut_content/items.md"
 
 # Entry bases in FDETXT00.TXT, each the constant the program adds to an id.
 NAME_BASES = {
@@ -90,7 +91,7 @@ USE_EFFECTS = {
     0x02: ("雷系傷害：播 `EMg05.saf`，其餘同 `01`", "消耗"),
     0x03: ("冰系傷害：播 `EMg08.saf`，其餘同 `01`", "消耗"),
     0x04: ("地系傷害：播 `EarQu.wav` 並震動畫面，其餘同 `01`", "消耗"),
-    0x05: (f"沒有處理分支，使用後什麼都不做（[空殼]({CUT})）", "不消耗"),
+    0x05: (f"沒有處理分支，使用後什麼都不做（[空殼]({CUT_ITEMS})，I01）", "不消耗"),
     0x06: ("同 `05`", "不消耗"),
     0x07: ("同 `01`", "不消耗"),
     0x08: ("同 `02`", "不消耗"),
@@ -118,7 +119,7 @@ USE_EFFECTS = {
 }
 # Codes the target picker knows but no item carries (fdps_battle_item_menu).
 PICKER_ONLY_EFFECTS = {
-    0x19: f"選完目標後再開一次傳送目的地游標，效果函式沒有分支（[空殼]({CUT})）",
+    0x19: f"選完目標後再開一次傳送目的地游標，效果函式沒有分支（[殘留內容]({CUT_ITEMS})，I02）",
     0x1C: "同 `19`，目的地排除施用者所在格",
 }
 
