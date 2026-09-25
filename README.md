@@ -18,6 +18,7 @@
 | [`resource_info/`](resource_info/_index.md) | 檔案 | 每個資源檔的二進位格式是什麼 | ✓ |
 | [`assets/`](assets/_index.md) | 資料表 | 遊戲的數值內容是什麼 | ✓ |
 | [`chapters/`](chapters/_index.md) | 關卡 | 每一章的關卡內容與事件流程是什麼 | ✓ |
+| [`cut_content/`](cut_content/_index.md) | 刪減與未用 | 遊戲裡有什麼做了卻用不到、留了位置卻沒內容：殘留內容、空殼、被封住的內容、前作遺留，附圖、音效與全文 | ✓ |
 | [`rebuild_info/`](rebuild_info/_index.md) | 重建 | 怎麼重建成等價執行檔、哪裡會踩雷 | ✓ |
 | [`libs/`](libs/_index.md) | — | 重建要連進去的第三方程式庫與標頭，逐 byte 沿用前作的產物 | ✓ |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | Ghidra | Ghidra 目前的分析狀態，以文字快照進版控 | ✓ |

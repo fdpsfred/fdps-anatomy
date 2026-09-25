@@ -1,6 +1,9 @@
 legacy/
 workspace/
 fdps_game_files/
+# CD audio tracks converted to WAV for cut_content/ are too large to version;
+# tools/cut_content regenerates them from the disc images.
+cut_content/media/cdda/
 **/__pycache__/
 .claude/settings.local.json
 # Watcom's DOS tools drop this crash-dump stub wherever they are run from.

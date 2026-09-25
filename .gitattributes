@@ -21,5 +21,10 @@ docs/guide/**/*.gif binary
 # find.
 tools/**/*.js text eol=lf
 
+# cut_content/ media: images and sounds regenerated from the game files. Binary,
+# so no line-ending conversion or textual diff ever touches them.
+cut_content/**/*.png binary
+cut_content/**/*.wav binary
+
 # The ETen font files are raw bitmaps; any line-ending conversion corrupts them.
 tools/glyph/ET3_fonts/*.15 binary
