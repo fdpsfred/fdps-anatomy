@@ -376,7 +376,14 @@ def class_user_rows(game):
         if unnamed:
             theirs.append(f"無名演員 {unnamed} 列")
         ours = unique(ours)
-        note = "—" if ours or theirs else f"[沒有單位使用]({CUT_UNITS})"
+        # A class the name table leaves blank is the table-tail row (U10); the
+        # named ones nobody has are U05.
+        if ours or theirs:
+            note = "—"
+        elif not game.class_name(clazz):
+            note = f"[沒有單位使用]({CUT_UNITS})（表尾列，U10）"
+        else:
+            note = f"[沒有單位使用]({CUT_UNITS})（U05）"
         rows.append([code(clazz), game.class_name(clazz) or BLANK, listing(ours),
                      listing(theirs), note])
     return rows
