@@ -1,0 +1,1243 @@
+[
+ {
+  "id": "T14-01",
+  "trace_sha1": "115acdf68fe9604bd0981c987649bbda99b0960e",
+  "from": "S01",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S1",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "部署表的死亡腳本（11 筆都是 opcode 0 掉落 `B4` 藥草）與 `MAP49.DAT` 的可搜尋格記錄 0–3（金錢 500、`B4` 藥草、`B4` 藥草、`DE` 解毒劑）都是過場地圖檔的預設值，不是這一段場景的內容：可搜尋格記錄是 31 個過場 `MAP` 檔共用的範本（見 [`_index.md`](_index.md) 排除清單的 I12），地圖 49 沒有任何寶箱或埋藏格引用它；opcode 0、`B4` 是 `MAP35`–`MAP64` 部署記錄的預設死亡腳本，只有 `MAP35`、`MAP51`、`MAP56`、`MAP57` 的 12 筆另填金錢（章節地圖的預設則是 opcode `0xFF`，無動作）。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "陳述成立：MAP49.DAT 的 11 筆部署記錄死亡腳本都是 opcode 0、運算元 180（`B4` 藥草），可搜尋格記錄 0–3 是金錢 500、`B4`、`B4`、`DE` 解毒劑，其餘 12 筆為 0；地圖上沒有寶箱或埋藏格引用它們。可搜尋格記錄這一半已由排除清單 I12 涵蓋（明列 MAP49）；死亡腳本這一半是 MAP35–MAP64 過場地圖部署記錄的預設值，S1 的部署表列出了「掉落 B4 藥草」卻沒說它是預設值，值得在 S1 補一句並連到 I12，免得被當成場景內容。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP49.DAT@0x53",
+    "observation": "可搜尋格記錄：0 = 金錢 500；1、2 = 物品 0xB4；3 = 物品 0xDE；4–15 全為 0（map_decode show 49 複核）"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP49.DAT@0x83",
+    "observation": "11 筆部署記錄的死亡腳本都是 00/180（map_decode show 49）"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M49.DTL@0x10",
+    "observation": "DTL 寬 27、高 21，567 byte 事件碼全為 0"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M490.MPL@0x0b",
+    "observation": "14×9 共 126 格的圖磚，以 FIELD2.VFS/ATTR490.DAT@0x11 查旗標，類別（& 0x60）全是 0x00，沒有寶箱 0x20 或埋藏 0x40"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/_index.md",
+    "observation": "排除清單 I12 已收 MAP31、32、34–50、52–55、57–64 共 31 個 MAP 檔共用的可搜尋格記錄（金錢 500、B4、B4、DE），明列 MAP49"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP31.DAT@0x83",
+    "observation": "過場地圖死亡腳本普查（map_decode show 30–64）：MAP31 00/180×1、FF/0×1；MAP32 00/180×2、FF/0×25；MAP34 00/180×1、FF/0×19；MAP35 00/180×3、01/180×2；MAP51 01/5000×1；MAP56 01/5000×2；MAP57 00/180×8、01/500×7；MAP36–50、52–55、58–64 全為 00/180"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP00.DAT@0x83",
+    "observation": "章節地圖的預設死亡腳本是 FF/0（MAP00 FF×14、MAP05 FF×48、MAP12 FF×51 為多數）"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:403",
+    "observation": "DEATH_SCRIPT_GOLD = 1；opcode 0 是物品、1 是金錢，0xFF 是無腳本（DEATH_SCRIPT_NONE）"
+   },
+   {
+    "source": "src",
+    "location": "src/btlact.c:214",
+    "observation": "fdps_battle_search_cell_at_cursor 在格子類別為 0x00（CELL_CLASS_NONE）或 0x60 時直接返回，不讀可搜尋格記錄"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一讀判為 S1 的補充並寫出「地圖 31 以後的部署記錄死亡腳本除了 MAP35、MAP51、MAP56、MAP57 的 12 筆外都是 opcode 0、B4」；重新普查發現 MAP31、MAP32、MAP34 共 45 筆是 FF/0（章節地圖的無動作預設），這句只在 MAP35–MAP64 成立，因此改寫範圍；另外可搜尋格記錄一半已由排除清單 I12 涵蓋，補充句改為連到 I12 而不重述普查。處置與條目不變。",
+  "trace": "MAP49.DAT 的 11 筆部署記錄死亡腳本都是 opcode 0、運算元 180（0xB4 藥草），可搜尋格記錄 0–3 為 500 金、藥草、藥草、解毒劑，但地圖 49 沒有任何格子引用。"
+ },
+ {
+  "id": "T14-02",
+  "trace_sha1": "47a8a27185af179ba36cc7b5dbd50cfcd749263a",
+  "from": "S01",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S15",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "`FDETXT47`–`FDETXT52`（地圖 46–51 的過場區塊）的 `0x01`–`0x03`：從第 6 章區塊整塊複製時帶過來的標題「帝國軍追擊」與勝敗條件「敵人全滅」「蘭迪斯﹑法蓮娜﹑索爾任一人死亡」，與 `FDETXT06` 的 `0x01`–`0x03` 逐字相同；讀這三條的存檔面板（`fdps_draw_save_slot_panel`，`0x24a40`，`src/savepnl.c`）與勝敗條件視窗（`fdps_battle_show_win_fail_window`，`0x17ca0`，`src/btlend.c`）只在玩家操作時開得到，那時章節編號恆在 0–29、只讀 `FDETXT01`–`30`，過場地圖只在腳本執行中是目前地圖。同一批區塊的 `0x00`「第六章」是 `FDETXT06` `0x00` 的複本，原稿本身就沒有讀取端，歸 S13a（S13a 的內容格「30 個章節區塊的 `0x00`」要一併涵蓋 `FDETXT47`–`FDETXT52` 的 `0x00`）。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "FDETXT47、48、49、50、51、52 六個過場區塊的 0x00–0x03 與第 6 章區塊 FDETXT06 的 0x00–0x03（第六章／帝國軍追擊／敵人全滅／蘭迪斯﹑法蓮娜﹑索爾任一人死亡）逐 byte 相同，是區塊整塊複製時帶過來的表頭。0x01–0x03 在 FDETXT06 由存檔面板與勝敗條件面板顯示，過場區塊這幾份沒有讀取端，屬 S15 的複本排除；0x00 的原稿本身就不顯示，歸 S13a。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT50.TXT@0x1C",
+    "observation": "偏移表 0x1C/0x24/0x30/0x3A 指向 0x00–0x03：3c02cc026301ffff、b4002c01c3008a03b800ffff、3d026f003e023f02ffff、2400…4002ffff，與 FDETXT06 的 0x00–0x03 逐 byte 相同"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT47.TXT@0x00",
+    "observation": "FDETXT47、48、49、51、52 的 0x00–0x03 原始 byte 也與 FDETXT06 完全相同；解碼為 第六章／帝國軍追擊／敵人全滅／蘭迪斯﹑法蓮娜﹑索爾{br}任一人死亡。其他過場區塊的表頭是第 9、12、20、25、27 章或空白"
+   },
+   {
+    "source": "src",
+    "location": "src/btlend.c:421",
+    "observation": "fdps_battle_show_win_fail_window 以 data_fdps_current_chapter_text_ptr 畫條目 2、3（WIN_CONDITION_TEXT_ID／FAIL_CONDITION_TEXT_ID），唯一呼叫端是戰鬥 SYSTEM 選單的勝敗條件項（src/btlmenu.c:596）"
+   },
+   {
+    "source": "src",
+    "location": "src/savepnl.c:482",
+    "observation": "fdps_draw_save_slot_panel 以存檔記錄的 chapter_index + 1 組 fdetxt%02d.txt，只畫條目 1（SLOT_CHAPTER_TITLE_TEXT_ID）"
+   },
+   {
+    "source": "ghidra",
+    "location": "00024c2c",
+    "observation": "位於 fdps_draw_save_slot_panel（00024a40–00024d40）內，與 src 註解的 PUSH 0x1 位置一致"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1054",
+    "observation": "SWITCH_MAP 把章節編號改成腳本運算元；ICON06／ICON07 切到 47／48 後切回，WIN05 停在 46、WIN22 停在 50，但 src/chend1.c:459 等章節 end 在腳本後立刻寫入下一章常數，所以 46–51 只在腳本執行中是目前地圖"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cutscene_script decode_all",
+    "observation": "造訪地圖 46–51 的腳本（ICON06、ICON07、WIN05、WIN20、WIN22、WIN24）從 FDETXT47–52 畫的條目都在 0x09 以後，沒有一條是 0x00–0x03"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/chapter_docs/judgements/ch06.json",
+    "observation": "第 6 章區塊的 never_shown 只有 0x00、0x0b、0x0c，0x01–0x03 是顯示中的條目"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "同一批 24 條（FDETXT47–52 的 0x00–0x03）在 story.py OWNERS 是 ?T14-02/T14-12 共同待判；T14-12 的判定把 41–52、55、56、62–65 的 0x00–0x03 整批放進一個新排除項，本判定則把 47–52 的 0x01–0x03 歸 S15、0x00 歸 S13a，兩者對同一批條目給了不同歸屬，轉錄時必須擇一：若採本判定，41–46 的逐字複本也應同樣歸 S15／S13a，只有 55、56、62–65 失敗條件與來源不同的那幾條需要另立；若採 T14-12，本判定改為被該排除項吸收。",
+  "_supersedes": "第一讀判定為 S15 的補充（0x01–0x03 是顯示中的 FDETXT06 條目的逐字複本、0x00 歸 S13a），事實與歸屬重讀後都成立（以 text_decode 逐條比對 FDETXT47–52 與 06 的 0x00–0x03 內容相同，btlend.c／savepnl.c 是 0x01–0x03 僅有的讀取端且只在玩家操作時開得到，存檔的章節編號取自 0–29）。改動的是：kb_text 明寫 S13a 的內容格要一併擴大，否則轉錄後 S13a 仍只寫「30 個章節區塊」；並在 open_question 記下 T14-12 對同一批 24 條給了不同歸屬（新排除項），轉錄時需擇一。",
+  "trace": "FDETXT50 與 FDETXT48、49、51 等過場文字區塊的 0x00–0x03 都照抄第 6 章的標題「第六章／帝國軍追擊」與勝敗條件。"
+ },
+ {
+  "id": "T14-03",
+  "trace_sha1": "ab5e8bc5ec3fc250a9424340bfa32b1bd6e4ade0",
+  "from": "S02",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S3",
+  "topic": "",
+  "category": "stub",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "地圖 30 在 FIELD.VFS 沒有 MAP30.DAT／MAP30.COD，在 FIELD2.VFS 沒有 DSC30.DAT，另外也沒有 M30.DTL、M30n.MPL／.CEL、ATTR30n.DAT；唯一存在的是 FIELD.VFS 的 FDETXT31.TXT（36 byte，offset 表 9 筆全指向結束碼）。這些事實 story.md 的 S3 已完整記載，不需落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/rsrc.c:299",
+    "observation": "fdps_field_load_chapter_resources 以章節編號加一格式化 fdetxt%02d.txt，地圖 30 讀 FDETXT31；接著 307 行 map%02d.dat、319 行 M%02d.dtl、323 行 dsc%02d.dat，地圖 30 分別對應 MAP30.DAT、M30.DTL、DSC30.DAT。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT31.TXT@0x0",
+    "observation": "檔長 36：18 個 word 的 offset 表（0x12..0x22）後接 18 byte 0xFF，9 筆條目全是空字串。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS@directory",
+    "observation": "MAP31、MAP32、MAP34–MAP39 的 DAT／COD 存在，沒有 MAP30.DAT／MAP30.COD。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD2.VFS@directory",
+    "observation": "DSC32、DSC34–DSC39 存在，沒有 DSC30.DAT；也沒有 ATTR30n.DAT（ATTRn30 是其他地圖的檔）。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS@directory",
+    "observation": "有 M31.DTL、M310/M330.MPL，沒有 M30.DTL 與 M300.* 系列。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S3",
+    "observation": "S3「地圖 30：只有一個全空的文字區塊」已記載 FDETXT31 36 byte 9 條空字串，以及缺 MAP30.DAT／.COD、DSC30.DAT 等。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "地圖 30 也沒有 MAP30、DSC30，FDETXT31.TXT 只有 36 byte。"
+ },
+ {
+  "id": "T14-04",
+  "trace_sha1": "c4c64765f4b7b3a444e4c84972290b2f5d13fbe2",
+  "from": "S02",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S2",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "`M31.DTL` 是 64 個 `DTL` 裡唯一宣告兩個平面的（`+0x0b` 為 2、`+0x0c` 為 `01 00 FF FF`，其餘都是 1 與 `01 00 FF 00`），檔長 6,545＝檔頭 16＋兩個 51×64 平面＋1 byte。兩個平面與多出的 1 byte 全是 0，第二平面沒有任何事件碼；就算地圖 31 載入得了，程式（`fdps_map_load_tile_info`，`0x2ba00`）也只用檔頭的寬索引第一個平面、不看平面數，第二平面從不被讀到。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "M31.DTL 宣告兩個平面（其餘 63 個 DTL 都是 1），檔長 6,545 = 16 + 2×51×64 + 1，確實多帶第二平面與 1 byte；程式只以檔頭寬度索引 +0x10 起的第一平面，不讀平面數。兩個平面與尾端 byte 全是 0，第二平面沒有承載任何內容。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M31.DTL@0x00",
+    "observation": "檔頭 44 54 4c 00 01 0e 00 33 00 40 00 02 01 00 ff ff：寬 51、高 64、平面數 2、0x0c 為 01 00 FF FF；檔長 6,545 = 16 + 3,280×2 + 1。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M31.DTL@0x10",
+    "observation": "第一平面（0x10–0xCDF）、第二平面（0xCE0–0x19AF）與最後 1 byte（0x19B0）全為 0。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M*.DTL@0x0b",
+    "observation": "逐檔比對 64 個 DTL：只有 M31.DTL 的平面數不是 1、0x0c 不是 01 00 FF 00、檔長不等於 16 + 寬×高。"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:85",
+    "observation": "fdps_map_load_tile_info 以 event_layer->width 索引 cells[tile_y*width+tile_x]，不讀 layer_count；tile 範圍受 MPL 寬高限制，只落在第一平面。"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:319",
+    "observation": "fdps_field_load_chapter_resources 整檔載入 M%02d.dtl 到 data_fdps_map_cell_event_code_layer_ptr，不檢查平面數。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0002bab0",
+    "observation": "MOVSX EAX,word ptr [EAX+0x7] 取 DTL 寬，IMUL/ADD 後 MOV AL,byte ptr [EAX+0x10]；函式不碰 +0x0b。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一次判讀為成立、補充到 S2，事實與歸屬都經重新比對確認（64 個 DTL 中只有 M31.DTL 平面數為 2、檔長 16＋2×51×64＋1、內容全為 0，fdps_map_load_tile_info 只以寬索引 +0x10 起的第一平面）；只改寫 kb_text：原句「只索引第一個平面，所以第二平面沒有任何內容」把「沒有內容」寫成「不被讀」的結果，因果顛倒，且未交代地圖 31 本身載入不了，改為兩件事分開陳述。",
+  "trace": "M31.DTL 宣告兩個平面並多帶第二平面與 1 byte，程式只讀第一平面。"
+ },
+ {
+  "id": "T14-05",
+  "trace_sha1": "711a6e961ddf0134d77eac5b6d8a21e3c678a6c1",
+  "from": "S02",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S2",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "地圖 31 的圖磚表 `FIELD1.VFS` `M310.CEL` 是 99 個 `.CEL` 中唯一檔頭 `0x0D` 為 1 的檔，192 個 24×24 圖磚用的是以列尾 byte 收尾的另一種像素編碼；繪製器（`fdps_blit_dispatch`，`0x568db`）只看得懂 `0x0D` 為 2 的 4-op RLE，而 `fdps_draw_scene_layer`（`0x2c330`）只從 `+0x0F` 的偏移表取串流、從不讀 `0x0D`，所以就算地圖 31 載入得了，第 0 層也畫不出正確的圖磚——以 4-op RLE 解讀這 192 個串流沒有一個能剛好填滿列寬。編碼細節見 [`cel.md`](../resource_info/cel.md)。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`M310.CEL` 是全部 99 個 `.CEL`（`FIELD1.VFS` 等容器 97 個加散檔 `FACE.CEL`、`ICON.CEL`）中唯一 `0x0D` 為 1 的檔，192 個串流全都照列尾 byte 編碼剛好解滿 24 列，照繪製器唯一懂的 4-op RLE 則一個也解不通；程式從不讀 `0x0D`，地圖圖層繪製只取 `+0x0F` 偏移表後直接交給同一個 RLE 繪製器，沒有第二種解碼路徑。這是 S2（地圖 31）殘留內容的一部分，S2 列了這個檔但沒寫它的編碼不同。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M310.CEL@0x07",
+    "observation": "寬 24、高 24、筆數 192、0x0D 編碼欄 = 1；偏移表哨兵 79764 = 檔長。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M310.CEL@0x0f",
+    "observation": "192 個串流以列尾 byte 編碼（0x00 列尾、0x01–0x7F 單像素、0x80–0xBF 原樣複製、0xC0–0xFF 填色）全部剛好解滿 24 列；以 4-op RLE 解讀則 0/192 通過，首批在第 1 列就超出列寬 8 個 column。"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/*/*.CEL@0x0d",
+    "observation": "容器內 97 個 .CEL：96 個為 2、只有 M310.CEL 為 1；fdps_game_files 的散檔 FACE.CEL、ICON.CEL 皆為 2。"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:353",
+    "observation": "fdps_field_load_chapter_resources 以 m%02d%d.cel 載入每層圖磚表，只在讀完 dsc%02d.dat（第 323 行）後的迴圈內，地圖 31 沒有 DSC31 所以走不到。"
+   },
+   {
+    "source": "src",
+    "location": "src/mapdraw.c:354",
+    "observation": "fdps_draw_scene_layer 以 tileset + *(int *)(tileset + tile_id*4 + 0x0f) 取串流，直接呼叫 fdps_blit_dispatch，沒有讀 +0x0D。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0002c565",
+    "observation": "fdps_draw_scene_layer 內只有 ADD EAX,[EDX+0xf]（0002c565、0002c65c）兩處讀檔頭，全函式沒有任何 [..+0xd] 運算元。"
+   },
+   {
+    "source": "src",
+    "location": "src/blit.h:378",
+    "observation": "fdps_blit_dispatch（0x568db）是所有 .CEL 繪製的唯一入口，13 個 kernel 讀同一種 RLE 串流。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀者確認原判定：重算全部 .CEL 的 0x0D（容器 97 個中 96 個為 2、僅 FIELD1 的 M310.CEL 為 1，散檔 FACE.CEL／ICON.CEL 皆為 2）、M310.CEL 檔頭 24×24×192 與哨兵等於檔長、192 串流以列尾 byte 編碼全數解滿而以 4-op RLE 0 個通過，src/rsrc.c 的圖磚表載入在 dsc%02d.dat 之後、src/sprite.h 註明 +0x0d 從不讀，函式名與位址 0x568db／0x2c330 對得上快照；S2 列了此檔但未寫編碼不同，addendum 成立。",
+  "trace": "M310.CEL 是唯一 0x0D 為 1、使用不同像素編碼的圖磚檔，FDPS.LE 沒有讀這種編碼的程式碼。"
+ },
+ {
+  "id": "T14-06",
+  "trace_sha1": "700fcc821e96560262f198f7c1b3f54072b3e8b8",
+  "from": "S02",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "地圖 32（`M320.MPL` 26×56）與地圖 34（`M340.MPL` 26×40）是第 1 章開場過場 `ICON00` 以 SWITCH_MAP 實際切換經過的地圖，屬於使用中的內容，不是刪減或未用內容；地圖 32 的尺寸已由 S2 記載，地圖 34 的尺寸只是一般地圖事實，在 cut_content 沒有落點。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M320.MPL@0x07",
+    "observation": "寬高 word 為 0x1a、0x38（26×56）；檔長 2,923 = 11 + 26×56×2。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M340.MPL@0x07",
+    "observation": "寬高 word 為 0x1a、0x28（26×40）；檔長 2,091 = 11 + 26×40×2。"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:184",
+    "observation": "地圖寬高取自第 0 層 .MPL 的 +7、+9 兩個 short，確認上述偏移就是寬與高。"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON00.DAT@0x0",
+    "observation": "`11 20` SWITCH_MAP → 32；@0x1e4 `11 22` SWITCH_MAP → 34；@0x44d → 35；@0x51c → 0。兩張地圖都在第 1 章開場被實際載入。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1053",
+    "observation": "SWITCH_MAP 把 script[offset+1] 寫入 data_fdps_chapter_current_chapter_id 並呼叫 fdps_chapter_state_reset 重新載入地圖。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S2、cut_content/units.md",
+    "observation": "S2 已寫明地圖 32 為 26×56 的第 1 章開場地圖；units.md 已寫 ICON00 經過 32、34。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "M320.MPL 與 M340.MPL 的地圖 32、34 也是開場過場用地圖，分別為 26×56 與 26×40。"
+ },
+ {
+  "id": "T14-07",
+  "trace_sha1": "06b85d2cc4550a2455cf7a2a1efc439dd0eabba8",
+  "from": "S04",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S4",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT24` `0x0F` 是蘭迪斯（角色 0）只有「﹒﹒﹒﹒﹒﹒」的一句，位在區塊的 0x622，緊接在回合計數 7 珊到場時畫的 `0x0E` 之後；第 24 章的回合事件 `fdps_chapter_24_event_deploy_wave_for_turn`（`0x38cc0`）只畫 `0x10`、`0x11`、`0x0E`、`0x12`、`0x13`、`0x14`，`fdps_chapter_24_post_action` 只畫 `0x15`–`0x1A`，`ICON23.DAT` 畫 `0x09`–`0x0C`、`WIN23.DAT` 畫 `0x1B`–`0x1D`，`MAP23.DAT` 的死亡腳本沒有 opcode 3，所以沒有任何讀取端畫到它。story.md 的 S4 已列出這一條（`24` `0x0D`、`0x0F`：珊「來遲一步了」與蘭迪斯的沉默），story.py 的 OWNERS 也已把 (24, 0x0F) 歸給 S4。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chevt5.c:58",
+    "observation": "第 24 章回合事件的文字常數只有 0x10、0x11、0x0e、0x12、0x13、0x14（chevt5.c:58-63），函式本體 chevt5.c:120-172 只以這六個常數呼叫 fdps_draw_text"
+   },
+   {
+    "source": "ghidra",
+    "location": "00038cc0",
+    "observation": "fdps_chapter_24_event_deploy_wave_for_turn 的六次 CALL 0x0001ff60 前分別 PUSH 0x10（00038cef）、0x11（00038d33）、0xe（00038d77）、0x12（00038dbb）、0x13（00038dec）、0x14（00038e2d），沒有 0xf"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost2.c:815",
+    "observation": "fdps_chapter_24_post_action 的文字常數是 0x15–0x1a（chpost2.c:815-820），沒有 0x0f"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT24.TXT@0x622",
+    "observation": "條目 0x0f 從 0x622 開始，內容為 {speaker char=0}﹒﹒﹒﹒﹒﹒；0x0e 在 0x422、0x10 在 0x634"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON23.DAT@0x27",
+    "observation": "ICON23.DAT 的 DRAW_TEXT 只有 FDETXT24 0x09（@0x27）、0x0a（@0x48）、0x0b（@0x69）、0x0c（@0x112）；WIN23.DAT 只有 0x1b（@0xd0）、0x1c（@0xf1）、0x1d（@0x229）"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP23.DAT@0x0",
+    "observation": "MAP23.DAT 各部署記錄的死亡腳本 opcode 只有 0、1、255，沒有會畫本章文字的 opcode 3"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S4",
+    "observation": "S4 條列「`24` `0x0D`、`0x0F`：珊「來遲一步了」與蘭迪斯的沉默」並附 `FDETXT24` `0x0f` 全文；tools/cut_content/story.py 的 S4_GROUPS 已含 (24, 0x0F)"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "24:0x0F（蘭迪斯的「﹒﹒﹒﹒﹒﹒」，FDETXT24.TXT@0x622）沒有任何路徑會畫到，緊接在第 7 回合珊到場時說的 0x0E 之後。"
+ },
+ {
+  "id": "T14-08",
+  "trace_sha1": "4329fa16144432cfecfed96d33dc36a7d4462f6d",
+  "from": "S04",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S4",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "`27` `0x0C`、`0x0D` 的說話者代碼有兩處與台詞對不上：`0x0C` 第六段「放開我！我要進去！」接在蘭迪斯的抗拒之後，代碼卻是角色 2（費塔加）；`0x0C` 以費塔加喊「裘娜！把他敲昏！」收尾，下一條 `0x0D`「對不起，得罪你了！」的說話者卻是角色 4（亞克），不是裘娜（角色 3）。下方全文照資料原樣標出這兩處說話者，不是轉錄錯誤。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT27` `0x0C` 裡「放開我！我要進去！」前的說話者代碼是 `-0x11 2`（費塔加），`0x0D` 開頭是 `-0x11 4`（亞克），而 `0x0C` 下令敲昏蘭迪斯的對象是裘娜（角色 3）；兩處都是這段從不顯示的對白本身的說話者標錯，全部 66 個文字區塊裡沒有另一份這段對話的版本。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT27.TXT@0x480",
+    "observation": "bytes EF FF 02 00：說話者代碼 -0x11、角色 2（費塔加），後接「放開我！我要進去！」；前一段 @0x42c 是 EF FF 00 00（蘭迪斯）說「放開我！我要找法蓮娜！」"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT27.TXT@0x49a",
+    "observation": "bytes EF FF 02 00：費塔加「﹒﹒﹒那只有得罪了！裘娜！把他敲昏！」，是 0x0C 的最後一段"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT27.TXT@0x4c8",
+    "observation": "0x0D 的開頭 bytes EF FF 04 00：說話者代碼 -0x11、角色 4（亞克），內容「對不起，得罪你了！」"
+   },
+   {
+    "source": "src",
+    "location": "src/text.c:498",
+    "observation": "fdps_draw_text 在說話者代碼 -0x11 時以串流裡的值當角色編號，交給 fdps_battle_find_unit_by_character_id 找單位與肖像，所以 2、4 指的是角色 id（費塔加、亞克），不是地圖單位索引"
+   },
+   {
+    "source": "investigation",
+    "location": "program_info/village.md 肖像表",
+    "observation": "肖像／角色 0–8 依序是蘭迪斯、法蓮娜、費塔加、裘娜、亞克、瑪麗安、尤利安、琴琴、布蘭多，裘娜是角色 3"
+   },
+   {
+    "source": "investigation",
+    "location": "FIELD.VFS 全部 FDETXT 區塊的全文搜尋",
+    "observation": "66 個區塊中只有 27:0x0C、0x0D 含「敲昏」「得罪你了」，沒有其他版本可對照"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：FDETXT27.TXT@0x42c／0x480／0x49a／0x4c8 的說話者代碼依序是角色 0、2、2、4，角色 2＝費塔加、3＝裘娜、4＝亞克（assets/characters.md），src/text.c 的 fdps_draw_text 以代碼值當角色 id，S4 條目本文只寫場景、未提說話者錯置，下方全文照原樣標為費塔加與亞克，補充成立。",
+  "trace": "27:0x0C 最後叫的是「裘娜！把他敲昏！」，下一句 27:0x0D 的說話者卻是角色 4（亞克）；0x0C 裡「放開我！我要進去！」的說話者也標成角色 2，不是蘭迪斯。"
+ },
+ {
+  "id": "T14-09",
+  "trace_sha1": "cceaea9e939034529f66ed80f62253c88a753821",
+  "from": "S04",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "S13b",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT25` 的 `0x09`、`0x0F`、`0x10`、`0x11` 分別與 `FDETXT57` `0x09`、`FDETXT60` `0x0C`／`0x0E`／`0x0F` 逐字相同（`0x10` 也與 `FDETXT51` `0x0D` 相同），第 25 章開場 `ICON24.DAT` 切到地圖 56 畫 `FDETXT57` `0x09`，勝利腳本 `WIN24.DAT` 切到地圖 59 畫 `FDETXT60` `0x09`–`0x10`，章節區塊這幾條沒有讀取端。`FDETXT25` `0x0E` 則不是逐字複本，而是艾芙羅拉對話較短的舊稿，實際顯示的是改寫擴充成三條的 `FDETXT60` `0x09`–`0x0B`。這些都已由排除清單 S13b（25→57／60 的被取代舊稿）與總表逐條涵蓋。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT25.TXT@0x1b4",
+    "observation": "25:0x09（凱因巴帶回法蓮娜、教主訓話）515 個 token，與 FDETXT57.TXT@0x14e 的 57:0x09 token 序列完全相同"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT25.TXT@0x752",
+    "observation": "25:0x0E 是艾芙羅拉對話（427 token），開頭與 FDETXT60.TXT@0x15c 的 60:0x09（132 token）相近但後文不同（「就把自己當作風吧」），60:0x09–0x0B 是改寫擴充的版本；不是逐字複本"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT25.TXT@0xac6",
+    "observation": "25:0x0F／0x10／0x11（@0xac6、@0xaf2、@0xb04）與 FDETXT60.TXT@0x7e2／0x824／0x836 的 60:0x0C／0x0E／0x0F token 序列完全相同；25:0x10「法蓮娜～！！」也與 FDETXT51.TXT@0x148 的 51:0x0D 相同"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON24.DAT@0xa5",
+    "observation": "@0x04 SWITCH_MAP 56 後 DRAW_TEXT 0x09（讀 FDETXT57）；@0xb7 切回地圖 24 後只在 @0x1f6 畫 25:0x0A"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/WIN24.DAT@0x04",
+    "observation": "開頭 SWITCH_MAP 59，於 @0x40、0x51、0x5d、0x68、0x89、0x155、0x16c 畫 FDETXT60 0x09–0x0F，最後切回地圖 59 在 @0x322 畫 0x10；全程沒有回到地圖 24"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt5.c:225",
+    "observation": "第 25 章的 C 只畫 0x12、0x13（chevt5.c:225-226）、0x14（chevt5.c:422）與 0x15 起的買弓對話；ICON24 由 src/chinit2b.c:121、WIN24 由 src/chend2b.c:74 播放"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/_index.md 排除清單 S13b；cut_content/story.md 永遠不會顯示的文字總表",
+    "observation": "S13b 已列「25→57／60」為被取代的舊稿，總表逐條列 25:0x09、0x0E–0x11 的對應（0x0E 標為最接近 60:0x0B、相符 54%）；tools/cut_content/story.py 的 OWNERS 把 (25,0x09)、(25,0x0E–0x11) 歸 S13b"
+   }
+  ],
+  "corrected_trace": "`FDETXT25` 的 `0x09`、`0x0F`、`0x10`、`0x11` 是 `FDETXT57` `0x09` 與 `FDETXT60` `0x0C`／`0x0E`／`0x0F` 的逐字複本，實際顯示的是後者；`FDETXT25` `0x0E` 則是艾芙羅拉對話較短的舊稿，`WIN24.DAT` 顯示的是改寫擴充成 `FDETXT60` `0x09`–`0x0B` 的版本。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "複讀確認：重新解碼 FDETXT25／57／60／51，25:0x09＝57:0x09、25:0x0F／0x10／0x11＝60:0x0C／0x0E／0x0F 逐字相同，25:0x0E 是較短舊稿而非複本；腳本引用顯示 ICON24 畫 57:0x09 與 25:0x0A、WIN24 畫 60:0x09–0x10，第 25 章的 C 只畫 0x12–0x18；排除清單 S13b 與 story.py OWNERS 已涵蓋這五條，判定維持 needs_correction／absorbed S13b。",
+  "trace": "25:0x09、0x0E–0x11 是 57:0x09 與 60:0x09／0x0C／0x0E／0x0F 的逐字複本，實際顯示的是後者。"
+ },
+ {
+  "id": "T14-10",
+  "trace_sha1": "003364ec034550c299eb4442aab02045f01e7c3a",
+  "from": "S04",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S15",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "`FDETXT63` `0x09`–`0x0B` 也屬本條：`FDETXT63` 與 `FDETXT62` 逐 byte 相同（464 byte）；第 27 章結局的 `WIN26` 切到地圖 62 後只有鏡頭移動、震動、單位轉向與退場、淡入淡出和動畫，不畫任何文字，同一段對白由隱藏路線的 `WINGA26` 切到地圖 61 後畫 `FDETXT62` 的 `0x09`、`0x0A` 顯示，`0x0B` 則和 `FDETXT62` `0x0B` 一樣最接近 `FDETXT16` `0x09`。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`WIN26`（第 27 章結局，`fdps_chapter_27_end` 在缺魔精石碎片或反禁制器時執行）在 `0x1D8` 切到地圖 62，到 `0x345` 切回地圖 26 之間沒有任何 `DRAW_TEXT`；`FDETXT63` 與 `FDETXT62` 逐 byte 相同，63 的 `0x09`–`0x0B` 沒有讀取端。其中 `0x09`、`0x0A` 是 `WINGA26` 在地圖 61 顯示的 `FDETXT62` `0x09`、`0x0A` 的逐字複本，`0x0B` 與已歸 S15 的 `FDETXT62` `0x0B` 相同，所以這三條是顯示中內容的複本，歸 S15 排除，不是殘留內容。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chend2b.c:269",
+    "observation": "fdps_chapter_27_end：兩件道具任一不在身上時執行 CH27_ENDING_SCRIPT \"Win26.dat\"（chend2b.c:189），接著片尾名單並結束遊戲；否則 chend2b.c:275 執行 \"WinGA26.dat\""
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1053",
+    "observation": "SCRIPT_OP_SWITCH_MAP 只把 data_fdps_chapter_current_chapter_id 設成運算元並呼叫 fdps_chapter_state_reset（載入該地圖與其文字區塊），本身不畫字"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/WIN26.DAT@0x1d8",
+    "observation": "`11 3e` SWITCH_MAP → 62；之後到 @0x345 `11 1a` 切回地圖 26、@0x347 END 之間只有 SET_VIEW_TILE、FACE_UNITS、FADE_IN/OUT、SHAKE_VIEW、RETIRE_UNIT、PLAY_SAF ICON0041，沒有 DRAW_TEXT；整支腳本的文字引用只有 @0x77 的 27:0x0A 與 @0xEB 的 27:0x0B"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/WINGA26.DAT@0x3f0",
+    "observation": "cutscene_script 追蹤：WINGA26 切到地圖 61 後在 @0x3F0、@0x3FF 畫 FDETXT62 的 0x09、0x0A；66 支腳本中只有 WIN26 會到地圖 62，沒有任何腳本引用 FDETXT63"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT63.TXT@0x50",
+    "observation": "FDETXT63.TXT 與 FDETXT62.TXT 逐 byte 相同（各 464 byte）；0x09@0x50「異界的入口開了！…」、0x0A@0xEA「對不起！因為我父親的任性…」、0x0B@0x1BA 蘭迪斯「好！我們出發！」"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cut_content/story.py twin()",
+    "observation": "以 story.py 的 never_shown_text／all_shown／twin 計算：62:0x09、0x0A 為顯示中；63:0x09、0x0A 的最近顯示版本是 62:0x09、0x0A（逐字相同）；63:0x0B 與 62:0x0B 同樣最接近 16:0x09（覆蓋率 0.857，高於 NEAR_COPY_MIN 0.8），符合 S15 的複本條件"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一次判讀的結論（WIN26 在地圖 62 不畫字、FDETXT63 與 FDETXT62 逐 byte 相同、63:0x09–0x0B 是顯示中內容的複本而補進 S15）經重新解 WIN26／WINGA26 腳本、比對兩個區塊的雜湊與 story.py 的歸屬後維持不變；只修正 kb_text 把地圖 62 上的步驟說成「只有鏡頭、震動與動畫」的漏列，實際還有單位轉向、退場與淡入淡出。",
+  "trace": "WIN26 會切到地圖 62，但在那裡不畫任何文字；FDETXT63 和 FDETXT62 內容相同，63:0x09–0x0B 都沒有被讀到。"
+ },
+ {
+  "id": "T14-11",
+  "trace_sha1": "2bf68afdbad147c2fddc329cff3f16a5fdd25d62",
+  "from": "S05",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S5",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT58` 的 `0x00`–`0x08` 是第 9 章區塊 `FDETXT09` 的複本：`0x08` 神秘商店寫「這裡有新奇的武器」，正式版寫「這裡有新奇的東西」；`0x06`、`0x07` 逐字相同，`0x04`、`0x05` 字相同、只差換行與換頁控制碼。村莊畫面只讀「章節索引 + 1」那個區塊，`FDETXT58` 的這幾條永遠不顯示；此事實已完整寫在 story.md 的 S5（含 `FDETXT58` `0x04`–`0x08` 的逐條對照），story.py 的 OWNERS 也把 `FDETXT58` `0x00`–`0x08` 歸給 S5。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT58.TXT@0x160",
+    "observation": "entry 0x08 decodes to 這裡有新奇的武器，{br}買了不會吃虧喲！{page}"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT09.TXT@0x194",
+    "observation": "entry 0x08 decodes to 這裡有新奇的東西，{br}買了不會吃虧喲！{page}"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT58.TXT@0x44",
+    "observation": "0x04 這裡是道具店！ without the trailing {page} that FDETXT09 0x04 (@0x74) has; 0x05 (@0x54 vs @0x86) lacks one {br}; 0x06 (@0x94/@0xc8) and 0x07 (@0x12a/@0x15e) token-identical"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT58.TXT@0x20",
+    "observation": "0x00-0x02 identical to FDETXT09 (第九章 / 布蘭多與蓋亞 / 敵人全滅); 0x03 (@0x38) is 蘭迪斯死亡 while FDETXT09 0x03 (@0x50) is 蘭迪斯　布蘭多或蓋亞{br}其中一人死亡"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:437",
+    "observation": "fdps_load_field_chapter_resources loads fdetxt%02d.txt with chapter id + 1, so village screens read FDETXT01-30 only, never FDETXT58"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S5",
+    "observation": "S5 lists FDETXT58 as chapter-9 copy and carries the 0x08 武器/東西 pair and the ctrl-only/identical notes for 0x04-0x07; OWNERS table row FDETXT58 0x00-0x08 -> S5"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "FDETXT58 是第 9 章文字區塊的舊複本，0x08 寫「新奇的武器」而正式版 FDETXT09 寫「新奇的東西」，其餘村莊台詞相同。"
+ },
+ {
+  "id": "T14-12",
+  "trace_sha1": "2283c0cc91fd93d2f9d03891d5bf72406582adad",
+  "from": "S05",
+  "verdict": "holds",
+  "disposition": "exclude",
+  "entry": "",
+  "topic": "story",
+  "category": "excluded",
+  "route": "none",
+  "title": "`FDETXT41`–`52`、`55`、`56`、`62`–`65` 的 `0x00`–`0x03`：過場地圖文字區塊開頭帶著的章名、標題與勝敗條件（`41`–`46` 第 12 章、`47`–`52` 第 6 章、`55`／`56` 第 9 章、`62`–`65` 第 27 章；這些區塊的村莊台詞 `0x04`–`0x08` 全空）",
+  "kb_text": "其實有在用的內容：過場區塊從章節區塊整塊複製時帶過來的表頭，讀 `0x01`–`0x03` 的存檔面板 `fdps_draw_save_slot_panel`（`0x24a40`）與戰況視窗 `fdps_battle_show_win_fail_window`（`0x17ca0`）只讀戰場章節的 `FDETXT01`–`30`，顯示中的版本在那裡，`0x00` 的原稿本身也沒有讀取端（S13a）；與來源章節不同的只有失敗條件兩處——`55`／`56` 寫「蘭迪斯死亡」（與 S5 的 `FDETXT58` 同一寫法），而 `FDETXT09` 與 `fdps_chapter_09_post_action`（`0x3a840`）另含布蘭多或蓋亞，`62`–`65` 寫「全員死亡」，而 `FDETXT27` 與 `fdps_chapter_27_post_action`（`0x3b8a0`）只看蘭迪斯，顯示的都是與處理函式一致的章節區塊那一份。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT41`–`46` 的 `0x00`–`0x03` 與 `FDETXT12`、`47`–`52` 與 `FDETXT06` 逐條相同，`55`／`56` 與 `FDETXT09`、`62`–`65` 與 `FDETXT27` 只在 `0x03` 失敗條件不同（「蘭迪斯死亡」／「全員死亡」），十八個區塊的 `0x04`–`0x08` 全為空串；讀 `0x01`–`0x03` 的只有存檔面板與戰況視窗，兩者都只讀戰場章節的區塊，過場腳本讀這些區塊都從 `0x09` 起，所以這 72 條永遠不會顯示，屬排除。一讀的理由把 `0x00` 也說成「顯示中的版本在章節區塊」，但章節區塊的 `0x00` 本身就沒有讀取端（S13a），已改寫；另把兩處不同的失敗條件斷言為「複製時的舊稿」，與它自己的待決問題（先後判斷不出）矛盾，改為中性敘述。`FDETXT47`–`52` 的同一批條目 T14-02 判為 S15 的補充，轉錄時兩者只能取一：這裡的單一排除列涵蓋全部 18 個區塊，且「全員死亡」不是任何顯示中條目的複本，放不進 S15 的複本規則。`FDETXT58` 的 `0x03` 也是「蘭迪斯死亡」，已由 S5 擁有。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT41.TXT@0x2e",
+    "observation": "0x00–0x03 為 第十二章／火神的宮殿／敵人全滅／蘭迪斯死亡，0x04–0x08 五條空串；FDETXT42–46 的 0x00–0x03 與 FDETXT12 逐條相同，0x04–0x08 全空"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT47.TXT@0x16",
+    "observation": "0x00–0x03 為 第六章／帝國軍追擊／敵人全滅／蘭迪斯﹑法蓮娜﹑索爾{br}任一人死亡；FDETXT48–52 與 FDETXT06 逐條相同，0x04–0x08 全空"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT55.TXT@0x3a",
+    "observation": "0x03 為「蘭迪斯死亡」（FDETXT56、FDETXT58 相同）；0x00–0x02 與 FDETXT09 相同，但 FDETXT09 的 0x03 是「蘭迪斯　布蘭多或蓋亞{br}其中一人死亡」"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT62.TXT@0x3c",
+    "observation": "0x03 為「全員死亡」（FDETXT63–65 相同）；0x00–0x02 與 FDETXT27 相同，FDETXT27 的 0x03 是「蘭迪斯死亡」；FDETXT01–30 沒有一個失敗條件含「全員」"
+   },
+   {
+    "source": "src",
+    "location": "src/savepnl.c:482",
+    "observation": "fdps_draw_save_slot_panel（00024a40）以存檔的章節索引 + 1 載入 fdetxt%02d.txt，只畫條目 1（SLOT_CHAPTER_TITLE_TEXT_ID）"
+   },
+   {
+    "source": "src",
+    "location": "src/btlend.c:421",
+    "observation": "fdps_battle_show_win_fail_window（00017ca0）從目前章節區塊畫條目 2、3（WIN_CONDITION_TEXT_ID／FAIL_CONDITION_TEXT_ID）；src 中以 data_fdps_current_chapter_text_ptr 讀固定條目 1–3 的只有這裡"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost1.c:567",
+    "observation": "fdps_chapter_09_post_action（0003a840）除共用判定外，單位 6 或 7（布蘭多、蓋亞）退場即判敗北，與 FDETXT09 相符"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost3.c:355",
+    "observation": "fdps_chapter_27_post_action（0003b8a0）只以單位 0（蘭迪斯）退場判敗北，與 FDETXT27 相符，與「全員死亡」不符"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cut_content/story.py OWNERS",
+    "observation": "這 18 個區塊的 0x00–0x03 目前歸屬為待判定的 ?T14-02/T14-12；章節區塊的 0x00 屬 S13a；FDETXT58 0x00–0x08 屬 S5"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "「全員死亡」與只寫蘭迪斯的第 9 章失敗條件，是比正式版早的舊稿還是複製後改錯的，資料判斷不出先後。",
+  "_supersedes": "一讀同樣判為排除，事實全部重驗成立；但理由把 `0x00` 也說成顯示中的版本在章節區塊，實際上章節區塊的 `0x00` 本身沒有讀取端（S13a），且把兩處不同的失敗條件斷言為複製時的舊稿，與自己待決的先後問題矛盾。二讀改寫 kb_text 與標題為中性敘述、補上 `FDETXT58` 同寫法的交叉連結，並註明與 T14-02 對 `FDETXT47`–`52` 的 S15 補充重疊、轉錄時只能取一。",
+  "trace": "FDETXT41–52、55、56、62–65 帶有第 6、9、12、27 章的標題與勝敗條件（FDETXT62 的失敗條件為「全員死亡」，與 FDETXT27 不同），但村莊條目全空。"
+ },
+ {
+  "id": "T14-13",
+  "trace_sha1": "f3181e6521b6064b49e84e3c7a548f8b48e59cea",
+  "from": "S05",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S5",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FDETXT19` `0x06` 是正式版第 19 章前村莊的酒館台詞，由 `fdps_run_bar_shop`（`0x35cc0`）實際顯示，不是刪減內容；它說「在天河星座中，隱藏著奧妙的數字，關鍵握在你手中」，同一村莊生效的密碼是 1 2（密碼表第 17 列），下一章是 1 3 2 4，但台詞指向哪一章的密碼，資料判斷不出來。trace 只說「可能是」提示，這一點成立；S5 的「暗示」已原樣寫出這個未定的可能性，不需另外落地。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/FDETXT19.TXT@0xdc",
+    "observation": "偏移表第 6 項為 0xdc；條目 0x06 解出為「哎呀～！你們就是那群，拯救羅特帝亞的英雄！……在天河星座中，隱藏著奧妙的數字··嗯，關鍵握在你手中，請加油努力吧！」，沒有任何具體數字"
+   },
+   {
+    "source": "src",
+    "location": "src/vilbar.c:269",
+    "observation": "fdps_run_bar_shop 以 data_fdps_current_chapter_text_ptr、BAR_SHOP_CHAPTER_TEXT_ID（PUSH 0x6 at 00035e1d）畫出酒館台詞，即載入中章節區塊的條目 0x06"
+   },
+   {
+    "source": "src",
+    "location": "src/rsrc.c:437",
+    "observation": "村莊重載以 data_fdps_chapter_current_chapter_id + 1 格式化 fdetxt%02d.txt；第 19 章前的村莊章節索引為 18，載入的正是 FDETXT19，所以這條台詞會在遊戲中顯示"
+   },
+   {
+    "source": "src",
+    "location": "src/village.c:1143",
+    "observation": "fdps_check_secret_code_key 的密碼表第 17 列 {0x02,0x03} = 1 2 屬章節索引 18（第 19 章前的村莊，即顯示這條台詞的村莊）；第 18 列 1 3 2 4 屬第 20 章前的村莊"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S5",
+    "observation": "S5「暗示」已寫：正式版第 19 章酒館的「天河星座中隱藏著奧妙的數字，關鍵握在你手中」是不是某章密碼的提示、指的是哪一章，資料判斷不出來"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "台詞是否真是密碼提示、指的是同村的 1 2 還是下一村的 1 3 2 4，無法從程式與資料判定；天河星座與數字的對應若有出處，只可能在遊戲外的資料（攻略或開發者說法）。",
+  "_reread": "二讀確認原判：重解 FDETXT19 0x06 確為正式版第 19 章村莊酒館台詞（vilbar.c 以 BAR_SHOP_CHAPTER_TEXT_ID 6 讀載入中章節區塊），密碼表第 17 列 1 2 與攻略站第 19 章「按12進入」一致，攻略站無天河／星座的說明，cut_content/story.md S5 暗示已寫出此未定可能，吸收於 S5、待決問題照舊保留。",
+  "trace": "FDETXT19 酒館台詞「天河星座中隱藏著奧妙的數字，關鍵握在你手中」可能是某章密碼的含糊提示。"
+ },
+ {
+  "id": "T14-14",
+  "trace_sha1": "3cba01d79c61a03c0ae310a9e5f7573b1012fb56",
+  "from": "S06",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S6",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`ICONANI.VFS` `ICON0032.SAF` 第 1 格播放的 sound 0 是 11025 Hz、8 bit、9184 取樣的音效，它的樣本內容在全部 525 個 SAF 中只出現在 `ICON0032`，也不以 WAV 或其他形式出現在任何資源裡。`ICON0032` 沒有任何過場腳本以 opcode `0x06` 播放，而且 opcode `0x08` PLAY_WAV 從未被使用，所以這段音效在遊戲中不會響。story.md 的 S6 已經寫明這件事。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:958",
+    "observation": "case SCRIPT_OP_PLAY_SAF 以腳本運算元組出 SCRIPT_SAF_MEMBER_FORMAT \"Icon%04d.saf\"（src/icon.c:721），是載入 IconNNNN.saf 的唯一途徑"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061984",
+    "observation": "字串 \"Icon%04d.saf\" 只被 fdps_icon_script_run 的 0002196f／00021974 引用"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON0032.SAF@58786",
+    "observation": "sound section 起點 58778，sound 0 起於 58786：11025 Hz、8 bit、9184 取樣，sha1 53f6b443…；frame 1 的 sound 欄位是 0，frame 7 是 1（22050 Hz、24000 取樣，與 ICON0033 sound 0 樣本相同）"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/EMG15.SAF@0",
+    "observation": "全部 525 個 SAF 中唯一另一段 11025 Hz、9184 取樣的音效是 EMG15 sound 0，但樣本 9184 byte 中有 8950 byte 不同、開頭 172 個取樣是靜音、任何位移下相關度都在 15% 以下，是巧合同長的另一段音效"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS@0",
+    "observation": "以 64 byte 樣本片段搜尋 vfs_dump 中所有非 SAF 成員與 fdps_game_files，只命中含 ICON0032 的 ICONANI.VFS 本身"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cutscene_script dump",
+    "observation": "66 支腳本、5533 步：PLAY_SAF 的運算元涵蓋 ICONANI 全部 SAF，唯獨沒有 ICON0032；opcode 0x08 PLAY_WAV 沒有腳本使用"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "ICON0032.SAF 第 1 格使用的 11025 Hz、9184 取樣音效在全部 525 個 SAF 中只存在於 ICON0032，遊戲中不會響。"
+ },
+ {
+  "id": "T14-15",
+  "trace_sha1": "356622a501e3d4de072e86c62f3742ab605ff984",
+  "from": "S08",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C16c",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`fdps_cd_play_track_range`（`0x3c892`）與 `fdps_cd_play_whole_disc`（`0x3c8e6`）在 FDPS.LE 中沒有任何呼叫或位址引用，是遊戲自己 MSCDEX 存取層裡做好卻沒被呼叫的成員。code.md 的 C16c 已把兩支列在零引用的 16 支之中，story.md 的 S8 也已寫明播區段與播整片的兩支包裝沒有呼叫者。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:531",
+    "observation": "fdps_cd_play_track_range 的定義；src/ 中除 cdaudio.c/cdaudio.h 的定義、宣告與註解外沒有任何呼叫（只有 tests/cdaudio.c 呼叫）"
+   },
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:599",
+    "observation": "fdps_cd_play_whole_disc 的定義；src/ 中同樣沒有呼叫者"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003c892",
+    "observation": "get_xrefs_to 無任何參照；全映像搜尋位址 bytes 92 c8 03 00 無結果"
+   },
+   {
+    "source": "ghidra",
+    "location": "0003c8e6",
+    "observation": "get_xrefs_to 無任何參照；全映像搜尋位址 bytes e6 c8 03 00 無結果"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C16c",
+    "observation": "零引用 16 支清單已含 fdps_cd_play_track_range 與 fdps_cd_play_whole_disc，分類殘留內容"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "fdps_cd_play_track_range（0003c892）與 fdps_cd_play_whole_disc（0003c8e6）在 FDPS.LE 中沒有任何呼叫者。"
+ },
+ {
+  "id": "T14-16",
+  "trace_sha1": "baf60e5993b04d858740987f9ba99e8a6a7c510e",
+  "from": "S08",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "章節音軌表（`0x304a0`）第 7 列（第 8 章）第 1 欄是索引 0x12，表中僅此一格；第 1 欄只有 fdps_battle_advance_turn 在敵方回合開始時要求，其他四個呼叫端都要第 0 欄。過場腳本中 0x12 只出現在 ICON08（第 9 章開場）一次。光碟 1 第 19 軌因此在第 8 章每個敵方回合與第 9 章開場都會播到，是使用中的音軌，不是刪減內容；這是遊戲怎麼運作的一般事實，S08 已涵蓋「沒人要求的音軌」的判定，這條沒有需要另外記錄的東西。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:905",
+    "observation": "chapter_track_table 第 7 列為 {0x0e, 0x12}，0x12 在 30×2 表中只出現這一格"
+   },
+   {
+    "source": "src",
+    "location": "src/cdaudio.c:1005",
+    "observation": "music_index = chapter_track_table[chapter][track_slot]，之後以 music_index+1 當光碟音軌播放"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:858",
+    "observation": "fdps_battle_advance_turn 在敵方回合前以 ADVANCE_CD_TRACK_ENEMY_PHASE（=1，btlturn.c:674）要求第 1 欄；btlturn.c:869 玩家回合要第 0 欄"
+   },
+   {
+    "source": "src",
+    "location": "src/menu.c:570",
+    "observation": "其餘呼叫端的欄位常數 OPTION_BGM_TRACK_SLOT、CD_TRACK_SLOT_FIELD（savefile.c:273）、VILLAGE_TRACK_SLOT（village.c:193）皆為 0"
+   },
+   {
+    "source": "ghidra",
+    "location": "000304a0",
+    "observation": "60 byte 模板第 14、15 byte 為 0e 12，與 src 表逐 byte 相同"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON08.DAT@0xa7",
+    "observation": "07 12：SET_MUSIC 索引 18（光碟音軌 19），呼叫端 fdps_chapter_09_init；66 支腳本的 141 個 opcode 7 中只有這一個是 0x12"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "章節音軌表第 7 列第 1 欄的索引 0x12（光碟 1 第 19 軌）只有第 8 章戰鬥中切換會用到，腳本裡也只有 ICON08 用一次。"
+ },
+ {
+  "id": "T14-17",
+  "trace_sha1": "c7d7ca5e269725507c113178754d71b26fea778a",
+  "from": "S09",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MAP17.DAT 的波次 13（記錄 50–64）與波次 1（記錄 0–14）逐筆只差波次標記，另外波次 1 的記錄 9、12 帶死亡腳本 opcode 0（掉落道具）`B6` 再生藥與 `B8` 魔法水，波次 13 的對應記錄 59、62 是 FF（無腳本）。兩個波次都會出場（波次 1 由開場過場 ICON17.DAT 部署，波次 13 由第 13 回合的 slot 25 事件部署），差異只是援軍不帶掉落物，屬於使用中內容的設計事實，不是刪減內容；chapters/ch18.md 已完整記載兩波編制與掉落，無需落地。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP17.DAT@0x16d",
+    "observation": "記錄 9：005900000d2967ffffffffffff00000000000000000100b60000，+0x15 波次 01、+0x16 死亡腳本 00、+0x17 運算元 0x00b6（182）"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP17.DAT@0x681",
+    "observation": "記錄 59：與記錄 9 前 0x15 byte 相同，+0x15 波次 0d、+0x16 ff、運算元 0"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP17.DAT@0x1bb",
+    "observation": "記錄 12（67 LV16）：+0x15 波次 01、死亡腳本 00/0x00b8（184）；記錄 62 @0x6cf 除波次 0d 與死亡腳本 ff/0 外逐 byte 相同。其餘 13 對（0–14 對 50–64）只有 +0x15 波次 byte 不同"
+   },
+   {
+    "source": "src",
+    "location": "src/death.c:402",
+    "observation": "DEATH_SCRIPT_ITEM 為 0：fdps_run_death_scripts 把 opcode 0 的運算元當道具 id 交給 fdps_unit_add_item，所以 00/182、00/184 是掉落 B6 再生藥、B8 魔法水"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt3.c:802",
+    "observation": "fdps_chapter_18_event_deploy_wave_for_turn 以回合計數本身當波次呼叫 fdps_deploy_wave；MAP17 回合表在第 13 回合點 slot 25，所以波次 13 會出場"
+   },
+   {
+    "source": "investigation",
+    "location": "chapters/ch18.md",
+    "observation": "章節頁已寫明第 13 回合的波次 13 與開場同樣編制的 15 人援軍，掉落表只列記錄 9（B6 再生藥）與 12（B8 魔法水），波次 13 各列掉落為 —"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "MAP17.DAT 的 wave 13（記錄 50–64）與 wave 1（記錄 0–14）角色與等級逐筆相同，但 wave 1 的記錄 9、12 帶死亡腳本 00/182、00/184，wave 13 的對應記錄都是 FF/0。"
+ },
+ {
+  "id": "T14-18",
+  "trace_sha1": "0004df4fa0103a108fbdf583406f1bd8ce5f267d",
+  "from": "S10",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S11",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 28 章戰場 `MAP27.DAT` 的部署記錄 4（`54` 骷顱兵，LV25）波次 byte 是 `0xFF`，`fdps_deploy_wave` 只以相等比對部署，第 28 章唯一以回合計數算波次的 slot 44 最大只算到 9，沒有任何路徑以 255 呼叫，所以這筆記錄永不出場。這正是 S11 表格最後一列（章 28、`MAP27.DAT`、#4、`54` 骷顱兵、LV25、錨點 (18, 17)）已記載的事實。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP27.DAT@0x100",
+    "observation": "記錄數（@0x2）65；記錄 4 起於 0xEB（0x83 + 4*26），side 0、char_id 0x54、level 25，+0x15 的波次 byte 為 0xFF；其餘記錄波次為 0–9"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:419",
+    "observation": "fdps_deploy_wave 逐筆以 spawn->wave_no（unsigned char）== wave_no 比對，相等才 fdps_deploy_unit"
+   },
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:80",
+    "observation": "struct fdps_char_spawn_record 的 wave_no 位於 +0x15，記錄大小 26 byte"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt6.c:154",
+    "observation": "fdps_chapter_28_event_deploy_wave_for_turn 以回合計數 / 2 當波次呼叫 fdps_deploy_wave；MAP27.DAT 回合事件表 slot 44 只排到第 18 回合，最大波次 9"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S11",
+    "observation": "S11「18 筆波次 0xFF 的部署記錄」表格已列出章 28 `MAP27.DAT` #4 `54` 骷顱兵 LV25 (18, 17)，並說明沒有路徑以 255 呼叫"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "MAP27.DAT 部署記錄 4（角色 0x54）的 wave 位元組是 255，而第 28 章沒有任何路徑部署 wave 255。"
+ },
+ {
+  "id": "T14-19",
+  "trace_sha1": "9e2f84ad617ffc995f1b0f2b6f85b263d6b7a6cd",
+  "from": "S11",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S10",
+  "topic": "",
+  "category": "sealed",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 28 章 slot 44 的處理函式 fdps_chapter_28_event_deploy_wave_for_turn 以回合計數器 ÷ 2 當波次，MAP27 的回合表在第 2、4、6、7、10、12、14、16、18 回合呼叫它，第 6、7 回合都算成波次 3，沒有回合算得出 4，所以 MAP27.DAT 波次 4 的記錄 47–49 三筆永遠不出場。這件事 story.md 的 S10 已完整記載（被封住的內容），不需另外落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chevt6.c:152",
+    "observation": "fdps_chapter_28_event_deploy_wave_for_turn 以 data_fdps_battle_turn_counter / CH28_WAVE_TURN_DIVISOR（2）呼叫 fdps_deploy_wave"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt6.c:126",
+    "observation": "註解記載 map27.dat 在第 2、4、6、7、10、12、14、16、18 回合排程此 slot，對半得波次 1、2、3、3、5、6、7、8、9，波次 3 部署兩次、波次 4 從不部署"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP27.DAT@0x2",
+    "observation": "回合表 (回合, slot)：02/2c、04/2c、06/2c、07/2c、0a/2c、0c/2c、0e/2c、10/2c、12/2c，全部指向 slot 0x2c=44"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP27.DAT@0x549",
+    "observation": "記錄 47（0x549）、48（0x563）、49（0x57d）的 +0x15 波次 byte 為 4；全檔 65 筆中波次 4 正好這 3 筆（角色 0x69、0x6b、0x6b）"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "第 28 章 slot 44 以回合 / 2 取波次，第 7 回合再次落在波次 3，MAP27 的波次 4 三筆從不出場（src/chevt6.c:124 已記載）。"
+ },
+ {
+  "id": "T14-20",
+  "trace_sha1": "e5fa22b01d725f1d34c99adaf3079e02602874be",
+  "from": "S11",
+  "verdict": "holds",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "第 1 章開場腳本 `ICON00` 在地圖 32 以 `DEPLOY_WAVE` 部署波次 16、17、18（`0x1AF`、`0x1BD`、`0x1CC`），切到地圖 34 後部署波次 16、19、18、17、20（`0x305`、`0x31B`、`0x38E`、`0x391`、`0x43B`），陳述屬實。這是正在使用的功能，不是刪減內容；它對刪減內容唯一的意義——過場腳本的波次運算元是 1–20、不會是 255——已寫在 S11 的「為什麼到不了」，不需另記。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:942",
+    "observation": "fdps_icon_script_run 的 SCRIPT_OP_DEPLOY_WAVE（0x04）以腳本 byte 當波次呼叫 fdps_deploy_wave，只有 0xFF 改用 chosen_branch"
+   },
+   {
+    "source": "src",
+    "location": "src/chinit1.c:113",
+    "observation": "fdps_chapter_01_init 執行 CH01_OPENING_SCRIPT（Icon00.dat），所以這些指令在每次新遊戲都會執行"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON00.DAT@0x1af",
+    "observation": "04 10 00、@0x1bd 04 11 00、@0x1cc 04 12 00：地圖 32 部署波次 16、17、18（找最近空格）"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON00.DAT@0x1e4",
+    "observation": "11 22：SWITCH_MAP 到地圖 34"
+   },
+   {
+    "source": "data",
+    "location": "ICONANI.VFS/ICON00.DAT@0x305",
+    "observation": "04 10 01、@0x31b 04 13 01、@0x38e 04 12 01、@0x391 04 11 01、@0x43b 04 14 01：地圖 34 部署波次 16、19、18、17、20；@0x44d 切到地圖 35"
+   },
+   {
+    "source": "investigation",
+    "location": "tools/cutscene_script show ICON00.DAT",
+    "observation": "解碼器追蹤顯示各波次分別部署出 MAP32 #24–#26、MAP34 #15–#19 的單位，皆實際出場"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S11",
+    "observation": "「為什麼到不了」已寫明過場腳本的波次運算元是 1–20，涵蓋本條與刪減內容相關的部分"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "過場腳本 ICON00 部署 MAP32 的波次 16–18 與 MAP34 的波次 16、17、18、19、20。"
+ },
+ {
+  "id": "T14-21",
+  "trace_sha1": "c6e9dacfe9a794d16eeb7a801d17fe8499207e82",
+  "from": "S12",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S12",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FIELD1.VFS` `M09.CEL` 第 33 格與 `M090.CEL` 同索引不同，且在其餘 71 張 24×24 圖磚表的任何一格都找不到相同的圖；`M090.CEL` 第 33 格是自己第 20 格的逐像素複本，`M090.MPL` 的 480 格沒有一格用到 33。這件事已由 story.md S12 的「是什麼」逐點寫明，無需再落地。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/rsrc.c:353",
+    "observation": "地圖圖磚表以 sprintf(resource_name, \"m%02d%d.cel\", ...) 組名，地圖 09 第 0 層只會開 m090.cel，M09.CEL 不在路徑上。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M09.CEL@0x0",
+    "observation": "cel_decode 解出 96 格 24×24；與 M090.CEL 同索引相同 90 格，不同者只有 33、91–95；M09 第 33 格 576 像素不透明且不等於本表任何其他格。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M090.CEL@0x0",
+    "observation": "第 33 格逐像素等於同表第 20 格；第 95 格等於第 36 格；91–94 為新圖。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M090.MPL@0x0b",
+    "observation": "檔頭 MPL、寬 0x14、高 0x18，其後 480 個 u16 圖磚編號：14 與 33 次數為 0，20 用 1 次，91/93/95 各 2 次。"
+   },
+   {
+    "source": "investigation",
+    "location": "workspace vfs_dump 全部 .CEL 與 fdps_game_files",
+    "observation": "掃描其餘 71 張 24×24 圖磚表的每一格（含只比不透明像素），沒有任何一格與 M09.CEL 第 33 格相同。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "M09.CEL 第 33 格是任何其他圖磚表都沒有的獨有圖磚，M090.CEL 同索引改成第 20 格的複本且 M090.MPL 不使用它。"
+ },
+ {
+  "id": "T14-22",
+  "trace_sha1": "c1f691c9eddb4d4d7840092b5893a488845968b9",
+  "from": "S12",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "S12",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "M090.MPL 的 480 格用到 M090.CEL 96 格中除 14、33、92、94 以外的全部；92、94 是寶箱格 91、93 開啟後由重繪加 1 顯示的圖，地圖 09 上沒有任何過場腳本的 SET_MAP_CELL，所以第 14 與第 33 格確實永遠不會畫出。但兩格都沒有內容：第 14 格在 M090.CEL 與 M09.CEL 裡都是全透明的空格，第 33 格是第 20 格的逐像素複本（S12 已記），因此沒有比 S12 更多值得記錄的東西。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M090.MPL@0x0b",
+    "observation": "20×24 圖磚編號去重後是 0–95 扣掉 14、33、92、94；第 0 層屬性類別 0x20 的格子擺的是 91（(18,5)、(3,6)）與 93（(9,3)、(19,13)），0x40 埋藏格擺 21 與 95。"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:197",
+    "observation": "fdps_map_apply_triggered_cell_changes 只對類別 0x20 或 0x60 且旗標已設的格把圖磚編號加 1（maptile.c:203），所以地圖 09 的寶箱 91→92、93→94 會出現，13、32 屬類別 0x00 不會變成 14、33。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1078",
+    "observation": "SCRIPT_OP_SET_MAP_CELL 直接寫第 0 層一格的 16-bit 值；以 cutscene_script 解全部 66 支腳本，834 筆 SET_MAP_CELL 發生時的目前地圖只有 12、14、16、22、23、26、28、29、47、50、51，造訪地圖 09 的 ICON09、WIN09 沒有任何一筆。"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt6.c:590",
+    "observation": "章節處理函式改地形也只是設觸發旗標再呼叫同一個重繪，不另寫圖磚編號。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD1.VFS/M090.CEL@0x17d5",
+    "observation": "第 14 格串流只有 24 byte、不透明像素 0，是整格全透明；M09.CEL 同索引也是同一個空格。第 33 格（@0x34ab）與第 20 格（@0x1f8d）解碼後逐像素相同。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/story.md S12",
+    "observation": "S12 已寫明 M090.CEL 第 33 格是第 20 格的複本且 M090.MPL 不用它；未提第 14 格，但該格沒有內容。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "M090.CEL 第 14 格與第 33 格（第 20 格複本）都未被 M090.MPL 使用。"
+ },
+ {
+  "id": "T14-23",
+  "trace_sha1": "c1dca67b0a7c5a17d837911f79519df93426dd23",
+  "from": "S13",
+  "verdict": "holds",
+  "disposition": "addendum",
+  "entry": "S13c",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "這一筆看來是填錯的未用列，不是排在第 255 回合的事件：各 `MAP` 檔回合事件表的未用列一律是 `FF FF 00`，只有這一筆的 slot 位元組是 0，與它前面第 3 到第 14 回合那 12 筆每回合增援（slot 0 `fdps_chapter_03_event_deploy_wave_for_turn`）相同；就算走到第 255 回合，這支 handler 要部署的第 254 波在 `MAP02.DAT` 也沒有任何部署記錄（波次只到 15），`fdps_deploy_wave` 找不到符合的記錄就什麼也不放。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FIELD.VFS` `MAP02.DAT` 回合事件第 13 筆確為 `FF 00 00`（第 255 回合、slot 0、side 0），第 14、15 筆才是未用列 `FF FF 00`；所有 MAP 檔中第一位元組為 FF 的回合事件列只有這一筆不是 `FF FF 00`。slot 0 正是前 12 筆（第 3–14 回合）使用的每回合增援 handler，以回合數減 1 當波次，第 255 回合要的第 254 波在 MAP02 不存在，所以這一筆即使觸發也沒有效果，符合填錯的未用列而非刻意安排的事件；它已由排除項 S13c 收錄為不可能觸發，這裡補上它是填錯列的依據。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP02.DAT@0x03",
+    "observation": "16 筆回合事件：030000 040000 … 0e0000（第 3–14 回合 slot 0）、160500（第 22 回合 slot 5）、ff0000、ffff00、ffff00；第 13 筆 @0x2a 是 ff 00 00"
+   },
+   {
+    "source": "data",
+    "location": "FIELD*/MAP*.DAT@0x03",
+    "observation": "掃描全部解包的 MAP 檔回合事件表：第一位元組為 FF 的列共 930 筆，929 筆是 (FF,FF,00)，唯一例外是 MAP02 的 (FF,00,00)；也沒有任何地圖在未用列之後還有非未用列"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:88",
+    "observation": "data_fdps_chapter_event_handler_table 第 0 格是 fdps_chapter_03_event_deploy_wave_for_turn，第 5 格是 fdps_chapter_03_event_turn_limit_game_over"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt1.c:136",
+    "observation": "fdps_chapter_03_event_deploy_wave_for_turn 以 turn_counter - CH03_WAVE_TURN_OFFSET（1）當波次呼叫 fdps_deploy_wave，只有第 3、14 回合另畫台詞；第 255 回合會要第 254 波"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:419",
+    "observation": "fdps_deploy_wave 只部署 wave_no 相等的記錄，沒有符合者就不放任何單位"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP02.DAT@0x83",
+    "observation": "map_decode show 2：80 筆部署記錄的波次只有 0–15，沒有 254"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:131",
+    "observation": "回合事件以回合位元組（無號）與 data_fdps_battle_turn_counter 比較相等才觸發"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "填錯是出於哪種操作（從 NN 00 00 列複製後只改回合，或未用列漏改 slot）無法從資料得知；另 src/chevt1.h 對 fdps_chapter_03_event_deploy_wave_for_turn 的註解寫 map02.dat 以 12 筆 {3,0,0}–{14,0,0} 指名 slot 0，字面上漏了這筆 {FF,0,0}（實際指名 slot 0 的有 13 筆），影響不大。",
+  "_reread": "第二讀確認 addendum／S13c：重讀 MAP02.DAT@0x03 的 16 筆回合事件（@0x2a 為 FF 00 00）、全部 MAP 檔第一位元組 FF 的 930 列中 929 列為 FF FF 00、chapter.c 事件表第 0 格與 chevt1.c 的 turn-1 波次、map_decode 顯示 MAP02 波次只有 0–15，以及 S13c 尚未提到填錯列與觸發亦無效果。",
+  "trace": "MAP02 回合事件第 13 筆 ff 00 00 的 handler 位元組是 0，跟填充值 ff ff 00 不同，看起來像打錯的填充列，不是刻意排在第 255 回合的事件"
+ }
+]
