@@ -306,12 +306,20 @@ S4_GROUPS = (
     ([(27, 0x18)], "幹部臨死台詞"),
     ([(30, 0x0D)], "第二型態平衡之神的叫陣"),
     ([(30, 0x0E)], "第三型態平衡之神喊出鬼動死靈陣"),
-    ([(30, 0x13)], "另一版的道別（前半）"),
-    ([(30, 0x14)], "另一版的道別（後半）"),
+    ([(30, 0x13)], "另一版的道別"),
+    ([(62, 0x0B), (63, 0x0B)], "隱藏路線那一幕結尾蘭迪斯的回應"),
 )
 
 
 S5_BLOCKS = (53, 54, 57, 58, 59, 60, 61)
+# The entries of those blocks whose text is shown nowhere: the old village
+# lines.  Their other entries (the header, and village lines the official
+# chapter block shows with the same words) are S13a / S15 / S13b copies.
+S5_ENTRIES = ((53, 0x06), (54, 0x06), (57, 0x05), (57, 0x07), (58, 0x08), (59, 0x06),
+              (59, 0x07), (59, 0x08), (60, 0x05), (60, 0x07), (61, 0x05), (61, 0x07))
+# Cut-scene blocks that start with a copy of a chapter block's header.
+HEADER_COPY_BLOCKS = tuple(range(41, 53)) + (53, 54, 55, 56, 57, 58, 59, 60, 61) \
+    + tuple(range(62, 66))
 
 
 def _span(owner, block, first, last=None):
@@ -328,33 +336,41 @@ def _owners():
     # S4: written dialogue nothing draws
     rows += [(key, "S4") for keys, _ in S4_GROUPS for key in keys]
     rows += _span("S4a", 27, 0x1C)
-    # S5: the cut-scene blocks that are copies of a chapter block, header and
-    # village lines included
-    for block in S5_BLOCKS:
-        rows += _span("S5", block, 0x00, 0x08)
-    # S13a: the chapter title text of every chapter block
-    for n in CHAPTER_BLOCKS:
+    # S5: the old village lines in the cut-scene copies of a chapter block
+    rows += [(key, "S5") for key in S5_ENTRIES]
+    # S18: the village lines of chapter index 0, a village that does not exist
+    rows += _span("S18", 1, 0x04, 0x06)
+    # S13a: the chapter title text, in every chapter block and in the cut-scene
+    # blocks that copied a chapter block's header
+    for n in tuple(CHAPTER_BLOCKS) + HEADER_COPY_BLOCKS:
         rows += _span("S13a", n, 0x00)
-    # S13b: chapter-block drafts whose used version is in a cut-scene block
+    # S13b: drafts superseded by the version that is shown
     for block, first, last in ((1, 0x0E, None), (6, 0x0B, 0x0C), (7, 0x09, 0x0A),
                                (8, 0x09, None), (9, 0x09, 0x10), (9, 0x14, 0x16),
                                (10, 0x09, 0x11), (12, 0x09, 0x0B), (18, 0x0F, None),
                                (19, 0x0C, None), (20, 0x09, 0x0D), (21, 0x0B, 0x13),
                                (23, 0x0E, 0x13), (25, 0x09, None), (25, 0x0E, 0x11),
-                               (27, 0x13, None), (30, 0x15, 0x1F)):
+                               (27, 0x13, None), (30, 0x14, None), (30, 0x15, 0x1F),
+                               (55, 0x03, None), (56, 0x03, None), (58, 0x03, None)):
         rows += _span("S13b", block, first, last)
     # S15: copies of an entry shown elsewhere
-    rows += _span("S15", 1, 0x04, 0x06)
+    for block in HEADER_COPY_BLOCKS:
+        for entry in (0x01, 0x02, 0x03):
+            if (block, entry) not in {(55, 3), (56, 3), (58, 3)} and not (block >= 62 and entry == 3):
+                rows.append(((block, entry), "S15"))
+    for block in S5_BLOCKS:
+        for entry in range(0x04, 0x09):
+            if (block, entry) not in S5_ENTRIES:
+                rows.append(((block, entry), "S15"))
     rows += _span("S15", 41, 0x09) + _span("S15", 41, 0x16)
     rows += _span("S15", 42, 0x09, 0x16) + _span("S15", 43, 0x09, 0x16)
     rows += _span("S15", 52, 0x0A)
     rows += _span("S15", 59, 0x0E, 0x11)
-    rows += _span("S15", 62, 0x0B)
+    rows += _span("S15", 63, 0x09, 0x0A)
     rows += _span("S15", 64, 0x17, 0x21)
-    # pending: the new traces the ticket-25.14 workflow judges
-    for block in list(range(41, 53)) + [55, 56] + list(range(62, 66)):
-        rows += _span("?T14-02/T14-12", block, 0x00, 0x03)
-    rows += _span("?T14-10", 63, 0x09, 0x0B)
+    # S19: the loss condition the chapter-27 header copies changed
+    for block in range(62, 66):
+        rows += _span("S19", block, 0x03)
     owners = {}
     for key, owner in rows:
         if key in owners:
@@ -362,7 +378,6 @@ def _owners():
                              f"({owners[key]} and {owner})")
         owners[key] = owner
     return owners
-
 
 OWNERS = _owners()
 
@@ -372,6 +387,15 @@ COPY_OWNERS = {"S15"}
 NEAR_COPY_MIN = 0.8
 # Owners whose rows in the text index name the closest shown twin.
 TWIN_NOTE_OWNERS = COPY_OWNERS | {"S13b"}
+# Drafts whose shown version is not one entry the character match finds: the
+# note says what replaced them instead.
+_NINE = "正式版 `FDETXT09` `0x03` 改為「蘭迪斯　布蘭多或蓋亞其中一人死亡」"
+NOTE_OVERRIDES = {
+    (1, 0x0E): "改寫擴充成 `FDETXT37` `0x0b`（`WIN00` 在地圖 36 顯示）",
+    (25, 0x0E): "拆成 `FDETXT60` `0x09`–`0x0b` 三條、後半改寫擴充（`WIN24` 在地圖 59 顯示）",
+    (30, 0x14): "改寫擴充成 `FDETXT64` `0x11`–`0x16` 的再會約定，`0x14` 保留「我會永遠記得妳的。」",
+    (55, 0x03): _NINE, (56, 0x03): _NINE, (58, 0x03): _NINE,
+}
 
 
 def scene_shown(game):
@@ -470,6 +494,9 @@ def ownership_problems(game):
     problems, pending = check_ownership(never, OWNERS, known_ids(), unsettled)
     shown = all_shown(game, never, unsettled)
     for key, owner in sorted(OWNERS.items()):
+        if owner == "S5" and any(plain(game.line(*k)) == plain(game.line(*key)) for k in shown):
+            problems.append(f"FDETXT{key[0]:02d} 0x{key[1]:02x} is owned by S5 as text shown "
+                            "nowhere, but an entry that is shown has the same words")
         if owner not in COPY_OWNERS or key[0] in unsettled:
             continue
         kind, other = twin(game, key, shown)
@@ -604,19 +631,12 @@ def block_s5_text(game):
     for entry in range(4, 9):
         groups = {}
         for b in S5_BLOCKS:
-            groups.setdefault(game.line(b, entry), []).append((b, entry))
+            if (b, entry) in S5_ENTRIES:
+                groups.setdefault(game.line(b, entry), []).append((b, entry))
         for keys in groups.values():
             c = S5_CHAPTER_OF[keys[0][0]]
-            ours, theirs = game.line(*keys[0]), game.line(c, entry)
-            if ours == theirs:
-                relation = f"與正式版 {ref(c, entry)} 逐字相同"
-            elif plain(ours) == plain(theirs):
-                relation = f"與正式版 {ref(c, entry)} 只差控制碼（換行、換頁或說話者）"
-            else:
-                relation = f"與正式版 {ref(c, entry)} 不同"
-            out += text_section(game, keys, f"{VILLAGE_SCREEN[entry]}；{relation}")
-            if plain(ours) != plain(theirs):
-                out += [f"正式版 {ref(c, entry)}：", ""] + fence(game.transcript(c, entry)) + [""]
+            out += text_section(game, keys, VILLAGE_SCREEN[entry])
+            out += [f"正式版 {ref(c, entry)}：", ""] + fence(game.transcript(c, entry)) + [""]
     return "\n".join(out)
 
 
@@ -679,7 +699,9 @@ def block_text_index(game):
             continue
         owner = OWNERS[key]
         note = ""
-        if owner in TWIN_NOTE_OWNERS:
+        if key in NOTE_OVERRIDES:
+            note = NOTE_OVERRIDES[key]
+        elif owner in TWIN_NOTE_OWNERS:
             kind, other = twin(game, key, shown)
             if kind == "same":
                 note = f"與 {ref(*other)} 逐字相同"
