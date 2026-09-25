@@ -63,7 +63,7 @@ AIL_start_sample            AIL_stop_sample             AIL_sample_status
 
 `AILDRVR.LST` 不是執行期相依。它自稱是「Sound driver installation message file」，內容是給安裝程式挑驅動程式用的選單與偵測規則；把它從執行目錄拿掉，`AIL_install_DIG_INI` 與播放都不受影響。
 
-**FDPS 沒有 `MDI.INI`，也沒有任何 `.MDI` 驅動程式。** 遊戲照樣呼叫 `AIL_install_MDI_INI`，在原版的安裝上它就會回 NULL——音樂走的是 CD 音源（[`program_info/cd_audio.md`](../program_info/cd_audio.md)），AIL 只負責音效。重建版要保留這個呼叫與它失敗的路徑，不要因為「安裝 MDI 失敗」就中止。
+**FDPS 沒有 `MDI.INI`，也沒有任何 `.MDI` 驅動程式。** 遊戲照樣呼叫 `AIL_install_MDI_INI`，在原版的安裝上它就會回 NULL——音樂走的是 CD 音源（[`program_info/cd_audio.md`](../program_info/cd_audio.md)），AIL 只負責音效。重建版要保留這個呼叫與它失敗的路徑，不要因為「安裝 MDI 失敗」就中止。這段 MDI 初始化是 FD2 以 MIDI 播背景音樂的遺留，見 [`cut_content/code.md`](../cut_content/code.md)。
 
 ## 已經驗證到什麼程度
 

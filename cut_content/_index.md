@@ -76,6 +76,19 @@
 
 | 編號 | 分類 | 內容 | 主題檔 |
 | --- | --- | --- | --- |
+| C1 | 被封住的內容 | 第 26 章前的神秘商店進不去 | [程式痕跡](code.md) |
+| C2 | 殘留內容 | AI 行為模式 9：追擊指定角色 | [程式痕跡](code.md) |
+| C3 | 前作遺留 | AI 行為 byte 的兩個高位旗標 | [程式痕跡](code.md) |
+| C4 | 前作遺留 | 單位 byte +5 的 bit 2 | [程式痕跡](code.md) |
+| C5 | 前作遺留 | 「取消即結束回合」旗標 | [程式痕跡](code.md) |
+| C6 | 殘留內容 | 兩種沒用上的全螢幕轉場 | [程式痕跡](code.md) |
+| C7 | 殘留內容 | 沒有任何地圖選用的判負處理函式 | [程式痕跡](code.md) |
+| C8 | 前作遺留 | 存檔的第 4 個 slot | [程式痕跡](code.md) |
+| C9 | 前作遺留 | MIDI 背景音樂的初始化 | [程式痕跡](code.md) |
+| C10 | 前作遺留 | 前作封裝檔的讀取器 | [程式痕跡](code.md) |
+| C11 | 殘留內容 | 沒接上的 raw PCM 播放介面 | [程式痕跡](code.md) |
+| C13 | 否定性結論 | 沒有除錯鍵、作弊碼與啟動開關 | [程式痕跡](code.md) |
+| C15 | 否定性結論 | 沒有未被引用的字串 | [程式痕跡](code.md) |
 
 ## 排除清單
 
@@ -85,3 +98,15 @@
 
 | 編號 | 內容 | 理由 |
 | --- | --- | --- |
+| C12 | `fdps_spell_heal_unit`（`0x28570`，`src/spell.c`）零引用 | 編譯器產物：唯一的用處是同一個 unit 內 `fdps_cast_spell_on_targets` 的法術補血迴圈，被 `-oe=25` 就地展開（`0x28afc`–`0x28b39`），只剩沒有呼叫端的 out-of-line 副本。道具補血本來就直接呼叫 `fdps_unit_apply_heal`，不經法術記錄 |
+| C14 | 過場 opcode `0x61`（`src/icon.c`），給單位 3 十輪各 99 經驗 | 使用中的功能：第 27 章隱藏路線的勝利腳本 `WINGA26.DAT` 在 `0x15F` 無條件執行它，給法蓮娜十輪 99 經驗後把單位陣列寫回名冊，是那條路線唯一的一次寫回（[`cutscene_script.md`](../resource_info/cutscene_script.md)）。形狀像除錯碼但不是 |
+| C16a | `-oe` 展開後留下的零呼叫本體：`fdps_draw_gauge_bar_proportional`（`0x176f0`）、`fdps_draw_stat_gauge`（`0x192c0`）、`fdps_draw_unit_gauge_proportional`（`0x1caa0`，`src/gauge.c`）、`fdps_unit_mark_retired`（`0x138f0`，`src/unit.c`）、`fdps_pack_rgb`（`0x2af20`，`src/palette.c`） | 編譯器產物：同一個 unit 內的用處全部被 `-oe=25` 就地展開，與 C12 同型（[`build_flags.md`](../rebuild_info/build_flags.md)） |
+| C16b | `fdps_move_grid_set_stop_flag`（`0x10da0`，`src/movegrid.c`）零呼叫，呼叫端寫開 | 形狀與 C16a 相同，但組語判斷不出是 `-oe` 展開還是原作本來就在呼叫端寫開；兩種都不是刪減 |
+| C16c | MSCDEX 包裝走不到的 19 支：零引用的 16 支（`src/cd.c` 6 支、`src/cdtoc.c` 5 支、`src/cdaudio.c` 5 支），加上只被它們呼叫的 `fdps_cd_ioctl_output_command`、`fdps_cd_get_track_length_sectors`、`fdps_cd_read_q_channel` | 通用程式庫沒用到的 API |
+| C16d | VFS 讀取器的 `fdps_vfs_read_entry_count`（`0x398f0`）、`fdps_vfs_image_entry_count`（`0x39960`）、`fdps_vfs_find_entry_size`（`0x39a20`），`src/vfs.c` | 通用程式庫沒用到的 API |
+| C16e | RLE 繪製 13 個 kernel 中 mode 1、2、5、6、7、12 走不到（`src/blit.h`；到得了的是 0、3、4、8、9、10、11） | 通用繪製程式庫沒用到的模式：每條到達 dispatcher 的路徑，mode 參數都是常數 |
+| C16f | `src/` 各處註解記下的防禦性分支與寫了不讀的欄位 | 不可能觸發的防禦性分支、沒有內容的簿記欄位；個別項目記在各 function 的註解 |
+| C16g | `src/unit.c` 名冊後備搜尋（`0x2dc8f`）把輸出指標本身跟 0 比，永遠不成立 | 原版 bug 造成的死分支，後面沒有內容可封；重建照原樣保留 |
+| C16h | 格子事件旗標 `data_fdps_map_cell_event_triggered_flags`（`0x640d8`，32 格）的 `0x13`–`0x1F` 沒有讀寫 | 陣列容量大於用量：地圖事件碼、AI 行為 5 與過場 opcode `0x13` 只用 0–15，`0x10`–`0x12` 被各章事件當一次性閂鎖，其餘沒有東西用 |
+
+`src/dpmi.c` 的 6 支 DPMI 包裝在 `src/` 裡找不到呼叫者，但全部被連進來的 Miles AIL 呼叫，是在用的功能，不在任何清單上。
