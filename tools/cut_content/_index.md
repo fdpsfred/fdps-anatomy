@@ -12,6 +12,9 @@
 | `test_cut_content.py` | 單元測試：`python -m unittest tools/cut_content/test_cut_content.py` |
 | `story.py` | `story` 主題（票 25.14）：`story.md` 產生區塊（對白全文、部署表、素材表、永遠不會顯示的文字總表）的 `build` 與閘門 `check`；永遠不會顯示的文字的歸屬表 `OWNERS`——每一條都要歸到一個條目或排除項，章節區塊以 `tools/chapter_docs/judgements/` 的逐章判定為準，`check --final` 不接受待判定；素材產生器（整張地圖、`ICON0032.SAF` 逐格與總覽及內嵌音效、`M09.CEL`／`M090.CEL` 總覽）；`cdda` 從光碟映像切出 CD 音軌 |
 | `test_story.py` | 單元測試：`python -m unittest tools/cut_content/test_story.py` |
+| `story_verify.py` | 票 25.14 自己逐條下的歸屬（S14–S17、`OWNERS` 裡的 S13b／S15、第 30 章歸 S4 的四條、S5 區塊的開頭、`16:0x00` 的例外）的獨立驗證：`show` 印出單一項主張（判定 agent 看到它的唯一途徑）、`mechanical` 以字串比對直接判定「與顯示中的條目逐字相同」的項目、`pending`、`check`（判定檔的 gate）、`rescan`、`report`（收尾報告與判定彙整到 `devlog/runs/<date>-story-verify-*.json`）。判定檔在 `workspace/story_verify/verdicts/` |
+| `verify_story_ticket25_14.js` | 上一列的 workflow：一項一個 agent、每輪 gate、失敗重試一次、回掃、收尾報告。`Workflow({ scriptPath: "tools/cut_content/verify_story_ticket25_14.js", args: { date: "YYYY-MM-DD" } })` |
+| `test_story_verify.py` | 單元測試：`python -m unittest tools/cut_content/test_story_verify.py` |
 | `units_media.py` | `units` 主題（票 25.11）的素材產生器：頭像（`FACE.CEL`）、12 格棋子圖示排成一張（`ICON.CEL`）、戰鬥動畫 `STAND`／`ACT` 的逐格 PNG 與總覽圖、動畫內嵌音效的 WAV。頭像與圖示用 `FDE.PAL`，戰鬥動畫用 `FIGHT.PAL`；動畫每格照 `saf_decode.compose_frame` 合成在 320×200 的戰鬥畫面上，再裁到整段動畫共同的最小框 |
 | `test_units_media.py` | 單元測試：`python -m unittest tools/cut_content/test_units_media.py`（有原版遊戲檔時另跑一次完整產生，檢查檔名與兩次產生逐 byte 相同） |
 | `battle_assets_media.py` | `battle_assets` 主題（票 25.13）的素材產生器：戰鬥背景一張 320×200 PNG；永遠不載入的動畫每格一張 PNG、一張總覽圖與它帶的全部音效 WAV；會播的動畫只輸出不響的那幾段音效；容器裡的 WAV 原樣複製。一律用 `FIGHT.PAL`，每格照 `saf_decode.compose_frame` 合成在整個 320×200 畫面上、不裁切；總覽圖直接用 `saf_decode.write_filmstrip`（排版與寫檔一步完成，輸出同樣是決定性的）。哪個項目產出哪些檔只由 `plan()` 決定 |
