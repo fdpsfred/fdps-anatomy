@@ -12,5 +12,5 @@
 | [`saf.md`](saf.md) | `.SAF` 動畫容器的四層結構（frame／tilemap／tile／音效）與 525 個檔的內容統計 |
 | [`save.md`](save.md) | `FDE.SAV` 存檔：live-state 與 4 個 slot 的逐欄佈局與各欄的讀寫 function、空 slot 標記與不會被寫到的 byte、檢查碼與 XOR 加密的算法與誰驗、以實際存檔驗證的結果 |
 | [`terrain.md`](terrain.md) | 地圖圖層 `Mnn.DTL`（事件碼層）、`Mnnn.MPL`（圖磚編號）、`ATTRnnn.DAT`（圖磚屬性）、`DSCnn.DAT`（圖層描述）的佈局與程式的讀法：一格怎麼判讀（事件碼層用自己的寬）、屬性旗標與地形類別、圖層的繪製規則、哪些地圖缺檔而載入不了 |
-| [`text.md`](text.md) | `FIELD.VFS` 的 `FDETXTnn.TXT` 文字區塊與 token、`FDETXT00.TXT` 的佈局、`FDETXT.FON` 字模表 |
+| [`text.md`](text.md) | `FIELD.VFS` 的 `FDETXTnn.TXT` 文字區塊與 token、`FDETXT00.TXT` 分成哪幾張名稱表（內容見 `assets/text/`）、`FDETXT.FON` 字模表 |
 | [`vfs.md`](vfs.md) | `.VFS` 容器的欄位佈局、程式端實際讀取的範圍，與 10 個容器的全部成員清單 |

@@ -6,15 +6,16 @@
 | --- | --- | --- |
 | `fdps_build/build_min.py` | 把 DOSBox-X 跑起來的機制：前置檢查、conf 產生、三訊號結束偵測、故障掃描 | 所有在 DOSBox-X 裡建置或執行的工作 |
 | `ail_link/link_ail.py` | AIL 的七條 alias 與 SB16 參數 | `code_emit`、`game_build` |
-| `code_emit/build_emit.py` | `src/` 的原始碼掃描與反編譯器預設名稱檢查 | `game_build`、`build_gate` |
+| `code_emit/build_emit.py` | `src/` 的原始碼掃描與反編譯器預設名稱檢查 | `game_build`、`build_gate`、`global_text`（`strip_c`） |
 | `data_emit/check_data.py` | LE 映像解析、wlink map 解析、Ghidra 快照的名稱表 | `game_build`、`game_mechanics` |
 | 各工作的建置函式 | 各建置目標怎麼建 | `build_gate` |
 | `vfs_dump/vfs_dump.py` | `.VFS` 容器解析（`parse_container`） | `cutscene_script` |
 | `cutscene_script/cutscene_script.py` | 過場腳本的解碼，以及每一步當下的地圖、文字區塊、單位身分 | 需要過場內容的工作（票 25.6、25.8、25.14 等） |
 | `map_decode/map_decode.py` | 地圖的全部檔：`MAPnn.DAT`／`.COD`（`parse_map_dat`、`parse_map_cod`）、圖層（`parse_dtl`、`parse_mpl`、`parse_attr`、`parse_dsc`）、整張地圖的載入與一格的判讀（`load_map`、`tile_info`、`classify_cell`、`searchable_cells`）、全圖算圖（`render_map`） | 需要地圖、部署記錄或寶物的工作（票 25.2 的 `cutscene_script` 待改、25.8、25.14 等） |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
+| `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`） | 需要「哪段文字會顯示」的工作（票 25.14、25.16 等） |
 
-儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表寫到 `assets/text/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`。
+儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表、全域文字頁與額外場景文字頁寫到 `assets/text/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`。
 
 | 子資料夾 | 用途 |
 | --- | --- |
@@ -35,6 +36,7 @@
 | [`game_build/`](game_build/_index.md) | 遊戲本體的建置（只編 `src/`，連結成 `FDE.EXE`）、原版與重建版並排遊玩的啟動器、當機位址到 function 的定位（票 24） |
 | [`game_mechanics/`](game_mechanics/_index.md) | `program_info/` 遊戲機制頁的全自動 workflow：一頁一個 agent 起草、回掃、原版 bug 目錄、閘門通過才逐 byte 落地、踩雷點候選逐條判定後由腳本寫入共用頁（票 25.5 專屬的 workflow） |
 | [`ghidra_baseline/`](ghidra_baseline/_index.md) | 複查 Ghidra 基準狀態：區塊屬性、孤立程式碼、未反組譯區域、error bookmark |
+| [`global_text/`](global_text/_index.md) | 產生 `assets/text/` 的全域文字頁與額外場景文字頁：原文取自 `text_decode`、`FDETXT00` 的讀取端掃描 `src/`、場景條目由誰顯示取自 `cutscene_script` 的追蹤，閘門核對手寫分區與掃描結果（票 25.6） |
 | [`global_data/`](global_data/_index.md) | 全域資料符號的語意命名與型別判定，以及主要 struct 的佈局定義與套用（票 17 專屬的 workflow） |
 | [`ghidra_config/`](ghidra_config/_index.md) | Ghidra MCP 專案設定的正本：把命名檢查調成本專案的慣例 |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | 把 Ghidra 的分析狀態匯出成文字快照 |

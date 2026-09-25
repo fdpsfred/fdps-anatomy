@@ -23,13 +23,7 @@
 
 ### `FDETXT00.TXT` 的佈局
 
-| 筆 | 內容 |
-| --- | --- |
-| `0x01`..`0x0f` | 我方角色名 |
-| `0x3c`..`0x81` | 敵方與 NPC 單位名 |
-| `0x97`..`0x9d` | 七個種族名：人類、妖鬼、魔族、機械、獸人、龍族、其他，對應種族代碼 0..6 |
-| `0x9e`..`0xa0` | 空字串 |
-| `0xa1` 起 | 職業名，`0xa1` + 職業代碼 |
+`FDETXT00.TXT` 的 555 條分成單位、種族、職業、物品、法術五張名稱表與一段系統訊息，各表以「編號 + 表的起點」取條目。各分區的範圍、公式、全文與讀取端由 [`assets/text/global_text.md`](../assets/text/global_text.md) 擁有；地圖 30 以上的額外場景區塊 `FDETXT31`–`FDETXT65` 的內容見 [`assets/text/scene_text.md`](../assets/text/scene_text.md)。
 
 出貨的 `FRIAPRDA.DAT` 與 `ENEMYDAT.DAT` 種族代碼只有 0..6，職業代碼最大 `0x26`。
 

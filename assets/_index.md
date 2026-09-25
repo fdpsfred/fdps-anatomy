@@ -8,7 +8,7 @@
 
 [`tables/`](tables/_index.md) 放 record 的 struct 定義，數值本身不重複寫在那裡，一律引用本層的正典檔。
 
-[`text/`](text/_index.md) 放遊戲文字：字模索引到字的對照表，以及由它解出的文字內容。
+[`text/`](text/_index.md) 放遊戲文字：字模索引到字的對照表，以及由它解出的全域文字（名稱表與系統訊息）與額外場景的文字。
 
 本層的表另有一個查詢入口：`fdps-data` skill 可依名稱、代碼與數值範圍反查這些數值，資料集由 [`tools/data_skill/`](../tools/data_skill/_index.md) 從 `MISC.VFS` 現解並逐列對照本層的表產生。
 

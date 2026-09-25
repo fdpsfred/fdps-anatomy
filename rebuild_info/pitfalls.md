@@ -45,6 +45,7 @@
 | `.CEL` 的偏移表位置寫死 `+0x0F`，header 的 `0x05` 欄位從不讀 | 改成讀 `0x05` 當表位置。兩者目前恰好都是 15，改了在畸形檔上行為就不同 | [`resource_info/cel.md`](../resource_info/cel.md) |
 | `.CEL` 的像素格式欄位 `0x0D` 從不讀，全程只有一條解碼路徑 | 依 `0x0D` 分派兩種解碼器。原版會把 `M310.CEL` 當 4-op RLE 讀，這個矛盾未收斂，見 [`open_issues.md`](../open_issues.md) | [`resource_info/cel.md`](../resource_info/cel.md) |
 | 九張 `.DAT` 資料表的取值一律是 `base + index * stride`，沒有任何上界檢查 | 加上 `index < count`。物品編號 `FF` 就落在 `ITEM.DAT` 之外，遊戲裡確實拿得到這個編號，效果隨當時的堆積內容而變 | [`assets/items.md`](../assets/items.md) |
+| `FDETXT00.TXT` 的五張名稱表（單位、種族、職業、物品、法術）是同一個區塊裡首尾相接的條目，讀取端一律以「編號 + 該表起點」取條目、不檢查上界：物品編號 `0xFF` 的名稱落在法術表、讀出「裂地術」（攻略站因此把這件 BUG 物品叫裂地術），部署記錄的肖像編號 `0x97`–`0x9C` 的單位名落在種族表 | 把名稱拆成各自的陣列、或補上 `id < count`。越界編號原本顯示的名稱會變成空白、別的字或當掉 | [`assets/text/global_text.md`](../assets/text/global_text.md) |
 | `FDE.SAV` 的檢查碼只有兩處比對：標題畫面拿它決定選單項目，`fdps_load_savegame` 不符時只閃一下警告（文字 `0x208`，不等按鍵）就**照樣載入**。slot 的讀檔畫面、版面組裝、兩條寫入路徑讀舊檔時都不驗；也沒有任何路徑檢查 `fread` 的長度 | 在每個讀檔點補上檢查碼比對、不符就拒絕，或在讀檔前檢查檔案長度。原版接受的檔（手改過的、短的）會被擋下；而寫入路徑本來就會把不符的檔重新封成相符的，補檢查也改變了「存一次就修好」的行為 | [`resource_info/save.md`](../resource_info/save.md) |
 | 建立我方單位時，`FRIAPRDA.DAT` 前兩個物品槽無條件標成「裝備中」，不看值是不是 `FF` | 依值判斷空槽再決定狀態 | [`assets/tables/characters.md`](../assets/tables/characters.md) |
 | 數值條的 clamp 是**單邊**的：下界壓到 0，上界不壓，而呼叫端算出的 `(cur * width + max - 1) / max` 在 `cur > max` 時會超出 | 補上對稱的 `min(width, fill)`。原版的滿溢數值條有的整條不畫、有的畫成超長的糊塊，補了 clamp 就變成乾淨的滿格 | plate comment 的 `Rebuild note` |
