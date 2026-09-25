@@ -34,6 +34,14 @@ ANSWERS = HERE / "developer_answers.json"
 OUT_JSON = REPO_ROOT / "assets" / "text" / "glyph_table.json"
 OUT_MD = REPO_ROOT / "assets" / "text" / "glyph_table.md"
 ANSWER_FILE = re.compile(r"^g[0-9A-Fa-f]{4}\.json$")
+# Glyphs whose one 16x16 cell draws the same symbol twice side by side (the
+# developer confirmed both from the bitmaps).  They map to two characters; no
+# other glyph may.
+DOUBLE_SYMBOL_GLYPHS = {
+    "0x00C4": "two question marks",
+    "0x0196": "two exclamation marks",
+}
+DOUBLE_SYMBOL_NAMES = {"0x00C4": "兩個問號", "0x0196": "兩個驚嘆號"}
 
 
 class TableError(Exception):
@@ -49,9 +57,23 @@ def read_answer_doc(path):
 
 
 def check_answer(key, char):
-    """One glyph is one character; anything else is a typo or a note, not an answer."""
-    if len(char) != 1:
+    """One glyph is one character -- except the glyphs listed in DOUBLE_SYMBOL_GLYPHS,
+    which are exactly two copies of one character.  Anything else is a typo or a
+    note, not an answer."""
+    if key in DOUBLE_SYMBOL_GLYPHS:
+        if len(char) != 2 or char[0] != char[1]:
+            raise TableError(f"answer {key} is {char!r}: this glyph draws "
+                             f"{DOUBLE_SYMBOL_GLYPHS[key]}, expected one character twice")
+    elif len(char) != 1:
         raise TableError(f"answer {key} is {char!r}: expected exactly one character")
+
+
+def page_answer_to_text(key, char):
+    """The review page takes one character per glyph; a double-symbol glyph's
+    single character stands for the pair."""
+    if key in DOUBLE_SYMBOL_GLYPHS and len(char) == 1:
+        return char * 2
+    return char
 
 
 def cmd_import(dump_dir, match_path):
@@ -68,8 +90,9 @@ def cmd_import(dump_dir, match_path):
         key = f"0x{index:04X}"
         if path.stem.upper() != f"G{index:04X}":
             raise TableError(f"{path}: file name does not match its index {key}")
-        check_answer(key, char)
-        answers[key] = char
+        text = page_answer_to_text(key, char)
+        check_answer(key, text)
+        answers[key] = text
     ANSWERS.write_text(json.dumps(dict(sorted(answers.items())), ensure_ascii=False, indent=1) + "\n",
                        encoding="utf-8")
     match = json.loads(Path(match_path).read_text(encoding="utf-8"))
@@ -88,6 +111,10 @@ def build_rows(match, answers):
     for key in answers:
         if int(key, 16) not in known:
             raise TableError(f"answer {key} names a glyph outside the font")
+    exact = {f"0x{g['index']:04X}" for g in match["glyphs"] if g["exact"]}
+    for key in DOUBLE_SYMBOL_GLYPHS:
+        if key in exact:
+            raise TableError(f"{key} is listed as a double-symbol glyph but matches ET3 exactly")
     for g in match["glyphs"]:
         key = f"0x{g['index']:04X}"
         if g["exact"]:
@@ -97,13 +124,29 @@ def build_rows(match, answers):
             rows.append({"index": g["index"], "char": g["exact"], "basis": "et3_exact", "big5": big5})
         elif key in answers:
             check_answer(key, answers[key])
-            rows.append({"index": g["index"], "char": answers[key], "basis": "developer"})
+            row = {"index": g["index"], "char": answers[key], "basis": "developer"}
+            if key in DOUBLE_SYMBOL_GLYPHS:
+                row["note"] = f"one glyph draws {DOUBLE_SYMBOL_GLYPHS[key]}"
+            rows.append(row)
         else:
             rows.append({"index": g["index"], "char": None, "basis": "pending"})
     return rows
 
 
-def markdown(rows, summary):
+def shared_characters(rows):
+    """{character: [indices]} for every character more than one glyph maps to."""
+    same_char = defaultdict(list)
+    for r in rows:
+        if r["char"]:
+            same_char[r["char"]].append(r["index"])
+    return {c: ix for c, ix in same_char.items() if len(ix) > 1}
+
+
+def display(char):
+    return "（全形空白）" if char == "　" else char.replace("|", "\\|")
+
+
+def markdown(rows, summary, shared, bitmaps):
     lines = [
         "# 字模對照表：`FDETXT.FON` 索引 ↔ 字",
         "",
@@ -121,20 +164,32 @@ def markdown(rows, summary):
     ]
     if summary["pending"]:
         lines.append(f"| 待填 | 尚未判讀 | {summary['pending']} |")
+    doubles = "、".join(f"`{k}`（{DOUBLE_SYMBOL_NAMES[k]}）" for k in DOUBLE_SYMBOL_GLYPHS)
     lines += [
         "",
-        f"共 {summary['glyph_count']} 個字模。",
+        f"共 {summary['glyph_count']} 個字模。一個字模原則上對一個字；例外是 {doubles}："
+        "這兩格在一個 16×16 字模裡並排畫了兩個相同的符號，對照表因此各對到兩個字元，"
+        "`glyph_table.json` 裡這兩列帶 `note` 欄位。其他任何索引都只對一個字元。",
+    ]
+    if shared:
+        lines += ["", "反過來，同一個字不一定只有一個索引，所以字到字模索引不是一對一：", ""]
+        for char, indices in shared.items():
+            same = len({bitmaps[i] for i in indices}) == 1
+            kind = "兩格字模內容相同" if same else "字形不同的字模"
+            lines.append(f"- {display(char)}：" + "、".join(f"`0x{i:04X}`" for i in indices) + f"（{kind}）")
+    lines += [
         "",
         "## 對照表",
         "",
-        "| 索引 | 字 | 依據 | Big5 |",
-        "| --- | --- | --- | --- |",
+        "| 索引 | 字 | 依據 | Big5 | 備註 |",
+        "| --- | --- | --- | --- | --- |",
     ]
     names = {"et3_exact": "倚天", "developer": "開發者", "pending": "待填"}
     for r in rows:
         char = r["char"] if r["char"] is not None else ""
-        shown = "（全形空白）" if char == "　" else char.replace("|", "\\|")
-        lines.append(f"| `0x{r['index']:04X}` | {shown} | {names[r['basis']]} | {r.get('big5', '')} |")
+        key = f"0x{r['index']:04X}"
+        note = "一個字模畫兩個符號" if key in DOUBLE_SYMBOL_GLYPHS else ""
+        lines.append(f"| `{key}` | {display(char)} | {names[r['basis']]} | {r.get('big5', '')} | {note} |")
     return "\n".join(lines) + "\n"
 
 
@@ -145,15 +200,12 @@ def cmd_build(match_path):
     summary = {"glyph_count": len(rows)}
     for basis in ("et3_exact", "developer", "pending"):
         summary[basis] = sum(1 for r in rows if r["basis"] == basis)
-    same_char = defaultdict(list)
-    for r in rows:
-        if r["char"]:
-            same_char[r["char"]].append(r["index"])
-    shared = {c: ix for c, ix in same_char.items() if len(ix) > 1}
+    shared = shared_characters(rows)
+    bitmaps = {g["index"]: g["bitmap"] for g in match["glyphs"]}
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
     OUT_JSON.write_text(json.dumps({"font": "FDETXT.FON", "glyph_count": len(rows), "summary": summary,
                                     "glyphs": rows}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    OUT_MD.write_text(markdown(rows, summary), encoding="utf-8")
+    OUT_MD.write_text(markdown(rows, summary, shared, bitmaps), encoding="utf-8")
     print(json.dumps(summary))
     if shared:
         print("glyphs sharing one character: " + ", ".join(

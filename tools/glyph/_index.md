@@ -23,6 +23,7 @@ python tools/glyph/glyph_table.py build                                      # -
 | `developer_answers.json` | 開發者在校對網頁上填的字。人工輸入、不可重生，所以與腳本一起進版控 |
 | `ET3_fonts/` | 倚天 `STDFONT.15`（13,094 個 16×15 字模）與 `ASCFONT.15`（256 個 8×15 字模） |
 | `test_glyph_match.py` | 倚天索引佈局的錨點與「完全吻合」判定的測試：`python -m unittest tools/glyph/test_glyph_match.py` |
+| `test_glyph_table.py` | 答案規則（一格一字、兩格一字重複兩次的例外）的測試：`python -m unittest tools/glyph/test_glyph_table.py` |
 
 ## 「完全吻合」的定義
 
@@ -33,3 +34,7 @@ python tools/glyph/glyph_table.py build                                      # -
 校對網頁宣告了資料庫能力，每填一格就寫一份 `answers/g<四位十六進位索引>` 文件，內容 `{index, char}`。網頁只接受一個字；打字途中（輸入法還在組字）不寫入；寫入失敗或離線時的答案留在瀏覽器裡，連上後自動補寫。
 
 讀回用 ArtifactData 的 `list`：`collection: "answers"`、`query: {limit: 1000}`（一頁就涵蓋全部）、`out_dir: workspace/glyph/answers_dump`，它把每份文件寫成 `<out_dir>/answers/g<索引>.json`。再跑 `glyph_table.py import workspace/glyph/answers_dump`：答案不是恰好一個字就中止，還有沒答的字就列出來並以非零結束。整段不經過任何手動轉貼。
+
+## 一格兩個符號的例外
+
+`0x00C4` 與 `0x0196` 在一個字模裡並排畫了兩個相同的符號（兩個問號、兩個驚嘆號），對照表裡各對到兩個字元。例外清單寫死在 `glyph_table.py` 的 `DOUBLE_SYMBOL_GLYPHS`，只放行這兩個索引、而且必須是同一個字元重複兩次；網頁上這兩格仍只填一個字元，`import` 讀回時自動重複成兩個。其他索引一律恰好一個字元。

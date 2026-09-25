@@ -4,189 +4,189 @@
  "summary": {
   "glyph_count": 1792,
   "et3_exact": 1723,
-  "developer": 0,
-  "pending": 69
+  "developer": 69,
+  "pending": 0
  },
  "glyphs": [
   {
    "index": 0,
-   "char": null,
-   "basis": "pending"
+   "char": "0",
+   "basis": "developer"
   },
   {
    "index": 1,
-   "char": null,
-   "basis": "pending"
+   "char": "1",
+   "basis": "developer"
   },
   {
    "index": 2,
-   "char": null,
-   "basis": "pending"
+   "char": "2",
+   "basis": "developer"
   },
   {
    "index": 3,
-   "char": null,
-   "basis": "pending"
+   "char": "3",
+   "basis": "developer"
   },
   {
    "index": 4,
-   "char": null,
-   "basis": "pending"
+   "char": "4",
+   "basis": "developer"
   },
   {
    "index": 5,
-   "char": null,
-   "basis": "pending"
+   "char": "5",
+   "basis": "developer"
   },
   {
    "index": 6,
-   "char": null,
-   "basis": "pending"
+   "char": "6",
+   "basis": "developer"
   },
   {
    "index": 7,
-   "char": null,
-   "basis": "pending"
+   "char": "7",
+   "basis": "developer"
   },
   {
    "index": 8,
-   "char": null,
-   "basis": "pending"
+   "char": "8",
+   "basis": "developer"
   },
   {
    "index": 9,
-   "char": null,
-   "basis": "pending"
+   "char": "9",
+   "basis": "developer"
   },
   {
    "index": 10,
-   "char": null,
-   "basis": "pending"
+   "char": "A",
+   "basis": "developer"
   },
   {
    "index": 11,
-   "char": null,
-   "basis": "pending"
+   "char": "B",
+   "basis": "developer"
   },
   {
    "index": 12,
-   "char": null,
-   "basis": "pending"
+   "char": "C",
+   "basis": "developer"
   },
   {
    "index": 13,
-   "char": null,
-   "basis": "pending"
+   "char": "D",
+   "basis": "developer"
   },
   {
    "index": 14,
-   "char": null,
-   "basis": "pending"
+   "char": "E",
+   "basis": "developer"
   },
   {
    "index": 15,
-   "char": null,
-   "basis": "pending"
+   "char": "F",
+   "basis": "developer"
   },
   {
    "index": 16,
-   "char": null,
-   "basis": "pending"
+   "char": "G",
+   "basis": "developer"
   },
   {
    "index": 17,
-   "char": null,
-   "basis": "pending"
+   "char": "H",
+   "basis": "developer"
   },
   {
    "index": 18,
-   "char": null,
-   "basis": "pending"
+   "char": "I",
+   "basis": "developer"
   },
   {
    "index": 19,
-   "char": null,
-   "basis": "pending"
+   "char": "J",
+   "basis": "developer"
   },
   {
    "index": 20,
-   "char": null,
-   "basis": "pending"
+   "char": "K",
+   "basis": "developer"
   },
   {
    "index": 21,
-   "char": null,
-   "basis": "pending"
+   "char": "L",
+   "basis": "developer"
   },
   {
    "index": 22,
-   "char": null,
-   "basis": "pending"
+   "char": "M",
+   "basis": "developer"
   },
   {
    "index": 23,
-   "char": null,
-   "basis": "pending"
+   "char": "N",
+   "basis": "developer"
   },
   {
    "index": 24,
-   "char": null,
-   "basis": "pending"
+   "char": "O",
+   "basis": "developer"
   },
   {
    "index": 25,
-   "char": null,
-   "basis": "pending"
+   "char": "P",
+   "basis": "developer"
   },
   {
    "index": 26,
-   "char": null,
-   "basis": "pending"
+   "char": "Q",
+   "basis": "developer"
   },
   {
    "index": 27,
-   "char": null,
-   "basis": "pending"
+   "char": "R",
+   "basis": "developer"
   },
   {
    "index": 28,
-   "char": null,
-   "basis": "pending"
+   "char": "S",
+   "basis": "developer"
   },
   {
    "index": 29,
-   "char": null,
-   "basis": "pending"
+   "char": "T",
+   "basis": "developer"
   },
   {
    "index": 30,
-   "char": null,
-   "basis": "pending"
+   "char": "U",
+   "basis": "developer"
   },
   {
    "index": 31,
-   "char": null,
-   "basis": "pending"
+   "char": "V",
+   "basis": "developer"
   },
   {
    "index": 32,
-   "char": null,
-   "basis": "pending"
+   "char": "W",
+   "basis": "developer"
   },
   {
    "index": 33,
-   "char": null,
-   "basis": "pending"
+   "char": "X",
+   "basis": "developer"
   },
   {
    "index": 34,
-   "char": null,
-   "basis": "pending"
+   "char": "Y",
+   "basis": "developer"
   },
   {
    "index": 35,
-   "char": null,
-   "basis": "pending"
+   "char": "Z",
+   "basis": "developer"
   },
   {
    "index": 36,
@@ -364,8 +364,8 @@
   },
   {
    "index": 65,
-   "char": null,
-   "basis": "pending"
+   "char": "？",
+   "basis": "developer"
   },
   {
    "index": 66,
@@ -1149,8 +1149,9 @@
   },
   {
    "index": 196,
-   "char": null,
-   "basis": "pending"
+   "char": "？？",
+   "basis": "developer",
+   "note": "one glyph draws two question marks"
   },
   {
    "index": 197,
@@ -2408,8 +2409,9 @@
   },
   {
    "index": 406,
-   "char": null,
-   "basis": "pending"
+   "char": "！！",
+   "basis": "developer",
+   "note": "one glyph draws two exclamation marks"
   },
   {
    "index": 407,
@@ -2431,8 +2433,8 @@
   },
   {
    "index": 410,
-   "char": null,
-   "basis": "pending"
+   "char": "，",
+   "basis": "developer"
   },
   {
    "index": 411,
@@ -2520,8 +2522,8 @@
   },
   {
    "index": 425,
-   "char": null,
-   "basis": "pending"
+   "char": "！",
+   "basis": "developer"
   },
   {
    "index": 426,
@@ -2849,8 +2851,8 @@
   },
   {
    "index": 480,
-   "char": null,
-   "basis": "pending"
+   "char": "。",
+   "basis": "developer"
   },
   {
    "index": 481,
@@ -3010,13 +3012,13 @@
   },
   {
    "index": 507,
-   "char": null,
-   "basis": "pending"
+   "char": "（",
+   "basis": "developer"
   },
   {
    "index": 508,
-   "char": null,
-   "basis": "pending"
+   "char": "）",
+   "basis": "developer"
   },
   {
    "index": 509,
@@ -3056,33 +3058,33 @@
   },
   {
    "index": 515,
-   "char": null,
-   "basis": "pending"
+   "char": "·",
+   "basis": "developer"
   },
   {
    "index": 516,
-   "char": null,
-   "basis": "pending"
+   "char": "＃",
+   "basis": "developer"
   },
   {
    "index": 517,
-   "char": null,
-   "basis": "pending"
+   "char": "％",
+   "basis": "developer"
   },
   {
    "index": 518,
-   "char": null,
-   "basis": "pending"
+   "char": "＊",
+   "basis": "developer"
   },
   {
    "index": 519,
-   "char": null,
-   "basis": "pending"
+   "char": "＆",
+   "basis": "developer"
   },
   {
    "index": 520,
-   "char": null,
-   "basis": "pending"
+   "char": "＠",
+   "basis": "developer"
   },
   {
    "index": 521,
@@ -3098,13 +3100,13 @@
   },
   {
    "index": 523,
-   "char": null,
-   "basis": "pending"
+   "char": "　",
+   "basis": "developer"
   },
   {
    "index": 524,
-   "char": null,
-   "basis": "pending"
+   "char": "＋",
+   "basis": "developer"
   },
   {
    "index": 525,
@@ -3198,18 +3200,18 @@
   },
   {
    "index": 540,
-   "char": null,
-   "basis": "pending"
+   "char": "i",
+   "basis": "developer"
   },
   {
    "index": 541,
-   "char": null,
-   "basis": "pending"
+   "char": "s",
+   "basis": "developer"
   },
   {
    "index": 542,
-   "char": null,
-   "basis": "pending"
+   "char": "k",
+   "basis": "developer"
   },
   {
    "index": 543,
@@ -3279,8 +3281,8 @@
   },
   {
    "index": 554,
-   "char": null,
-   "basis": "pending"
+   "char": "～",
+   "basis": "developer"
   },
   {
    "index": 555,
@@ -3626,8 +3628,8 @@
   },
   {
    "index": 612,
-   "char": null,
-   "basis": "pending"
+   "char": "﹒",
+   "basis": "developer"
   },
   {
    "index": 613,
@@ -3973,8 +3975,8 @@
   },
   {
    "index": 670,
-   "char": null,
-   "basis": "pending"
+   "char": "；",
+   "basis": "developer"
   },
   {
    "index": 671,
@@ -4098,13 +4100,13 @@
   },
   {
    "index": 691,
-   "char": null,
-   "basis": "pending"
+   "char": "＜",
+   "basis": "developer"
   },
   {
    "index": 692,
-   "char": null,
-   "basis": "pending"
+   "char": "＞",
+   "basis": "developer"
   },
   {
    "index": 693,
@@ -5374,8 +5376,8 @@
   },
   {
    "index": 904,
-   "char": null,
-   "basis": "pending"
+   "char": "﹑",
+   "basis": "developer"
   },
   {
    "index": 905,
@@ -6147,13 +6149,13 @@
   },
   {
    "index": 1033,
-   "char": null,
-   "basis": "pending"
+   "char": "「",
+   "basis": "developer"
   },
   {
    "index": 1034,
-   "char": null,
-   "basis": "pending"
+   "char": "」",
+   "basis": "developer"
   },
   {
    "index": 1035,
@@ -6487,8 +6489,8 @@
   },
   {
    "index": 1090,
-   "char": null,
-   "basis": "pending"
+   "char": "﹕",
+   "basis": "developer"
   },
   {
    "index": 1091,
@@ -7104,8 +7106,8 @@
   },
   {
    "index": 1193,
-   "char": null,
-   "basis": "pending"
+   "char": "　",
+   "basis": "developer"
   },
   {
    "index": 1194,
@@ -7451,8 +7453,8 @@
   },
   {
    "index": 1251,
-   "char": null,
-   "basis": "pending"
+   "char": "—",
+   "basis": "developer"
   },
   {
    "index": 1252,
@@ -7882,8 +7884,8 @@
   },
   {
    "index": 1323,
-   "char": null,
-   "basis": "pending"
+   "char": "丫",
+   "basis": "developer"
   },
   {
    "index": 1324,
@@ -8649,13 +8651,13 @@
   },
   {
    "index": 1451,
-   "char": null,
-   "basis": "pending"
+   "char": "＄",
+   "basis": "developer"
   },
   {
    "index": 1452,
-   "char": null,
-   "basis": "pending"
+   "char": "︿",
+   "basis": "developer"
   },
   {
    "index": 1453,
