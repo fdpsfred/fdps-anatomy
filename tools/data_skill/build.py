@@ -1,16 +1,29 @@
 """Build the queryable game-data set that ships with the `fdps-data` skill.
 
-Numbers come from the real bytes of `MISC.VFS`.  Names come from the knowledge base
-tables under `assets/` and `chapters/`, which own the hand-transcribed guide labels
-(the guide itself is never parsed -- see ADR-0006).
+Two files, both regenerated from the shipped game files:
 
-Every label row is checked against the record it claims to name, so a table that has
-drifted, or a parse that has slipped a row, fails loudly instead of shipping a data
-set with the wrong names on the wrong records.
+    fdps_data.json   the tables: item, spell, character, class (MISC.VFS records
+                     decoded here, names from the assets/ tables, every row checked
+                     against its record); enemy, race, shop, use_effect (from
+                     tools/data_tables' Game); chapter (from tools/chapter_docs'
+                     chapter_facts and the landed chapter judgements)
+    fdps_text.json   every entry of the 66 text blocks FDETXT00..65, with who shows
+                     it, or -- for text nothing shows -- which cut_content/ entry
+                     owns it (tools/cut_content/story.py)
+
+The knowledge base is never parsed for anything it did not write by hand: the
+tables tools/data_tables and tools/chapter_docs generate are checked by their own
+gates (data_tables.check, check_chapter's landed-page staleness), run here against
+the same data the records are built from, so a data set only ships when the
+knowledge base agrees with it.
 
 Usage:
-    python tools/data_skill/build.py <MISC.VFS> <output json>
+    python tools/data_skill/build.py [--game DIR] [--out DIR] [--no-chapter-page-gate]
+
+--game defaults to fdps_game_files/, --out to .claude/skills/fdps-data/.
 """
+import argparse
+import collections
 import hashlib
 import json
 import re
@@ -19,9 +32,14 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-
-VFS_HEADER = 35
-VFS_ENTRY = 26
+TOOLS = REPO / "tools"
+for _sub in ("data_tables", "chapter_docs", "cut_content", "global_text", "text_decode",
+             "map_decode", "cutscene_script"):
+    sys.path.insert(0, str(TOOLS / _sub))
+DEFAULT_GAME = REPO / "fdps_game_files"
+DEFAULT_OUT = REPO / ".claude" / "skills" / "fdps-data"
+DATA_FILE = "fdps_data.json"
+TEXT_FILE = "fdps_text.json"
 
 # Member holding each table, and the record stride FDPS.LE multiplies by.
 # Owner of these facts: resource_info/data_tables.md.
@@ -72,24 +90,9 @@ SPELL_TARGET = {0: "敵方", 1: "己方"}
 
 
 # ---------------------------------------------------------------------------
-# MISC.VFS
+# MISC.VFS members, read out of the unpacked tree (story.dump_tree, which uses
+# vfs_dump.parse_container, the owner of the container format)
 # ---------------------------------------------------------------------------
-def read_entries(data):
-    """Return [(name, offset, size)] from a VFS container held in memory."""
-    if data[:3] != b"VFS":
-        raise SystemExit("not a VFS container")
-    table = struct.unpack_from("<H", data, 5)[0]
-    count = struct.unpack_from("<I", data, 7)[0]
-    out = []
-    for i in range(count):
-        base = table + i * VFS_ENTRY
-        name = data[base:base + 13].split(b"\0")[0].decode("ascii")
-        size = struct.unpack_from("<I", data, base + 13)[0]
-        offset = struct.unpack_from("<I", data, base + 22)[0]
-        out.append((name, offset, size))
-    return out
-
-
 def u16(rec, at):
     return struct.unpack_from("<H", rec, at)[0]
 
@@ -153,18 +156,17 @@ DECODERS = {
 }
 
 
-def decode_tables(data):
-    """Decode all six tables straight from their members' first byte."""
-    by_name = {name: (offset, size) for name, offset, size in read_entries(data)}
+def decode_tables(misc_dir):
+    """Decode all six tables from their members, each a whole number of records."""
     out = {}
     for key, (member, stride) in TABLES.items():
-        if member not in by_name:
-            raise SystemExit("%s is not a member of this container" % member)
-        offset, size = by_name[member]
-        if size % stride:
-            raise SystemExit("%s is %d bytes, not a multiple of %d" % (member, size, stride))
-        rows = [DECODERS[key](data[offset + i * stride:offset + (i + 1) * stride])
-                for i in range(size // stride)]
+        path = Path(misc_dir) / member
+        if not path.is_file():
+            raise SystemExit("%s is not a member of MISC.VFS" % member)
+        data = path.read_bytes()
+        if len(data) % stride:
+            raise SystemExit("%s is %d bytes, not a multiple of %d" % (member, len(data), stride))
+        rows = [DECODERS[key](data[i:i + stride]) for i in range(0, len(data), stride)]
         out[key] = {"member": member, "stride": stride, "records": rows}
     return out
 
@@ -216,13 +218,6 @@ class Check:
         if expected != actual:
             self.failures.append("%s: the entry says %r, the record holds %r"
                                  % (what, expected, actual))
-
-    def done(self):
-        if self.failures:
-            for f in self.failures:
-                print("MISMATCH  " + f)
-            raise SystemExit("%d of %d label checks failed" % (len(self.failures), self.compared))
-        return self.compared
 
 
 def record_at(records, index, where):
@@ -380,20 +375,26 @@ def build_classes(records, check):
 APPEARANCE_HEADER = ("索引", "人物／職業", "種族", "職業", "等級", "HP 基礎", "MP 基礎",
                      "移動力", "法術", "物品", "AP 基礎", "DP 基礎", "DX 基礎")
 LEVELUP_HEADER = ("索引", "人物／職業", "AP", "DP", "DX", "HP", "MP", "習得索引")
-LEARN_HEADER = ("人物", "型態", "職業", "習得索引", "出場時已會", "升級習得")
 
 
 def mask_to_spells(mask):
     return [i for i in range(32) if mask >> i & 1]
 
 
-def build_characters(appearance, levelup, learn, spell_names, item_names, class_names, check):
+def build_characters(appearance, levelup, learn, spell_names, item_names, class_names, game,
+                     check):
+    """FRIAPRDA/FRILEVUP/GETMGTAB merged per index, plus RANKUP routes and deployments.
+
+    `game` is tools/data_tables' Game: which indices the program reads, the routes the
+    church offers, and the deployment census all come from it."""
+    import data_tables
     path = REPO / "assets/characters.md"
 
-    documented = set()
+    documented, appearance_labels = set(), {}
     for row in read_md_table(path, APPEARANCE_HEADER):
         index = int(row[0], 16)
         documented.add(index)
+        appearance_labels[index] = row[1]
         rec = record_at(appearance, index, "assets/characters.md 出場屬性")
         check.eq("character %02X race" % index, int(row[2], 16), rec["race"])
         check.eq("character %02X class" % index, int(row[3], 16), rec["class_code"])
@@ -408,6 +409,14 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
         check.eq("character %02X ap base" % index, int(row[10]), rec["ap_base"])
         check.eq("character %02X dp base" % index, int(row[11]), rec["dp_base"])
         check.eq("character %02X dx base" % index, int(row[12]), rec["dx_base"])
+    # The appearance table lists exactly the indices the program reads: a row
+    # nothing reads would ship look-alike values, a missing reader would ship none.
+    readers = game.base_record_readers()
+    check.compared += 1
+    if readers != sorted(documented):
+        check.failures.append("assets/characters.md 出場屬性 lists indices %s, the program "
+                              "reads %s" % (["%02X" % i for i in sorted(documented)],
+                                            ["%02X" % i for i in readers]))
 
     labels = {}
     for row in read_md_table(path, LEVELUP_HEADER):
@@ -420,25 +429,16 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
             check.eq("character %02X %s" % (index, lo), parse_range(cell), (rec[lo], rec[hi]))
         check.eq("character %02X learn index" % index, int(row[7], 16), rec["learn_index"])
 
-    # The per-character spell table: one row per form, its learn index in column 3
-    # ("—" for a form that learns nothing) and the schedule as "Lv16 `01` name".
-    for row in read_md_table(path, LEARN_HEADER):
-        if row[3] == "—":
-            continue
-        index = int(row[3], 16)
-        pairs = [(int(lv), int(sp, 16))
-                 for lv, sp in re.findall(r"Lv(\d+)\s+`?([0-9A-F]{2})`?", row[5])]
-        check.eq("learn %02X" % index, pairs,
-                 [(p["level"], p["spell"])
-                  for p in record_at(learn, index, "assets/characters.md 法術習得")
-                  if p["level"] != 0xFF])
+    # The per-character spell table (learn indices and schedules) is generated by
+    # tools/data_tables (spell_schedule); data_tables.check in kb_gates compares
+    # it with the same GETMGTAB.DAT these records are decoded from.
 
     out = []
     for index, growth in enumerate(levelup):
-        label = labels.get(index, "")
+        label = labels.get(index) or appearance_labels.get(index, "")
         character, _, class_label = label.partition("／")
-        if label.startswith("（"):
-            character, class_label = "", ""
+        if character.startswith("（"):
+            character = ""          # （空白）: the game gives this index no name
         learned = []
         if growth["learn_index"] != 0xFF:
             for p in record_at(learn, growth["learn_index"],
@@ -446,23 +446,34 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
                 if p["level"] != 0xFF:
                     learned.append({"level": p["level"], "spell": p["spell"],
                                     "spell_name": spell_names.get(p["spell"])})
+        promotions = []
+        if index < len(game.promotions):
+            for route, (form, clazz, move) in data_tables.offered_routes(index,
+                                                                          game.promotions[index]):
+                promotions.append({"route": route, "route_name": data_tables.ROUTES[route],
+                                   "form": form, "class_code": clazz,
+                                   "class_name": class_names.get(clazz), "move_bonus": move})
+        chapters, scenes = game.deployed_maps(index)
         row = {
             "code": index, "code_hex": "%02X" % index,
             "name": character or None, "class": class_label or None,
             "label": label or None,
-            # Only the twelve rows assets/characters.md tabulates carry appearance
-            # values.  The other FRIAPRDA.DAT rows are either non-party characters
-            # (索爾 and others) or byte copies nothing reads -- a promoted form's
-            # index lands on such a copy -- see that document.
+            # Appearance values only for the indices the program reads (the
+            # assets/characters.md table, checked against the readers above).  The
+            # other FRIAPRDA.DAT rows are byte copies nothing reads -- a promoted
+            # form's index lands on such a copy -- see that document.
             "appearance_documented": index in documented,
             "learn_index": growth["learn_index"],
             "learn": learned,
+            "promotions": promotions,
+            "deployed_chapters": chapters, "deployed_scene_maps": scenes,
         }
         app = appearance[index] if index in documented else None
         row.update({
             "class_code": app["class_code"] if app else None,
             "class_name": class_names.get(app["class_code"]) if app else None,
             "race": app["race"] if app else None,
+            "race_name": (game.race_name(app["race"]) or None) if app else None,
             "level": app["level"] if app else None,
             "move": app["move"] if app else None,
             "hp_base": app["hp_base"] if app else None,
@@ -476,7 +487,7 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
                               for i in app["item_slots"] if i != 0xFF] if app else [],
         })
         row.update({k: growth[k] for k in growth if k != "learn_index"})
-        row["blank"] = index not in labels
+        row["blank"] = index not in labels and index not in documented
         out.append(row)
     return out
 
@@ -500,30 +511,466 @@ def check_discrepancies(merged, check):
                    d["dump"], actual)
 
 
-CHAPTER_HEADER = ("章號", "章節索引", "標題", "文件")
+# ---------------------------------------------------------------------------
+# The tables tools/data_tables owns.  Its `check` compares the assets/ tables
+# with its generators cell by cell; build() runs it on the same Game these
+# records come from, so the records and the knowledge base cannot differ.
+# ---------------------------------------------------------------------------
+def coded_name(code_value, name):
+    return {"code": code_value, "name": name or None}
 
 
-def build_chapters(check):
-    rows = read_md_table(REPO / "chapters/_index.md", CHAPTER_HEADER)
+def build_enemies(game):
+    """ENEMYDAT.DAT, one record per row, keyed by portrait id like the map data."""
+    import data_tables
+    template = game.template_enemy_rows()
     out = []
-    for row in rows:
-        chapter, index = int(row[0]), int(row[1])
-        check.eq("chapter %d index" % chapter, chapter - 1, index)
-        out.append({"code": chapter, "code_hex": "%02X" % chapter, "chapter": chapter,
-                    "index": index, "name": row[2],
-                    "doc": None if row[3] == "（尚無）" else row[3]})
+    for row, e in enumerate(game.enemies):
+        pid = data_tables.ENEMY_BASE + row
+        chapters, scenes = game.deployed_maps(pid)
+        out.append({
+            "code": pid, "code_hex": "%02X" % pid, "row": row,
+            "name": game.unit_label(pid),
+            "race": e["race"], "race_name": game.race_name(e["race"]) or None,
+            "class_code": e["class"], "class_name": game.class_name(e["class"]) or None,
+            "hp": e["hp"], "mp": e["mp"], "ap": e["ap"], "dp": e["dp"], "dx": e["dx"],
+            "mv": e["mv"], "exp": e["exp"],
+            "deployed_chapters": chapters, "deployed_scene_maps": scenes,
+            "deployed": bool(chapters or scenes),
+            "template": row in template,
+        })
+    return out
+
+
+def build_races(game):
+    """The race names, and which deployed units are of each race."""
+    import data_tables
+    out = []
+    for race in range(data_tables.NAME_BASES["class"] - data_tables.NAME_BASES["race"]):
+        name = game.race_name(race)
+        if not name:
+            continue
+        ours = [c for c in game.base_record_readers() if game.appearance[c]["race"] == race]
+        theirs = [data_tables.ENEMY_BASE + i for i, e in enumerate(game.enemies)
+                  if e["race"] == race and game.deployments(data_tables.ENEMY_BASE + i)]
+        out.append({"code": race, "code_hex": "%02X" % race, "name": name,
+                    "text_entry": data_tables.NAME_BASES["race"] + race,
+                    "party_and_guest_units": [coded_name(c, game.unit_label(c)) for c in ours],
+                    "enemy_and_npc_units": [coded_name(c, game.unit_label(c)) for c in theirs]})
+    return out
+
+
+SHOP_ROWS = ("item_shop", "weapon_shop", "secret_shop")   # 道具店、武器店、秘密商店
+
+
+def build_shops(game):
+    """The villages' SHOPnn.DAT, keyed by the chapter index the file is named for."""
+    out = []
+    for chapter in game.village_chapters():
+        rec = {"code": chapter, "code_hex": "%02X" % chapter, "name": "SHOP%02d.DAT" % chapter,
+               "after_chapter": chapter, "before_chapter": chapter + 1}
+        for key, stock in zip(SHOP_ROWS, game.shops[chapter]):
+            rec[key] = [coded_name(i, game.item_name(i)) for i in stock]
+        out.append(rec)
+    return out
+
+
+def build_use_effects(game):
+    """ITEM.DAT's use-effect codes, as src/item.c handles them (data_tables.USE_EFFECTS)."""
+    import data_tables
+    carried = collections.defaultdict(list)
+    for item, rec in enumerate(game.items):
+        if rec["use_effect"]:
+            carried[rec["use_effect"]].append(item)
+    out = []
+    for effect in sorted(set(data_tables.USE_EFFECTS) | set(data_tables.PICKER_ONLY_EFFECTS)):
+        if effect in data_tables.USE_EFFECTS:
+            what, consumed = data_tables.USE_EFFECTS[effect]
+        else:
+            what, consumed = data_tables.PICKER_ONLY_EFFECTS[effect], None
+        out.append({"code": effect, "code_hex": "%02X" % effect, "description": what,
+                    "consumed": consumed,
+                    "items": [coded_name(i, game.item_name(i)) for i in carried.get(effect, [])]})
     return out
 
 
 # ---------------------------------------------------------------------------
-def main():
-    if len(sys.argv) != 3:
-        raise SystemExit(__doc__)
-    misc = Path(sys.argv[1])
-    out_path = Path(sys.argv[2])
+# Chapters, out of tools/chapter_docs/chapter_facts and the landed judgements.
+# The chapter pages hold the same facts rendered; chapter_page_problems() is the
+# gate that they are current with the data these records come from.
+# ---------------------------------------------------------------------------
+def _function(cf, name):
+    if name is None:
+        return None
+    addr = cf.snapshot_addresses().get(name)
+    return {"name": name, "address": "0x%x" % addr if addr is not None else None}
 
-    data = misc.read_bytes()
-    decoded = decode_tables(data)
+
+def _wave_verdict(cf, judgement, wave):
+    """(deployed, when, why) for a wave; deployed None when no judgement covers it."""
+    if wave == cf.OPENING_WAVE:
+        return True, "進入戰場時由 fdps_build_map_unit_array 部署在錨點上", None
+    for w in (judgement or {}).get("waves", []):
+        if isinstance(w, dict) and w.get("wave") == wave and isinstance(w.get("deployed"), bool):
+            return w["deployed"], w.get("when"), w.get("why")
+    return None, None, None
+
+
+def build_chapter(n, src):
+    # chapter_facts' _ai_text and _record_text are the page's wording for an AI
+    # byte and a search record; imported rather than copied (tools/_index.md).
+    import map_decode
+    cf, g = src.facts, src.game
+    map_no = n - 1
+    m = cf.battle_map(map_no)
+    dat, cod = m["dat"], m["cod"]
+    judgement = cf.load_judgement(n)
+    tables = cf.handler_tables()
+    width, height = map_decode.grid_size(m)
+    anchors = cod[:dat["spawn_count"]] if cod else []
+
+    waves, deployed_wave = [], {}
+    for w in cf.wave_list(m):
+        deployed, when, why = _wave_verdict(cf, judgement, w)
+        deployed_wave[w] = deployed
+        waves.append({"wave": w, "deployed": deployed, "when": when, "why": why,
+                      "records": [s["index"] for s in dat["spawns"] if s["wave"] == w]})
+
+    def unit(s):
+        return {"index": s["index"], "wave": s["wave"], "deployed": deployed_wave[s["wave"]],
+                "char_id": s["char_id"], "code_hex": "%02X" % s["char_id"],
+                "name": g.unit_label(s["char_id"])}
+
+    deployments = []
+    for s in dat["spawns"]:
+        anchor = anchors[s["index"]] if s["index"] < len(anchors) else None
+        rec = unit(s)
+        rec.update({"side": s["side"], "side_name": cf.SIDE.get(s["side"]), "level": s["level"],
+                    "ai": s["ai"], "ai_text": cf._ai_text(s, g.unit_label),
+                    "anchor": [anchor[1], anchor[2]] if anchor else None,
+                    "death_op": s["death_op"], "death_arg": s["death_arg"],
+                    "death": None if s["death_op"] == 0xFF else cf.death_cell(n, s)})
+        deployments.append(rec)
+
+    by_code = collections.defaultdict(list)
+    for c in map_decode.searchable_cells(m):
+        by_code[c["code"]].append(c)
+    treasure = []
+    for code in sorted(by_code):
+        group, rec = by_code[code], by_code[code][0]["record"]
+        entry = {"code": code,
+                 "cells": [{"x": c["x"], "y": c["y"], "kind": cf.CELL_KIND[c["kind"]]}
+                           for c in group],
+                 "record_kind": rec["kind"], "content": cf._record_text(rec),
+                 "shared": len(group) > 1}
+        if rec["kind"] == 0:
+            entry.update(item=rec["payload"], item_name=g.item_name(rec["payload"]) or None)
+        elif rec["kind"] == 1:
+            entry.update(gold=rec["payload"])
+        else:
+            entry.update(event_slot=rec["payload"],
+                         handler=_function(cf, cf.event_handler(rec["payload"])))
+        treasure.append(entry)
+    unreachable = [{"record": i, "kind": r["kind"], "payload": r["payload"]}
+                   for i, r in enumerate(dat["search"])
+                   if i not in by_code and (r["kind"], r["payload"]) != (0, 0)]
+    drops = []
+    for s in dat["spawns"]:
+        if s["death_op"] in (0, 1):
+            rec = unit(s)
+            if s["death_op"] == 0:
+                rec.update(item=s["death_arg"], item_name=g.item_name(s["death_arg"]) or None)
+            else:
+                rec.update(gold=s["death_arg"])
+            rec["content"] = cf.death_cell(n, s)
+            drops.append(rec)
+
+    turn_events = []
+    for t in dat["turn_events"]:
+        if (t["turn"], t["handler"]) != (0xFF, 0xFF):
+            turn_events.append({"turn": t["turn"], "side": t["side"],
+                                "phase": cf.PHASE.get(t["side"]), "slot": t["handler"],
+                                "handler": _function(cf, cf.event_handler(t["handler"]))})
+    cells = collections.defaultdict(list)
+    for c in map_decode.all_cells(m):
+        e = c.get("tile_event")
+        if e and e["handler"] is not None:
+            cells[c["code"]].append(c)
+    cell_events = []
+    for code in sorted(cells):
+        e = cells[code][0]["tile_event"]
+        cell_events.append({"code": code, "cells": [[c["x"], c["y"]] for c in cells[code]],
+                            "trigger": cf.TRIGGER.get(e["trigger"], e["trigger"]),
+                            "slot": e["handler"],
+                            "handler": _function(cf, cf.event_handler(e["handler"]))})
+    death_events = []
+    for s in dat["spawns"]:
+        if 2 <= s["death_op"] < 0xFF:
+            rec = unit(s)
+            rec["death"] = cf.death_cell(n, s)
+            death_events.append(rec)
+
+    scripts = []
+    for member, r, mine in cf.chapter_scripts(n):
+        callers = []
+        for c in mine:
+            caller = {"kind": cf.KIND_LABEL[c.kind], "function": c.function}
+            if caller not in callers:
+                callers.append(caller)
+        scripts.append({"member": member, "callers": callers, "size": r.size,
+                        "steps": len(r.steps), "initial_map": r.initial_map,
+                        "switches": list(r.trace.switches), "final_map": r.trace.final_map})
+
+    village = cf.village_before(n)
+    return {
+        "code": n, "code_hex": "%02X" % n, "chapter": n, "index": map_no,
+        "name": cf.chapter_title(n),
+        "win": cf.one_line(cf.entry_line(n, 2)), "lose": cf.one_line(cf.entry_line(n, 3)),
+        "doc": "chapters/ch%02d.md" % n,
+        "judged": judgement is not None,
+        "map": map_no, "map_size": [width, height], "player_slots": dat["player_slots"],
+        "spawn_count": dat["spawn_count"],
+        "text_block": "FDETXT%02d.TXT" % n, "text_entries": len(cf.text_block(n)),
+        "handlers": {k: _function(cf, tables[k][map_no]) for k in ("init", "post", "end")},
+        "event_slots": [{"slot": slot, "handler": _function(cf, cf.event_handler(slot)),
+                         "used_by": where} for slot, where in cf.event_slots_used(m).items()],
+        "village_shop": village[0] if village else None,
+        "disc": cf.disc_of(map_no),
+        "waves": waves, "deployments": deployments,
+        "treasure": treasure, "unreachable_search_records": unreachable, "drops": drops,
+        "turn_events": turn_events, "cell_events": cell_events, "death_events": death_events,
+        "scripts": scripts,
+    }
+
+
+def build_chapters(src):
+    return [build_chapter(n, src) for n in src.facts.CHAPTERS]
+
+
+# ---------------------------------------------------------------------------
+# Every text entry, with who shows it or who owns it for not being shown
+# ---------------------------------------------------------------------------
+def _owner(owner_id, cut_entries, exclusions):
+    """The cut_content/ entry (or exclusion) a never-shown entry belongs to."""
+    import cut_content
+    if owner_id is None:
+        return None
+    if owner_id in cut_entries:
+        e = cut_entries[owner_id]
+        return {"id": owner_id, "title": e.title, "category": e.category,
+                "page": "cut_content/" + cut_content.TOPICS[e.topic][0]}
+    if owner_id in exclusions:
+        return {"id": owner_id, "title": None, "category": "排除清單",
+                "page": "cut_content/_index.md"}
+    return {"id": owner_id, "title": None, "category": None, "page": None}
+
+
+def _global_readers():
+    """FDETXT00's readers: ({entry: [function]} for fixed ids, {base: {function}}
+    for the name regions a code indexes)."""
+    import global_text
+    fixed = collections.defaultdict(list)
+    indexed = collections.defaultdict(set)
+    for r in global_text.scan_readers():
+        if r.ids is not None:
+            for entry in r.ids:
+                if r.function not in fixed[entry]:
+                    fixed[entry].append(r.function)
+        else:
+            indexed[r.base].add(r.function)
+    return fixed, indexed
+
+
+def _region_of(entry):
+    import global_text
+    for region in global_text.REGIONS:
+        if region.first <= entry <= region.last:
+            group = next((title for first, last, title in global_text.MESSAGE_GROUPS
+                          if first <= entry <= last), None)
+            return region, group
+    return None, None
+
+
+# Every entry ships with one of these; anything else fails the build.
+TEXT_STATUSES = ("shown", "never_shown", "empty")
+
+
+def build_text(src):
+    import cut_content
+    import global_text
+    import story
+    cf, sg = src.facts, src.story
+    never, unsettled = story.never_shown_text(sg)
+    cut_entries = {e.id: e for e in cut_content.collect(cut_content.CUT_DIR)[0]}
+    exclusions = set(cut_content.exclusion_ids(
+        (cut_content.CUT_DIR / "_index.md").read_text(encoding="utf-8")))
+    scene = global_text.scene_refs(list(cf.scripts().values()))
+    fixed, indexed = _global_readers()
+
+    blocks = []
+    for number in range(global_text.LAST_SCENE_BLOCK + 1):
+        chapter = number in cf.CHAPTERS
+        judged = {}
+        for item in ((cf.load_judgement(number) or {}) if chapter else {}).get("text_readers", []):
+            judged.setdefault(cf.parse_entry(item["entry"]), []).append(item["reader"])
+        scanned = cf.text_readers(number) if chapter else {}
+        scene_readers = collections.defaultdict(list)
+        if number >= global_text.FIRST_SCENE_BLOCK:
+            for script, offset, entry in scene.get(number, []):
+                label = "`%s` `0x%03x`" % (script, offset)
+                if label not in scene_readers[entry]:
+                    scene_readers[entry].append(label)
+        out = []
+        for i in range(len(cf.text_block(number))):
+            lines = cf.transcript(number, i)
+            region = group = None
+            if number == 0:
+                region, group = _region_of(i)
+                readers = list(fixed.get(i, []))
+                if region is not None and region.base is not None:
+                    readers.append("%s：程式以%s + 0x%03x 取這一條（%d 個函式）"
+                                   % (region.title, region.code_name, region.base,
+                                      len(indexed.get(region.base, ()))))
+            elif chapter:
+                readers = list(scanned.get(i, [])) + judged.get(i, [])
+            else:
+                readers = list(scene_readers.get(i, []))
+            if (number, i) in never:
+                status = "never_shown"
+            elif not lines:
+                status = "empty"
+            elif readers:
+                status = "shown"
+            else:
+                status = "unsettled" if number in unsettled else "no_reader"
+            rec = {"entry": i, "lines": lines, "status": status, "readers": readers,
+                   "owner": _owner(story.OWNERS.get((number, i)), cut_entries, exclusions)
+                   if status == "never_shown" else None}
+            if number == 0:
+                rec["region"] = region.title if region else None
+                rec["group"] = group
+            out.append(rec)
+        kind = ("global" if number == 0 else "chapter" if chapter
+                else "scene" if number >= global_text.FIRST_SCENE_BLOCK else "other")
+        blocks.append({"block": number, "name": "FDETXT%02d.TXT" % number, "kind": kind,
+                       "entries": out})
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# Knowledge-base gates owned by other tools, run against this build's data
+# ---------------------------------------------------------------------------
+def kb_gates(src, check_chapter_pages):
+    """Problems (strings) between the knowledge base and the data the records
+    are built from.  Each gate belongs to the tool that writes those pages."""
+    import data_tables
+    import global_text
+    import story
+    problems = ["data_tables: " + p for p in data_tables.check(src.game)]
+    for path, text in global_text.build_pages(src.game_dir).items():
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            problems.append("global_text: %s differs from a rebuild" % path.relative_to(REPO))
+    owner_problems, pending, _, unsettled, _ = story.ownership_problems(src.story)
+    problems += ["story: " + p for p in owner_problems]
+    problems += ["story: FDETXT%02d 0x%02x owner pending (%s)" % (k[0], k[1], why)
+                 for k, why in pending]
+    problems += ["story: chapter block FDETXT%02d has no judgement" % n for n in sorted(unsettled)]
+    for n in src.facts.CHAPTERS:
+        judgement = src.facts.load_judgement(n)
+        if judgement is not None:
+            problems += ["chapter %d judgement: %s" % (n, p)
+                         for p in src.facts.validate_judgement(n, judgement)]
+    if not owner_problems:
+        page = story.PAGE.read_text(encoding="utf-8")
+        new, block_problems = story.apply_blocks(page, story.render_blocks(src.story))
+        problems += ["story: " + p for p in block_problems]
+        if new != page:
+            problems.append("story: cut_content/story.md has a stale generated block")
+    if check_chapter_pages:
+        problems += chapter_page_problems(src)
+    return problems
+
+
+def chapter_page_problems(src):
+    """chapters/chNN.md and chapters/_index.md against a fresh regeneration."""
+    import check_chapter
+    import index as chapter_index
+    problems = []
+    for n in src.facts.CHAPTERS:
+        path = check_chapter.LANDED / ("ch%02d.md" % n)
+        judgement = src.facts.load_judgement(n)
+        if not path.exists() or judgement is None:
+            problems.append("chapters: ch%02d has no landed page or judgement" % n)
+            continue
+        text = path.read_text(encoding="utf-8")
+        fresh = check_chapter.regions(check_chapter.fill(text, n, judgement))
+        for key, body in check_chapter.regions(text).items():
+            if fresh.get(key) != body:
+                problems.append("chapters: ch%02d.md block %s is stale" % (n, key))
+    current = chapter_index.INDEX.read_text(encoding="utf-8")
+    fresh = check_chapter.regions(chapter_index.build_text(current))
+    for key, body in check_chapter.regions(current).items():
+        if fresh.get(key) != body:
+            problems.append("chapters: _index.md table %s is stale" % key)
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Loading everything once, and the build
+# ---------------------------------------------------------------------------
+class Sources:
+    """The game files unpacked once, and the owner modules pointed at them."""
+
+    loaded = None
+
+    def __init__(self, game_dir):
+        import chapter_facts
+        import data_tables
+        import story            # owner of the never-shown text, and of dump_tree
+        self.game_dir = Path(game_dir)
+        if Sources.loaded not in (None, self.game_dir.resolve()):
+            # chapter_facts caches what it loaded from the first tree
+            raise BuildError("one build per process: %s was loaded already" % Sources.loaded)
+        Sources.loaded = self.game_dir.resolve()
+        self.dump = story.dump_tree(self.game_dir)
+        # chapter_facts reads its inputs through these two module globals; point
+        # them at this build's game files before its first (cached) load.
+        chapter_facts.DUMP = self.dump
+        chapter_facts.GAME = self.game_dir
+        self.facts = chapter_facts
+        self.game = data_tables.load(self.dump)
+        self.story = story.Game(self.game_dir)
+
+    def read(self, name):
+        import cut_content
+        return cut_content.read_game_file(self.game_dir, name)
+
+
+class BuildError(Exception):
+    """The data and the knowledge base disagree; nothing is written."""
+
+
+PROVENANCE = {
+    "dump": "遊戲檔（MISC.VFS、FIELD.VFS、FIELD1.VFS、FIELD2.VFS、ICONANI.VFS）成員的實際 byte",
+    "game_text": "遊戲內文字 FDETXT00.TXT 的名稱條目（物品、法術、職業、人物的名稱經 assets/ 的表"
+                 "轉錄，tools/data_tables 的 check 逐條對過遊戲內文字；敵人、種族、商店的名稱"
+                 "直接取自 FDETXT00），章名與勝敗條件取自各章的文字區塊",
+    "src": "從 src/ 轉錄的說明（使用效果代碼的效果，tools/data_tables 的 USE_EFFECTS）",
+    "judgement": "資料本身判斷不了的事——波次會不會部署、文字由誰顯示、為什麼不會顯示——"
+                 "取自章節頁的逐章判定（tools/chapter_docs/judgements/）與 cut_content 的歸屬"
+                 "（tools/cut_content/story.py 的 OWNERS）",
+    "guide": "攻略站的說法，只出現在 discrepancies",
+    "rule": "數值出自遊戲檔，名稱出自遊戲內文字；攻略站與資料檔不一致的地方以資料檔為準，"
+            "全部列在 discrepancies",
+}
+SOURCE_FILES = ("MISC.VFS", "FIELD.VFS", "FIELD1.VFS", "FIELD2.VFS", "ICONANI.VFS")
+
+
+def build(game_dir, check_chapter_pages=True):
+    """(data, text): the two data sets.  Raises BuildError when a label row does
+    not match its record or a knowledge-base gate fails."""
+    src = Sources(game_dir)
+    decoded = decode_tables(src.dump / "MISC")
     check = Check()
 
     items, hit_effect = build_items(decoded["item"]["records"], check)
@@ -535,67 +982,109 @@ def main():
     characters = build_characters(decoded["appearance"]["records"],
                                   decoded["levelup"]["records"],
                                   decoded["learn"]["records"],
-                                  spell_names, item_names, class_names, check)
-    chapters = build_chapters(check)
+                                  spell_names, item_names, class_names, src.game, check)
+    use_effects = build_use_effects(src.game)
+    effect_text = {u["code"]: u["description"] for u in use_effects}
+    for item in items:
+        item["use_effect_description"] = effect_text.get(item["use_effect"])
     check_discrepancies({"item": items, "spell": spells, "character": characters,
-                         "class": classes, "chapter": chapters}, check)
-    compared = check.done()
+                         "class": classes}, check)
+    if check.failures:
+        raise BuildError("\n".join("MISMATCH  " + f for f in check.failures)
+                         + "\n%d of %d label checks failed" % (len(check.failures),
+                                                                check.compared))
+    problems = kb_gates(src, check_chapter_pages)
+    blocks = build_text(src)
+    problems += ["text: FDETXT%02d 0x%02x is %s" % (b["block"], e["entry"], e["status"])
+                 for b in blocks for e in b["entries"] if e["status"] not in TEXT_STATUSES]
+    if problems:
+        raise BuildError("\n".join("KB  " + p for p in problems))
 
-    out = {
+    def table(canon, member, index, name_source, value_source, records):
+        return {"canon": canon, "member": member, "index": index,
+                "name_source": name_source, "value_source": value_source, "records": records}
+
+    data = {
         "generator": "tools/data_skill/build.py",
-        "source": {
-            "file": misc.name,
-            "size": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
-        },
-        "provenance": {
-            "dump": "MISC.VFS 內對應 .DAT 成員的實際 byte",
-            "guide": "攻略站的名稱，經知識庫 assets/ 與 chapters/ 轉錄",
-            "game_text": "遊戲內文字 FDETXT00.TXT 的名稱，經知識庫 assets/ 轉錄",
-            "rule": "兩者不一致時以 dump 為準，差異全部列在 discrepancies",
-        },
-        "label_checks": compared,
+        "source": {name: {"size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
+                   for name, blob in ((n, src.read(n)) for n in SOURCE_FILES)},
+        "provenance": PROVENANCE,
+        "label_checks": check.compared,
+        "chapter_page_gate": check_chapter_pages,
         "enums": {
             "hit_effect": {"%02X" % k: v for k, v in sorted(hit_effect.items())},
             "spell_target": {"%02X" % k: v for k, v in sorted(SPELL_TARGET.items())},
         },
         "discrepancies": DISCREPANCIES,
         "tables": {
-            "item": {
-                "canon": "assets/items.md", "member": "ITEM.DAT", "index": "物品編號",
-                "name_source": "game_text", "value_source": "dump", "records": items,
-            },
-            "spell": {
-                "canon": "assets/spells.md", "member": "MAGICDAT.DAT", "index": "法術編號",
-                "name_source": "game_text", "value_source": "dump", "records": spells,
-            },
-            "character": {
-                "canon": "assets/characters.md",
-                "member": "FRIAPRDA.DAT + FRILEVUP.DAT + GETMGTAB.DAT",
-                "index": "肖像編號",
-                "name_source": "game_text", "value_source": "dump", "records": characters,
-            },
-            "class": {
-                "canon": "assets/classes.md", "member": "PROMAP.DAT", "index": "職業代碼",
-                "name_source": "game_text", "value_source": "dump", "records": classes,
-            },
-            "chapter": {
-                "canon": "chapters/_index.md", "member": None, "index": "章號",
-                "name_source": "guide", "value_source": "guide", "records": chapters,
-            },
+            "item": table("assets/items.md", "ITEM.DAT", "物品編號", "game_text", "dump", items),
+            "spell": table("assets/spells.md", "MAGICDAT.DAT", "法術編號", "game_text", "dump",
+                           spells),
+            "character": table("assets/characters.md",
+                               "FRIAPRDA.DAT + FRILEVUP.DAT + GETMGTAB.DAT + RANKUP.DAT",
+                               "肖像編號", "game_text", "dump", characters),
+            "class": table("assets/classes.md", "PROMAP.DAT", "職業代碼", "game_text", "dump",
+                           classes),
+            "enemy": table("assets/enemies.md", "ENEMYDAT.DAT", "肖像編號", "game_text", "dump",
+                           build_enemies(src.game)),
+            "race": table("assets/races.md", "FDETXT00.TXT", "種族代碼", "game_text", "dump",
+                          build_races(src.game)),
+            "shop": table("assets/shops.md", "SHOPnn.DAT", "章節索引", "game_text", "dump",
+                          build_shops(src.game)),
+            "use_effect": table("assets/items.md", "ITEM.DAT +0x0d", "使用效果代碼", "src", "src",
+                                use_effects),
+            "chapter": table("chapters/_index.md", "MAPnn.DAT + ICONANI.VFS + FDETXTnn.TXT",
+                             "章號", "game_text", "dump + judgement", build_chapters(src)),
         },
     }
+    text = {
+        "generator": "tools/data_skill/build.py",
+        "provenance": {
+            "lines": "tools/text_decode 解出、以章節頁的方式逐行呈現：【名稱】換說話者、▼ 換頁、"
+                     "{subst1}／{subst2}／{number} 是執行期代入",
+            "readers": "FDETXT00：tools/global_text 的 src/ 掃描；章節區塊：chapter_facts 的"
+                       "讀取端掃描加逐章判定；額外場景區塊：過場腳本的追蹤",
+            "owner": "永遠不會顯示的條目歸哪個 cut_content 條目（tools/cut_content/story.py 的 OWNERS）",
+        },
+        "blocks": blocks,
+    }
+    return data, text
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8", newline="\n") as fh:
-        json.dump(out, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
 
-    print("%s  %d bytes  sha256 %s" % (misc.name, len(data), out["source"]["sha256"][:16]))
-    for name, table in out["tables"].items():
+def write(out_dir, data, text):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in ((DATA_FILE, data), (TEXT_FILE, text)):
+        with (out_dir / name).open("w", encoding="utf-8", newline="\n") as fh:
+            json.dump(content, fh, indent=1, ensure_ascii=False)
+            fh.write("\n")
+
+
+def main(argv=None):
+    sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--game", type=Path, default=DEFAULT_GAME)
+    ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--no-chapter-page-gate", action="store_true",
+                    help="build even when chapters/ is not current with the data")
+    a = ap.parse_args(argv)
+    try:
+        data, text = build(a.game, check_chapter_pages=not a.no_chapter_page_gate)
+    except BuildError as error:
+        print(error)
+        print("FAIL: nothing written")
+        return 1
+    write(a.out, data, text)
+    for name, table in data["tables"].items():
         print("%-10s %4d records" % (name, len(table["records"])))
-    print("%d label checks passed, %d known guide discrepancies" % (compared, len(DISCREPANCIES)))
+    entries = sum(len(b["entries"]) for b in text["blocks"])
+    print("text       %4d entries in %d blocks" % (entries, len(text["blocks"])))
+    print("%d label checks passed, %d known guide discrepancies, knowledge-base gates clean%s"
+          % (data["label_checks"], len(DISCREPANCIES),
+             "" if data["chapter_page_gate"] else " (chapter pages not checked)"))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

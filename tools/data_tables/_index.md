@@ -26,7 +26,7 @@ python -m unittest tools/data_tables/test_data_tables.py
 | `class_users` | `assets/classes.md` | 每個職業有哪些單位 |
 | `promotions` | `assets/characters.md` | `RANKUP.DAT` 的四條路線 |
 | `spell_schedule` | `assets/characters.md` | 每人每型態的初始法術與升級習得 |
-| `shops` | `assets/shops.md` | 有村莊的 20 個 `SHOPnn.DAT` |
+| `shops` | `assets/shops.md` | 有村莊的 21 個 `SHOPnn.DAT` |
 | `use_effects` | `assets/items.md` | 使用效果代碼與帶這個碼的物品 |
 
 ## 寫在程式裡的知識

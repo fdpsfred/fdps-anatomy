@@ -12,7 +12,7 @@
 
 名稱一律取遊戲內文字（`FDETXT00.TXT` 的名稱表），攻略站的寫法只作為差異記錄。由資料檔直接產生的表（敵方全表、種族、職業的使用者、法術總表、轉職路線、商店、使用效果代碼）由 [`tools/data_tables/`](../tools/data_tables/_index.md) 寫入並逐格驗證，改表要改工具而不是手改。
 
-本層的表另有一個查詢入口：`fdps-data` skill 可依名稱、代碼與數值範圍反查這些數值，資料集由 [`tools/data_skill/`](../tools/data_skill/_index.md) 從 `MISC.VFS` 現解並逐列對照本層的表產生。
+本層的表另有一個查詢入口：`fdps-data` skill 可依名稱、代碼與數值範圍反查這些數值，資料集由 [`tools/data_skill/`](../tools/data_skill/_index.md) 從遊戲檔現解並逐列對照本層的表產生；同一個 skill 也能查每一章的敵人、寶物與事件，以及全部遊戲文字的全文。
 
 | 文件 | 內容 |
 | --- | --- |

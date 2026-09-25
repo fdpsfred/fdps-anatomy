@@ -24,7 +24,7 @@
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | Ghidra | Ghidra 目前的分析狀態，以文字快照進版控 | ✓ |
 | [`tools/`](tools/_index.md) | — | 工作腳本，一項工作一個子資料夾 | ✓ |
 | [`docs/`](docs/) | — | 決策記錄（[`adr/`](docs/adr/)）、攻略站鏡像（[`guide/`](docs/guide/_index.md)）、agent 規範、前作研究筆記 | ✓ |
-| `.claude/skills/` | — | skill：`fdps-data` 查遊戲數值，`ghidra-usage` 是 Ghidra 操作慣例 | ✓ |
+| `.claude/skills/` | — | skill：`fdps-data` 查遊戲數值、每章的敵人寶物事件與遊戲文字全文，`ghidra-usage` 是 Ghidra 操作慣例 | ✓ |
 | [`devlog/`](devlog/_conventions.md) | — | 怎麼走到這些結論的敘事記錄 | ✓ |
 | [`.scratch/`](.scratch/fdps-rebuild/spec.md) | — | 專案 spec 與工作票（`fdps-rebuild/issues/`） | ✓ |
 | `workspace/` | — | 腳本的中間產物與輸出，全部可重生 | ✗ |
