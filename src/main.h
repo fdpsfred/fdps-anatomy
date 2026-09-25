@@ -98,13 +98,14 @@ extern void fdps_shutdown_free_resources(void);
    two tables are read straight out of Mer1.tmp and Mer2.tmp; if it is not,
    they are computed twice -- once from Fight.pal, written out as FMer1.tmp and
    FMer2.tmp, and once from Fde.pal, written out as Mer1.tmp and Mer2.tmp --
-   and the Fde.pal pair is what the program runs on either way.  Nothing ever
-   reads the Fight.pal pair back: FMer1.tmp exists so that the branch has
-   something to test for, FMer2.tmp is not even that, and no other code in the
-   image names either.  Only FMer1.tmp is tested for, and no fopen is checked,
-   so a directory holding FMer1.tmp but not Mer1.tmp reads through a null
-   FILE *.  Deleting the four files is what makes the game pick up an edited
-   palette; nothing else invalidates the cache.
+   and the Fde.pal pair is what this function leaves installed either way.  The
+   Fight.pal pair is for the fight-palette screens: the combat exchange, the
+   spell animation, the church promotion and the ending credit roll each read
+   FMer1.tmp and FMer2.tmp over the two tables on the way in and Mer1.tmp and
+   Mer2.tmp back on the way out.  Only FMer1.tmp is tested for, and no fopen
+   is checked, so a directory holding FMer1.tmp but not Mer1.tmp reads through
+   a null FILE *.  Deleting the four files is what makes the game pick up an
+   edited palette; nothing else invalidates the cache.
 
    It runs exactly once.  A second call would install the keyboard vector over
    its own handler and overwrite every pointer it filled the first time,

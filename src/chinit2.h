@@ -329,9 +329,10 @@ extern void fdps_chapter_22_init(void);
 
    THE MAP DEPLOYS NO ENEMY AND THE CUT-SCENE DEPLOYS THEM ALL.  MAP22.DAT tags
    twenty-one of its eighty records wave 0 and every one of them is on side 1,
-   the guest side: characters 36 to 39, FRIAPRDA.DAT template rows, the scene's
-   own cast.  The opposition arrives in the member's two DEPLOY_WAVEs, both
-   placed on the nearest free tile: wave 2 at script offset 469, the single
+   the guest side: characters 36 to 39, nameless one-HP FRIAPRDA.DAT rows,
+   the scene's own cast.  The opposition arrives in the member's two
+   DEPLOY_WAVEs, both placed on the nearest free tile: wave 2 at script
+   offset 469, the single
    LV23 死神 (character 72), and wave 1 at offset 604, ten units.  That makes
    forty-three units when the handler returns -- eleven player slots,
    twenty-one guests, and eleven enemies.

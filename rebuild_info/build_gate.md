@@ -51,6 +51,8 @@
 
 判定的做法是把這兩種效果會動到的 byte 全部抹零再比殘差：整張 Fixup Record Table，加上每個 fixup site 的 1／2／4／6 byte 值（寬度依 LE 的 source type 決定）。表界與每個 site 都從 header 即時解析，沒有硬編。真正改到 code 或 data 的改動必定落在這些位置之外，殘差就會破掉。
 
+還有第三個行為中性的效果，閘門**不**處理、會報成 `different`：**`wcc386` 不把對齊填充清零。** `CONST` 字串池裡每個字面值結尾 NUL 之後補到 4 byte 邊界的 1–3 byte、`_DATA` 裡小物件（例如一個 `unsigned char`）後面到下一個對齊邊界的空隙，裝的是編譯器緩衝區的殘值，會隨原始碼的文字改變——只改註解就足以讓它們變，同一份原始碼換了換行字元（git 取出的 CRLF 與直接寫檔的 LF）也會變。沒有任何程式讀這些 byte。判斷方式是在乾淨的 worktree 以 `HEAD` 建一份，再用 [`tools/build_gate/pad_diff.py`](../tools/build_gate/_index.md) 比兩份映像：字面值填充自動認定，其餘差異列出兩側的 map 符號，對照 `src/` 裡前一個符號的宣告大小確認它落在空隙裡。
+
 ## 基準值的更新
 
 基準值存在 `tools/build_gate/data/baselines.json`，一個建置目標一筆，進版控——放在 `workspace/` 下就會跟著中間產物一起消失。每筆記的是日期、當時的 commit、**更新的理由**、可接受的警告文字，以及重定位感知的指紋。舊的一筆推進到 `history`，鏈條不刪，因為那就是「閘門被要求接受過什麼」的完整記錄。
@@ -70,7 +72,8 @@ python tools/build_gate/gate.py update --target smoke --reason "為什麼輸出�
 | 情況 | 處置 |
 | --- | --- |
 | emit 了新的 function 或資料、修了行為、換了旗標 | 推進，理由寫清楚改了什麼 |
-| 只改註解、只改文件、只改 `tools/` | 不該有任何改變。閘門若報 `different` 就是有東西被連帶改到，去找它，不要推進 |
+| 只改註解、只改文件、只改 `tools/` | 不該有任何改變。閘門若報 `different` 就是有東西被連帶改到，去找它，不要推進——唯一的例外是下一列 |
+| 改了 `src/` 的註解或巨集名，`game` 報 `different` | 先確認是不是對齊填充（見下）。是的話推進，理由寫明「只有對齊填充改變」與比對結果；有任何一個 byte 不是填充就照回歸處理 |
 | 只改名（符號、參數、檔名） | 允許 `identical`／`strict`／`reloc`，不必推進。若報 `different`，那就不是純改名 |
 | 閘門報 `different` 而你不知道為什麼 | 一律當回歸。先解釋清楚再決定，推進基準值是把問題永久蓋掉 |
 | 改了某個目標也會編到的共用原始碼 | 那個目標的基準值也要推進。`ailsmoke` 會編 `src/dpmi.c` 與 `src/ailflags.asm`，改它們卻只跑 `--target emittest`，`ailsmoke` 就會一直紅著沒人發現；所以收尾要跑一次不帶 `--target` 的完整閘門 |

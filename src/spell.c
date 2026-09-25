@@ -160,9 +160,11 @@ int fdps_spell_damage_unit(int caster_unit_index, int target_unit_index,
  * the record.
  *
  * Nothing in the image reaches this entry -- no call, no data word, no other
- * reference.  The two live heal paths call fdps_unit_apply_heal themselves, so
- * this is an unused packaged form of that step; its damage counterpart
- * fdps_spell_damage_unit above has two callers. */
+ * reference.  Its one use is inline: the heal loop of
+ * fdps_cast_spell_on_targets below is this body expanded in place by the
+ * compiler's -oe (rebuild_info/build_flags.md), and the item heal path calls
+ * fdps_unit_apply_heal directly, so the out-of-line copy is left with no
+ * caller.  Its damage counterpart fdps_spell_damage_unit above has two. */
 int fdps_spell_heal_unit(int unit_index, int spell_id)
 {
     struct fdps_spell_effect *spell;

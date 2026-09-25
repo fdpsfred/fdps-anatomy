@@ -661,7 +661,7 @@ int fdps_map_actor_score_best_spell(int unit_index, int side_select)
    That byte is packed and each reader takes its own piece of it: AND AL,0xf at
    00010065 in fdps_map_actor_behavior_step takes the low nibble as an AI mode
    code, AND AL,0x40 at 00012c72 in fdps_map_actor_take_best_action and
-   AND AL,0x80 at 0001337d in fdps_score_targets_for_item take single flags, and
+   AND AL,0x80 at 00013380 in fdps_score_targets_for_item take single flags, and
    fdps_map_actor_behavior_step assigns the whole byte the literal 7 at 0001039a.
    So this bit is the bottom bit of the mode nibble and not a flag of its own,
    and what the mode it belongs to means is not settled here -- the mask is named

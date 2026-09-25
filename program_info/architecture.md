@@ -20,6 +20,8 @@ calling convention 是 `__cdecl` 503 個、`__watcall` 11 個。`__watcall` 那 
 
 其餘 831 個是 vendor 程式碼（`crt` 與 `ail`），命名依 [`rebuild_info/naming.md`](../rebuild_info/naming.md) 只用程式庫原名，判不出 PUBDEF 的就保留預設名稱，不硬湊。
 
+全域資料的名稱、型別與 struct 佈局由 [`data_structures.md`](data_structures.md) 擁有。不少 plate comment 仍以 `DAT_xxxxxxxx` 的位址寫法指稱全域資料，那只是位址記法，符號的名稱以 Ghidra 的 label 為準。
+
 ## 啟動鏈
 
 LE 進入點到 `main` 是一條五段的固定鏈，全部是 Watcom C/C++ 10.0a 的 runtime，沒有遊戲自己的程式碼：
@@ -156,7 +158,17 @@ vendor library 那一組不該進任何遊戲分區——它們由 vendor 契約
 | 8 | `0003d50a`–`00054f51` |
 | 7 | `0003dcb0`–`00054564` |
 
-群集全部落在 `0003c000` 以上的程式庫區。每一個要嘛是連結器帶進來的死碼，要嘛唯一的入邊是尚未解出的間接呼叫——AIL 在執行期以驅動映像的內部表分派，那些邊靜態看不到。走不到的 36 個 `fdps` function 則多半是由 `.object2` 的章節分派表指到、而表的基底在執行期才算出來的處理函式。
+群集全部落在 `0003c000` 以上的程式庫區。每一個要嘛是連結器帶進來的死碼，要嘛唯一的入邊是尚未解出的間接呼叫——AIL 在執行期以驅動映像的內部表分派，那些邊靜態看不到。
+
+走不到的 36 個 `fdps` function 沒有一個在章節分派表裡——四張表的 140 項在 `src/chapter.c` 全部是具名初值，呼叫圖經由各表的分派者走得到每一項。它們分成三類：
+
+| 類別 | 數量 | 成員 |
+| --- | ---: | --- |
+| `-oe` 展開後留下的本體：呼叫點全部被編譯器就地展開，獨立的那一份沒人呼叫 | 7 | `fdps_move_grid_set_stop_flag`、`fdps_unit_mark_retired`、`fdps_draw_gauge_bar_proportional`、`fdps_draw_stat_gauge`、`fdps_draw_unit_gauge_proportional`、`fdps_spell_heal_unit`、`fdps_pack_rgb` |
+| 以位址掛上的中斷處理常式：執行期會跑，但入口是寫進中斷向量或 AIL timer callback 的位址，不是 `CALL` 也不在指標表裡 | 2 | `fdps_keyboard_isr`、`fdps_timer_tick_handler` |
+| 完全沒有呼叫者的成員 | 27 | MSCDEX 包裝的 19 支（`src/cd.c`、`cdtoc.c`、`cdaudio.c`；其中 `fdps_cd_get_track_length_sectors`、`fdps_cd_ioctl_output_command`、`fdps_cd_read_q_channel` 只被同樣沒人用的成員呼叫）、VFS 讀取器的 3 支（`src/vfs.c`）、前作 `.DAT` 封裝檔的讀取器 `fdps_load_indexed_archive_entry`（FDPS 沒有這種檔）、兩種沒用上的全螢幕轉場 `fdps_transition_box`／`fdps_transition_slide`、沒接上的 raw PCM 播放介面 `fdps_audio_start_sample`／`fdps_audio_set_sample_playback_rate` |
+
+前兩類不是死碼：第一類的行為以展開後的形式活在呼叫端裡，第二類在執行期被硬體中斷或 AIL 呼叫。第三類各自屬於刪減與未用的哪一類（[`CONTEXT.md`](../CONTEXT.md)），逐條的判定與證據由 [`cut_content/`](../cut_content/_index.md) 擁有。
 
 ## 尚未確定的事
 
@@ -171,4 +183,3 @@ vendor library 那一組不該進任何遊戲分區——它們由 vendor 契約
 - 單位記錄的 byte +5 已由寫入端證實：bit 0 是退場、bit 7 是本回合已行動，而且退場是整個指派而非設位元。bit 1..6 在整個映像裡沒有任何寫入端——這個 byte 只被整個指派成 0 或 1、OR `0x80`／`0x1`、AND `0x7f`／`0xfe`／`0x1`——所以執行期恆為 0。bit 2 雖然被 `fdps_battle_system_menu`（`00014c9c`）與 `fdps_battle_player_phase_loop`（`0002bc89`）的 `AND AL,0x85` 測試，但沒有人設它，是死旗標；MP 回復的三處 `flags == 0` 測試實際上等於「未退場且本回合未行動」。bit 2 是沿用 FD2 的 `0x85` 遮罩留下的前作遺留，見 [`cut_content/code.md`](../cut_content/code.md)。byte +6（陣營）與 +0x26 的語意仍只從測試推得。
 - 移動格子 cell 的 byte 0 只有 bit 6（`0x40`，有單位佔據）與 bit 7（`0x80`，進入即停）有意義。`fdps_field_load_chapter_resources` 以 malloc 配置整塊後只寫表頭就呼叫 `fdps_map_grid_reset`，後者以 `AND 0x3f` 保留低六位，所以低六位是堆積殘值；全程式沒有任何讀取端不先以 `0x40` 或 `0x80` 遮罩，殘值不影響行為。
 - `fdps_set_flag_bit`（`000282b0`）與 `fdps_object_set_field34_low_nibble_range`（`00036b60`）的行為清楚但歸屬哪個子系統未定，要等它們操作的旗標語意定案。
-- 全域資料的命名與 struct 佈局整批留給票 17。目前 plate comment 一律以 `DAT_xxxxxxxx` 指稱它們。

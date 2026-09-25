@@ -214,10 +214,10 @@ void fdps_chapter_16_init(void)
    FOR.  MAP16.DAT's records 18, 19 and 20 carry side 1, the guest side that
    fdps_collect_targets_in_area selects with mode 2 and that the ambush gates
    in src/chevt4.c refuse (src/aitarget.c), and they are characters 12 and 14
-   at level 10 and character 91 at level 20.  The first two are FRIAPRDA.DAT
-   template rows rather than named party members (assets/characters.md), so
-   they are built through the roster-side branch of the deploy with a template
-   stat line.
+   at level 10 and character 91 at level 20.  The first two are 索爾 and
+   亞雷斯, non-party characters with FRIAPRDA.DAT rows of their own
+   (assets/characters.md), so they are built through the roster-side branch
+   of the deploy from those rows.
 
    THE CUT-SCENE WALKS UNIT 3, SO THE CURSOR CALL IS NOT WHERE THE MAP PUT IT.
    The member places map units 3, 4, 7, 8 and 9 on (18, 18) at script offsets 7
@@ -934,9 +934,9 @@ void fdps_chapter_22_init(void)
    of those twenty-one is on side 1, the guest side that
    fdps_collect_targets_in_area selects with mode 2 and that the ambush gates
    in src/chevt4.c refuse (src/aitarget.c).  They are characters 36 to 39,
-   FRIAPRDA.DAT template rows rather than named party members
-   (assets/characters.md), so the state rebuild appends twenty-one guests as
-   map units 11 to 31 and not a single enemy.
+   nameless FRIAPRDA.DAT rows of one hit point and one move rather than
+   named party members (assets/characters.md), so the state rebuild appends
+   twenty-one guests as map units 11 to 31 and not a single enemy.
 
    THE OPPOSITION IS THE CUT-SCENE'S, IN TWO DEPLOYS THAT MUST STAY IN ORDER.
    ICON22.DAT's DEPLOY_WAVE at script offset 469 asks for wave 2, MAP22.DAT's

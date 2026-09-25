@@ -705,7 +705,7 @@ int fdps_icon_script_prompt_three_way_choice(void)
 }
 
 /* The container every cut-scene script lives in.  The interpreter holds the
-   name itself -- all 67 call sites push nothing but the member name -- so a
+   name itself -- all 66 call sites push nothing but the member name -- so a
    caller cannot point it at another archive. */
 #define SCRIPT_ARCHIVE_NAME "IconAni.vfs"
 
@@ -779,9 +779,16 @@ int fdps_icon_script_prompt_three_way_choice(void)
 #define SCRIPT_TILE_LAYER_HEADER_BYTES 0xb
 #define SCRIPT_TILE_LAYER_STRIDE_OFFSET 7
 
-/* Opcode 0x61's debug award: ten rounds of 99 experience handed to unit 3.
-   The award global is re-armed inside the loop, once per round, because the
-   award routine consumes it. */
+/* Opcode 0x61's award: ten rounds of 99 experience handed to battle unit 3,
+   then the whole unit array written back to the roster.  It is not a debug
+   hook.  The one script that carries it is WinGA26.dat, the victory scene of
+   chapter 27's hidden route, at offset 0x15f and before any map switch, so
+   unit 3 is the player's slot 3 on that battlefield: 法蓮娜, the fourth roster
+   entry, rejoining the party.  The write-back at the end is the only one that
+   route makes -- its end handler has none of its own -- so it is also what
+   records the whole chapter 27 battle in the roster
+   (resource_info/cutscene_script.md).  The award global is re-armed inside
+   the loop, once per round, because the award routine consumes it. */
 #define SCRIPT_XP_AWARD_ROUNDS 10
 #define SCRIPT_XP_AWARD_POINTS 99
 #define SCRIPT_XP_AWARD_UNIT 3
@@ -810,7 +817,7 @@ int fdps_icon_script_prompt_three_way_choice(void)
 #define SCRIPT_OP_TRIGGER_CELL_EVENT 0x13
 #define SCRIPT_OP_SET_MAP_CELL 0x14
 #define SCRIPT_OP_BIAS_PALETTE 0x15
-#define SCRIPT_OP_DEBUG_LEVEL_UNIT_3 0x61
+#define SCRIPT_OP_AWARD_XP_UNIT_3 0x61
 #define SCRIPT_OP_ACTOR_BEHAVIOR_STEP 0x62
 #define SCRIPT_OP_ASK_THREE_WAY 0x63
 
@@ -851,7 +858,7 @@ int fdps_icon_script_prompt_three_way_choice(void)
 
    The epilogue reloads data_fdps_chapter_current_chapter_id and compares it
    against the copy the prologue took at 00021678.  Nothing branches on the
-   result, the function returns void, and all 67 call sites destroy the flags
+   result, the function returns void, and all 66 call sites destroy the flags
    with ADD ESP,0x4 before they do anything else, so the comparison has no
    observable and no local is kept here to feed it. */
 void fdps_icon_script_run(char *script_name)
@@ -1093,7 +1100,7 @@ void fdps_icon_script_run(char *script_name)
                 offset += 4;
                 break;
 
-            case SCRIPT_OP_DEBUG_LEVEL_UNIT_3:
+            case SCRIPT_OP_AWARD_XP_UNIT_3:
                 for (xp_round = 0; xp_round < SCRIPT_XP_AWARD_ROUNDS;
                      xp_round++) {
                     data_fdps_battle_pending_xp_credit =

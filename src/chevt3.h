@@ -281,9 +281,11 @@ extern void fdps_chapter_17_event_deploy_wave_for_turn(int unit_index);
    13, so wave number and scheduled turn are the same nine values and each
    firing brings on the group tagged with the turn it fires on -- four
    reinforcements a turn for eight turns, then fifteen at once on turn 13.
-   (The map also carries fifteen records tagged wave 1 and one tagged wave 2,
-   which nothing in the shipped data ever asks for: the chapter opens on wave 0
-   and no turn 1 or 2 record names this slot.) */
+   (The map also carries fifteen records tagged wave 1 and one tagged wave 2.
+   No turn 1 or 2 record names this slot, so this handler never deploys them;
+   the chapter's opening cut-scene Icon17.dat does, with DEPLOY_WAVE 2 at
+   script offset 0x18a -- the one actor it retires again at 0x2a4 -- and
+   DEPLOY_WAVE 1 at 0x2f1, which is the chapter's whole opening opposition.) */
 extern void fdps_chapter_18_event_deploy_wave_for_turn(int unit_index);
 #pragma aux fdps_chapter_18_event_deploy_wave_for_turn "*" parm caller [];
 

@@ -931,9 +931,9 @@
 00061768 | 0x4 | /char[4] | s_End_00061768 | DEFAULT
 0006176c | 0xa | /string | s_Explo.Saf_0006176c | DEFAULT
 00061778 | 0xa | /string | s_Levup.wav_00061778 | DEFAULT
-00061783 | 0xa | /string | - | -
+00061784 | 0x9 | /string | s_REST.WAV_00061784 | DEFAULT
 00061790 | 0xd | /string | s_EnyPhase.saf_00061790 | DEFAULT
-0006179f | 0xe | /string | - | -
+000617a0 | 0xd | /string | s_PlyPhase.saf_000617a0 | DEFAULT
 000617b0 | 0x9 | /char[9] | s_Turn.saf_000617b0 | DEFAULT
 000617bc | 0x3 | /char[3] | binary_artifact_string_literal_decimal_format_617bc | USER_DEFINED
 000617bf | 0x1 | /undefined1 | - | -
@@ -946,8 +946,8 @@
 00061804 | 0xb | /string | s_Icon00.dat_00061804 | DEFAULT
 00061810 | 0xb | /string | s_Icon01.dat_00061810 | DEFAULT
 0006181c | 0xb | /string | s_Icon02.dat_0006181c | DEFAULT
-00061827 | 0xc | /string | - | -
-00061833 | 0xc | /string | - | -
+00061828 | 0xb | /string | s_Icon03.dat_00061828 | DEFAULT
+00061834 | 0xb | /string | s_Icon04.dat_00061834 | DEFAULT
 00061840 | 0xb | /string | s_Icon05.dat_00061840 | DEFAULT
 0006184c | 0xb | /string | s_Icon06.dat_0006184c | DEFAULT
 00061858 | 0xb | /string | s_Icon07.dat_00061858 | DEFAULT
@@ -991,11 +991,11 @@
 00061a50 | 0x25 | /string | s_Out_of_Memory_on_get_save_buffer_00061a50 | DEFAULT
 00061a78 | 0x8 | /string | s_Fde.pal_00061a78 | DEFAULT
 00061a80 | 0x23 | /string | s_Out_of_Memory_at_get_fieldadr!!!_00061a80 | DEFAULT
-00061aa3 | 0x26 | /string | - | -
-00061ac9 | 0x10 | /string | - | -
-00061ad9 | 0xc | /string | - | -
+00061aa4 | 0x25 | /string | s_Out_of_Memory_at_get_ManDataSeg!_00061aa4 | DEFAULT
+00061acc | 0xd | /string | s_PlyPhase.saf_00061acc | DEFAULT
+00061adc | 0x9 | /string | s_Save.cel_00061adc | DEFAULT
 00061ae8 | 0x3 | /char[3] | binary_artifact_string_literal_fopen_mode_wb_61ae8 | USER_DEFINED
-00061aeb | 0xa | /string | - | -
+00061aec | 0x9 | /string | s_Load.cel_00061aec | DEFAULT
 00061af8 | 0xc | /char[12] | binary_artifact_string_literal_resource_filename_loadkon_cel_61af8 | USER_DEFINED
 00061b04 | 0x9 | /string | s_Beep.wav_00061b04 | DEFAULT
 00061b10 | 0x9 | /char[9] | binary_artifact_string_literal_sfx_filename_sure_wav_61b10 | USER_DEFINED
@@ -1031,7 +1031,7 @@
 00061ce0 | 0xa | /char[10] | binary_artifact_string_literal_resource_filename_cusor_cel_61ce0 | USER_DEFINED
 00061cec | 0xc | /char[12] | binary_artifact_string_literal_resource_filename_command_cel_61cec | USER_DEFINED
 00061cf8 | 0xb | /string | s_Shadow.cel_00061cf8 | DEFAULT
-00061d03 | 0xd | /string | - | -
+00061d04 | 0xc | /string | s_IconSts.cel_00061d04 | DEFAULT
 00061d10 | 0xc | /string | s_Message.cel_00061d10 | DEFAULT
 00061d1c | 0xb | /string | s_Number.cel_00061d1c | DEFAULT
 00061d28 | 0xb | /char[11] | binary_artifact_string_literal_resource_filename_selbar_cel_61d28 | USER_DEFINED
@@ -1042,7 +1042,7 @@
 00061d64 | 0xc | /char[12] | binary_artifact_string_literal_resource_filename_easybar_cel_61d64 | USER_DEFINED
 00061d70 | 0x8 | /string | s_Bar.cel_00061d70 | DEFAULT
 00061d78 | 0xa | /string | s_Field.vfs_00061d78 | DEFAULT
-00061d82 | 0x1f | /string | - | -
+00061d84 | 0x1d | /string | s_file_not_found:_'field.vfs'_00061d84 | DEFAULT
 00061da4 | 0xb | /char[11] | binary_artifact_string_literal_resource_filename_fdetxt_fon_61da4 | USER_DEFINED
 00061db0 | 0xd | /string | s_Fdetxt00.txt_00061db0 | DEFAULT
 00061dc0 | 0xa | /char[10] | binary_artifact_string_literal_palette_cache_filename_fmer1_tmp_61dc0 | USER_DEFINED

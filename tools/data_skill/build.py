@@ -445,9 +445,10 @@ def build_characters(appearance, levelup, learn, spell_names, item_names, class_
             "code": index, "code_hex": "%02X" % index,
             "name": character or None, "class": class_label or None,
             "label": label or None,
-            # Only the twelve rows assets/characters.md documents carry appearance
-            # values.  The rest of FRIAPRDA.DAT is duplicated template rows that mean
-            # nothing per index -- see that document.
+            # Only the twelve rows assets/characters.md tabulates carry appearance
+            # values.  The other FRIAPRDA.DAT rows are either non-party characters
+            # (索爾 and others) or byte copies nothing reads -- a promoted form's
+            # index lands on such a copy -- see that document.
             "appearance_documented": index in documented,
             "learn_index": growth["learn_index"],
             "learn": learned,
@@ -545,6 +546,7 @@ def main():
         "provenance": {
             "dump": "MISC.VFS 內對應 .DAT 成員的實際 byte",
             "guide": "攻略站的名稱，經知識庫 assets/ 與 chapters/ 轉錄",
+            "game_text": "遊戲內文字 FDETXT00.TXT 的名稱，經知識庫 assets/ 轉錄",
             "rule": "兩者不一致時以 dump 為準，差異全部列在 discrepancies",
         },
         "label_checks": compared,
@@ -556,7 +558,7 @@ def main():
         "tables": {
             "item": {
                 "canon": "assets/items.md", "member": "ITEM.DAT", "index": "物品編號",
-                "name_source": "guide", "value_source": "dump", "records": items,
+                "name_source": "game_text", "value_source": "dump", "records": items,
             },
             "spell": {
                 "canon": "assets/spells.md", "member": "MAGICDAT.DAT", "index": "法術編號",

@@ -173,7 +173,7 @@ void fdps_chapter_25_post_action(void)
    is character id 0x0c at level 40 and records 63..66 are four copies of
    character id 0x3b at level 40, which is the guide's 友方 LV40英雄索爾 plus
    LV40侍衛x4.  Character id 0x0c is 索爾: FRIAPRDA.DAT's row 0x0c is the
-   HP960 / MP480 / AP300 / DP100 / DX160 / MV6 template and FRILEVUP.DAT's row
+   HP960 / MP480 / AP300 / DP100 / DX160 / MV6 base line and FRILEVUP.DAT's row
    0x0c grows every field by 1, so at level 40 the unit builder's
    HP = hp_base + (LV-1) * hp_min gives 999 and MP gives 519, while
    AP = ap_base + LV * ap_min gives 340 and DP 140 -- 740 and 310 once 炎龍劍

@@ -411,10 +411,12 @@ void fdps_show_game_over(void)
 /* The twelve characters the demo enrols, in the order the twelve
    PUSH/CALL pairs at 0002ac37..0002aca7 enrol them.  They are portrait ids
    (assets/characters.md): the eleven playable characters other than 琴琴,
-   and 12, which is not a party member at all but the shared template row in
-   FRIAPRDA.DAT.  The order is what decides which map slot each of them ends
-   up standing in, because fdps_build_map_unit_array fills player slot i from
-   roster slot i. */
+   and 12, which is not a party member at all but 索爾, the guest hero of
+   chapters 1 to 6 and 26, enrolled from his own FRIAPRDA.DAT row.  Several
+   later indices hold byte copies of that row, but row 12 is 索爾's: his
+   guide-listed stats come out of it.  The order is what decides which map
+   slot each of them ends up standing in, because fdps_build_map_unit_array
+   fills player slot i from roster slot i. */
 #define DEMO_CHAR_RANDIS 0
 #define DEMO_CHAR_FLARENA 1
 #define DEMO_CHAR_BRANDO 8
@@ -424,7 +426,7 @@ void fdps_show_game_over(void)
 #define DEMO_CHAR_JUNA 3
 #define DEMO_CHAR_LANCELOT 11
 #define DEMO_CHAR_ARC 4
-#define DEMO_CHAR_TEMPLATE 12
+#define DEMO_CHAR_SOL 12
 #define DEMO_CHAR_MARIANNE 5
 #define DEMO_CHAR_JULIAN 6
 
@@ -534,7 +536,7 @@ void fdps_title_demo(void)
     fdps_roster_add_character(DEMO_CHAR_JUNA);
     fdps_roster_add_character(DEMO_CHAR_LANCELOT);
     fdps_roster_add_character(DEMO_CHAR_ARC);
-    fdps_roster_add_character(DEMO_CHAR_TEMPLATE);
+    fdps_roster_add_character(DEMO_CHAR_SOL);
     fdps_roster_add_character(DEMO_CHAR_MARIANNE);
     fdps_roster_add_character(DEMO_CHAR_JULIAN);
 

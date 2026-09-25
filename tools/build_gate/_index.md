@@ -10,6 +10,7 @@
 | --- | --- |
 | `gate.py` | 四個子命令。`check`（預設）建置每個目標、比對基準值、跑測試套件；`update` 推進某個目標的基準值，需要 `--reason`；`show` 印出目前的基準值與推進鏈；`selftest` 不碰 DOSBox-X，用自己合成的 LE 映像驗證閘門的每一項判定 |
 | `lefixup.py` | LE 重定位解析與重定位感知的映像指紋。表界與每個 fixup site 都從 header 即時解析 |
+| `pad_diff.py` | 比兩份同源建置的映像，判斷差異是不是全落在 `wcc386` 沒清零的對齊填充裡：字面值結尾 NUL 後的填充自動認定，其餘差異列出 object 位移與兩側的 map 符號供人工確認。用法見檔頭；`gate.py` 報 `different` 而改動只有註解時用它（[`rebuild_info/build_gate.md`](../../rebuild_info/build_gate.md)） |
 | `data/baselines.json` | 基準值，一個建置目標一筆，含推進鏈。**進版控**——放到 `workspace/` 下會跟中間產物一起消失 |
 
 `TARGETS` 是建置目標的正本。重建推進時新增一個目標再跑一次 `update`，就是全部的擴充工作。`TEST_SUITES` 是測試套件的正本，每筆帶 `needs` 與 `target`：機器缺件、或 `--target` 沒選到它對應的建置目標時報 skip，不會靜默略過，也不會跑到範圍外的東西。

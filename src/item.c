@@ -168,8 +168,8 @@ void fdps_apply_heal_to_targets(int target_count, unsigned char *target_ids,
    built out of, because only the item half is consumed.
 
    0x05, 0x06, 0x0d and 0x1b are absent on purpose: they exist in ITEM.DAT --
-   空白道具, 光之水晶 and 空之魔石, 精靈之劍, 封咒手套 -- and match no branch
-   here, so those items do nothing when used.  See item.h. */
+   item 0xcc (no name), 光之水晶 and 空之寶石, 精靈之劍, 封咒手套 -- and
+   match no branch here, so those items do nothing when used.  See item.h. */
 #define USE_EFFECT_FIRE_ITEM 0x01
 #define USE_EFFECT_THUNDER_ITEM 0x02
 #define USE_EFFECT_ICE_ITEM 0x03

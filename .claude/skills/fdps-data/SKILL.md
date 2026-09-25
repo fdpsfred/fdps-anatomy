@@ -40,9 +40,9 @@ python .claude/skills/fdps-data/query.py find 0x2710
 
 ## 讀結果時要知道的事
 
-- **數值一律出自資料檔**，名稱出自攻略站（經知識庫轉錄）。兩者不一致的地方以資料檔為準，`show` 會在該筆下面用 `!` 印出攻略站的說法。全部歧異列在 `fdps_data.json` 的 `discrepancies`。
+- **數值一律出自資料檔**。物品名稱出自遊戲內文字，其餘名稱出自攻略站，都經知識庫轉錄（物品名與攻略站寫法的三處差異列在 `assets/items.md`）。數值與攻略站不一致的地方以資料檔為準，`show` 會在該筆下面用 `!` 印出攻略站的說法。全部歧異列在 `fdps_data.json` 的 `discrepancies`。
 - **`blank` 的記錄預設不列出**：知識庫的表完全沒有列到的索引，`item` 的 `E2`–`FA` 與人物的空白索引都屬於這類。要看加 `--blank`。人物的 `22`、`23`、`3B` 三筆不是 `blank`——它們有內容，只是攻略站沒有給名字，名稱欄顯示「（攻略站未列）」。
-- **人物的出場屬性只有 `00`–`0B` 十二筆**。其餘索引的 `appearance_documented` 是 `false`，出場欄位一律 `null`——`FRIAPRDA.DAT` 那些位置的 byte 不是空的，但它們是重複的樣板列，不是該索引的角色屬性（見 `assets/characters.md`）。這些索引仍有成長範圍與法術習得。
+- **人物的出場屬性只有 `00`–`0B` 十二筆**。其餘索引的 `appearance_documented` 是 `false`，出場欄位一律 `null`——`FRIAPRDA.DAT` 那些位置的 byte 不是空的：`0C` 索爾、`0D` 卡里斯、`0E` 亞雷斯、`23`、`24`–`27`、`3B` 侍衛是非隊員角色的出場屬性，其餘是沒有讀取端的複本，資料集目前沒有收（見 `assets/characters.md`）。這些索引仍有成長範圍與法術習得。
 - **`distance` 與 `use_distance` 是位元欄位**：設了 `0x10` 表示直線，低 4 位才是距離。`distance_line` 與 `distance_value` 是解好的。
 - **法術的 `power` 為負數時是攻擊力加乘率**，`ap_multiplier` 是換算好的倍率。
 - **職業的 `code` 是職業代碼，`record_index` 才是它在 `PROMAP.DAT` 的位置**，兩者差 1。

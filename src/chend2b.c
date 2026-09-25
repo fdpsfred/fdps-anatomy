@@ -237,7 +237,10 @@ void fdps_chapter_26_end(void)
    own search returned (MOV EAX,[EBP-0x8] at 0003b933, MOV EAX,[EBP-0x4] at
    0003b941); WinGA26.dat interpreted; the fallen revived; the chapter index
    set to 27.  There is no roster write-back call anywhere in the handler --
-   unlike every other slot of the table -- so none is written here.
+   unlike every other slot of the table -- so none is written here.  The
+   route's one write-back happens inside the cut-scene instead: WinGA26.dat
+   runs opcode 0x61, which awards 法蓮娜 her experience and then writes the
+   battle units back to the roster (src/icon.c), before the revive below.
 
    THE ENDING ROUTE: Win26.dat interpreted, the ending sequence played, and the
    return-to-title flag raised.  It leaves data_fdps_chapter_current_chapter_id

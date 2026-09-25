@@ -330,10 +330,14 @@ void fdps_shutdown_free_resources(void)
    because fdps_build_palette_tables replaces both tables outright
    (src/palette.h).  The taken arm reads Mer1.tmp and Mer2.tmp back, which is
    the same two files and therefore the same Fde.pal-derived contents.  The
-   Fight.pal pair is written and then read by nothing at all: every reference
-   to the two literals at 00061dc0 and 00061dd0 is inside this function, and
-   FMer1.tmp is only ever looked at by the access() that decides the branch, so
-   the fight palette's tables reach disk and no code ever loads them back.
+   Fight.pal pair is not read here: every reference to the two literals at
+   00061dc0 and 00061dd0 is inside this function, and in it FMer1.tmp is only
+   looked at by the access() that decides the branch.  The pair is read back
+   elsewhere, each reader through its own copy of the two names: the combat
+   exchange (src/combat.c), the spell animation (src/cmbspell.c), the church
+   promotion (src/church.c) and the ending credit roll (src/ending.c) each
+   load FMer1.tmp and FMer2.tmp over the same two globals for the length of
+   their fight-palette screen and put Mer1.tmp and Mer2.tmp back afterwards.
    Only FMer1.tmp is tested for; nothing checks that the other three are, and
    no fopen result is tested at all, so a partial cache directory hands a null
    FILE * to fread.  That is the original's behaviour and no check is added.

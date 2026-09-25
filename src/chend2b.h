@@ -73,7 +73,9 @@ extern void fdps_chapter_26_end(void);
    data_fdps_shared_quit_game_requested is raised, sending the game back to
    the title screen.  The chapter index is left alone.
 
-   The only handler of the table with no roster write-back call.
+   The only handler of the table with no roster write-back call.  On the
+   hidden route the write-back is done by the cut-scene itself, WinGA26.dat's
+   opcode 0x61 (src/icon.c).
 
    Table slot 26. */
 extern void fdps_chapter_27_end(void);

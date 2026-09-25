@@ -99,9 +99,10 @@ extern void fdps_apply_heal_to_targets(int target_count,
    fields everything below runs on -- the use-effect code at +0x0d and the
    SIGNED use-amount word at +0x0e.
 
-   FOUR EFFECT CODES DO NOTHING AT ALL.  0x05 (空白道具), 0x06 (光之水晶,
-   空之魔石), 0x0d (精靈之劍) and 0x1b (封咒手套) match no branch, so using one
-   of those items plays nothing, changes nothing and does not consume the item.
+   FOUR EFFECT CODES DO NOTHING AT ALL.  0x05 (item 0xcc, whose name is
+   empty), 0x06 (光之水晶, 空之寶石), 0x0d (精靈之劍) and 0x1b (封咒手套)
+   match no branch, so using one of those items plays nothing, changes
+   nothing and does not consume the item.
    That is the original's behaviour and not a gap to fill in.
 
    WHICH CODES CONSUME THE ITEM IS NOT A PROPERTY OF THE EFFECT.  Five effects

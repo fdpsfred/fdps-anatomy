@@ -246,7 +246,7 @@ extern int fdps_icon_script_prompt_three_way_choice(void);
 
 /* Runs one cut-scene.  script_name is the member of IconAni.vfs to run, and it
    is the only thing a caller supplies: the archive's own name is held here, so
-   there is no way to run a script out of anything else.  All 67 call sites
+   there is no way to run a script out of anything else.  All 66 call sites
    hand it a string literal -- "Icon00.dat" is chapter 1's opening scene,
    "Win00.dat" chapter 1's victory scene.
 

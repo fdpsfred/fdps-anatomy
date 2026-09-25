@@ -63,12 +63,14 @@
 /* What the battle turn counter is divided by to name the wave, and it is a
    plain signed halving: MOV EAX,[0x00069ce8] / MOV EDX,[0x00069ce8] /
    SAR EDX,0x1f / SUB EAX,EDX / SAR EAX,0x1 at 0003955f..00039571, the -od
-   expansion of a signed divide by two, which truncates toward zero.  The bias
-   by the sign is the whole difference from an unsigned shift and it is
-   behaviour: it is what makes turn 7 come out at wave 3 rather than at wave 4,
-   and map27.dat schedules turn 7.  Rounding it, or writing it as a shift of an
-   unsigned counter, changes which wave arrives (rebuild_info/pitfalls.md,
-   contract C). */
+   expansion of a signed divide by two, which truncates toward zero.  The
+   truncation is the behaviour that matters: turn 7 comes out at wave 3, not
+   wave 4, and map27.dat schedules turn 7.  Rounding it, or writing it as
+   (turn + 1) / 2, changes which wave arrives (rebuild_info/pitfalls.md).  The
+   sign bias is not what decides turn 7 -- 7 / 2 is 3 signed or unsigned; it
+   only differs from an unsigned shift for a negative counter, which the turn
+   counter never is -- so the signed int division is kept because it is the
+   original's code shape (contract C), not because the chapter depends on it. */
 #define CH28_WAVE_TURN_DIVISOR 2
 
 /* How the wave is placed: XOR EAX,EAX / PUSH EAX at 0003955c, so
