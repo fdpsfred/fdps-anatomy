@@ -1,0 +1,526 @@
+<title>FDETXT 字模校對</title>
+<meta name="description" content="炎龍騎士團外傳 FDETXT.FON 中與倚天字型不完全吻合的字模，逐字填入正確的字。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground: #eef0ec;
+  --surface: #fbfcfa;
+  --ink: #1b2127;
+  --muted: #5d6770;
+  --rule: #d3d8d2;
+  --pixel: #1b2127;
+  --pixel-off: #e3e7e1;
+  --accent: #1f6b73;
+  --accent-soft: #d5e8e8;
+  --self: #b5421d;
+  --self-soft: #f6dfd4;
+  --ok: #2d7a3d;
+  --warn: #9a6400;
+  --bad: #b3261e;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --sans: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #12161a;
+    --surface: #1a1f25;
+    --ink: #e4e7e2;
+    --muted: #97a1a9;
+    --rule: #2e353d;
+    --pixel: #e4e7e2;
+    --pixel-off: #242a31;
+    --accent: #5cb3bb;
+    --accent-soft: #1f3538;
+    --self: #ee8a63;
+    --self-soft: #3d2519;
+    --ok: #6cc47c;
+    --warn: #e0a93a;
+    --bad: #f07a70;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #12161a;
+  --surface: #1a1f25;
+  --ink: #e4e7e2;
+  --muted: #97a1a9;
+  --rule: #2e353d;
+  --pixel: #e4e7e2;
+  --pixel-off: #242a31;
+  --accent: #5cb3bb;
+  --accent-soft: #1f3538;
+  --self: #ee8a63;
+  --self-soft: #3d2519;
+  --ok: #6cc47c;
+  --warn: #e0a93a;
+  --bad: #f07a70;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  padding-inline: 16px;
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+header.intro { padding-block: 28px 12px; display: grid; gap: 8px; }
+h1 { font-size: 26px; line-height: 1.25; margin: 0; text-wrap: balance; font-weight: 700; }
+.intro p { margin: 0; max-width: 68ch; color: var(--muted); }
+.intro strong { color: var(--ink); font-weight: 500; }
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--ground);
+  border-bottom: 1px solid var(--rule);
+  padding-block: 10px;
+  display: grid; gap: 8px;
+}
+.bar-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.progress { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.meter { width: 160px; height: 8px; background: var(--pixel-off); border-radius: 4px; overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+.conn { font-size: 13px; color: var(--muted); }
+.conn.ok { color: var(--ok); }
+.conn.bad { color: var(--bad); }
+.filters { display: flex; gap: 6px; }
+button { font: inherit; cursor: pointer; }
+.chip, .seg {
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  border-radius: 6px; padding: 2px 10px; font-size: 14px;
+}
+.seg[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.palette { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.palette span { font-size: 13px; color: var(--muted); margin-right: 4px; }
+.palette button {
+  width: 32px; height: 32px; border: 1px solid var(--rule); background: var(--surface);
+  color: var(--ink); border-radius: 6px; font-size: 17px; line-height: 1;
+}
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); padding-block: 16px; }
+.card {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+  padding: 14px; display: grid; gap: 12px; align-content: start;
+}
+.card.done { border-color: var(--accent); }
+.head { display: flex; gap: 14px; align-items: flex-start; }
+.big { image-rendering: pixelated; width: 128px; height: 128px; border-radius: 4px; flex: none; }
+.meta { display: grid; gap: 4px; min-width: 0; }
+.gid { font-family: var(--mono); font-size: 18px; font-weight: 600; }
+.uses { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.note { font-size: 13px; color: var(--warn); }
+.cands { display: grid; gap: 4px; }
+.cands h3, .ctx h3 { font-size: 12px; letter-spacing: .06em; color: var(--muted); margin: 0; font-weight: 500; }
+.cand-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.cand {
+  display: flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--ground);
+  color: var(--ink); border-radius: 6px; padding: 3px 8px 3px 4px; text-align: left;
+}
+.cand canvas { image-rendering: pixelated; width: 32px; height: 32px; flex: none; }
+.cand .ch { font-size: 20px; min-width: 1.2em; text-align: center; }
+.cand .d { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.25; }
+.cand .d b { color: var(--ink); font-weight: 600; }
+.cand.fd2 { border-color: var(--accent); background: var(--accent-soft); }
+.ctx { display: grid; gap: 4px; }
+.line { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; font-size: 18px; line-height: 1; }
+.line .where { font-family: var(--mono); font-size: 11px; color: var(--muted); width: 100%; margin-bottom: 2px; }
+.line canvas { image-rendering: pixelated; width: 18px; height: 18px; }
+.line .self { background: var(--self-soft); outline: 2px solid var(--self); border-radius: 2px; }
+.line .ans { text-decoration: underline dotted var(--accent); text-underline-offset: 3px; }
+.line .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--rule); border-radius: 3px; padding: 0 3px; margin: 0 2px; line-height: 1.4; }
+.none { font-size: 13px; color: var(--muted); }
+.answer { display: grid; gap: 4px; }
+.answer label { font-size: 13px; color: var(--muted); }
+.answer-row { display: flex; gap: 8px; align-items: center; }
+.answer input {
+  font: inherit; font-size: 22px; width: 5.5em; padding: 4px 8px; border: 1px solid var(--rule);
+  border-radius: 6px; background: var(--ground); color: var(--ink);
+}
+.status { font-size: 13px; color: var(--muted); }
+.status.ok { color: var(--ok); }
+.status.warn { color: var(--warn); }
+.status.bad { color: var(--bad); }
+@media (max-width: 420px) {
+  .grid { grid-template-columns: 1fr; }
+  .big { width: 96px; height: 96px; }
+}
+@media (prefers-reduced-motion: reduce) { .meter > i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <h1>FDETXT 字模校對</h1>
+    <p id="lede"></p>
+    <p>在每格下方打上這個字模代表的字。點候選字會直接填入；上方的標點列會填進最後點選的輸入框。<strong>輸入會自動儲存</strong>，全部填完後回到對話說一聲即可。</p>
+  </header>
+  <div class="bar">
+    <div class="bar-row">
+      <div class="progress"><div class="meter"><i id="meter"></i></div><span id="count"></span></div>
+      <div class="filters" role="group" aria-label="篩選">
+        <button class="seg" id="f-all" aria-pressed="true">全部</button>
+        <button class="seg" id="f-todo" aria-pressed="false">只看未填</button>
+      </div>
+      <span class="conn" id="conn">正在連線…</span>
+    </div>
+    <div class="palette" id="palette"><span>標點</span></div>
+  </div>
+  <main class="grid" id="grid"></main>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const PUNCT = ["，","。","、","；","：","？","！","「","」","『","』","（","）","～","…","—","．","‧","﹑","　"];
+const DRAFT_KEY = "fdetxt-glyph-drafts";
+const answers = {};          // index -> char, as shown on the page
+const unsynced = new Set();  // indices edited here whose write the database has not confirmed
+const cards = {};            // index -> {root, input, status}
+let db = null;
+let lastInput = null;
+let filterTodo = false;
+
+const hex4 = n => n.toString(16).toUpperCase().padStart(4, "0");
+const docId = n => "g" + hex4(n);
+
+function tokens() {
+  const s = getComputedStyle(document.documentElement);
+  return { on: s.getPropertyValue("--pixel").trim(), off: s.getPropertyValue("--pixel-off").trim() };
+}
+
+function drawGlyph(canvas, hex, withGround) {
+  const ctx = canvas.getContext("2d");
+  canvas.width = 16; canvas.height = 16;
+  const t = tokens();
+  ctx.clearRect(0, 0, 16, 16);
+  if (withGround) { ctx.fillStyle = t.off; ctx.fillRect(0, 0, 16, 16); }
+  ctx.fillStyle = t.on;
+  for (let r = 0; r < 16; r++) {
+    const row = parseInt(hex.slice(r * 4, r * 4 + 4), 16);
+    for (let c = 0; c < 16; c++) if (row & (0x8000 >> c)) ctx.fillRect(c, r, 1, 1);
+  }
+}
+
+function glyphCanvas(hex, cls, withGround) {
+  const c = document.createElement("canvas");
+  if (cls) c.className = cls;
+  c.dataset.hex = hex;
+  c.dataset.ground = withGround ? "1" : "";
+  drawGlyph(c, hex, withGround);
+  return c;
+}
+
+// The browser keeps what is shown plus which answers have not been confirmed
+// written to the database yet ("unsynced"), so a failed or offline edit is
+// pushed again later instead of being overwritten by the database's copy.
+function loadDrafts() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) || "{}");
+    if (raw && raw.values) {
+      Object.assign(answers, raw.values);
+      for (const k of raw.unsynced || []) unsynced.add(Number(k));
+    }
+  } catch (e) { /* storage blocked or unreadable */ }
+}
+function saveDrafts() {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ values: answers, unsynced: [...unsynced] }));
+  } catch (e) { /* storage blocked */ }
+}
+
+const TAG_TEXT = { line_break: "換行", page_break: "換頁", subst_1: "代入", subst_2: "代入", number: "數字", speaker: "說話者" };
+
+function renderContext(item, box) {
+  box.textContent = "";
+  const h = document.createElement("h3");
+  h.textContent = "出現在";
+  box.append(h);
+  if (!item.contexts.length) {
+    const p = document.createElement("p");
+    p.className = "none";
+    p.textContent = "沒有任何文字區塊用到這個字模。";
+    box.append(p);
+    return;
+  }
+  for (const ctx of item.contexts) {
+    const line = document.createElement("div");
+    line.className = "line";
+    const where = document.createElement("span");
+    where.className = "where";
+    where.textContent = ctx.block + " 第 0x" + ctx.entry.toString(16).padStart(2, "0") + " 筆";
+    line.append(where);
+    for (const cell of ctx.cells) {
+      if (cell.c !== undefined) {
+        line.append(document.createTextNode(cell.c));
+      } else if (cell.g !== undefined) {
+        const a = answers[cell.g];
+        if (cell.self) {
+          line.append(glyphCanvas(DATA.bitmaps[cell.g], "self", false));
+        } else if (a) {
+          const s = document.createElement("span");
+          s.className = "ans";
+          s.textContent = a;
+          line.append(s);
+        } else {
+          line.append(glyphCanvas(DATA.bitmaps[cell.g], "", false));
+        }
+      } else {
+        const s = document.createElement("span");
+        s.className = "tag";
+        s.textContent = TAG_TEXT[cell.k] || cell.k;
+        line.append(s);
+      }
+    }
+    box.append(line);
+  }
+}
+
+function setStatus(index, text, kind) {
+  const st = cards[index].status;
+  st.textContent = text;
+  st.className = "status" + (kind ? " " + kind : "");
+}
+
+const timers = {};      // index -> pending debounce timer
+const saving = new Set();  // indices with a database write in flight
+const failed = {};      // index -> error code of the last failed write
+
+function describeSaved(index) {
+  if (timers[index] || saving.has(index)) { setStatus(index, "儲存中…", ""); return; }
+  if (failed[index]) { setStatus(index, "儲存失敗（" + failed[index] + "），稍後會自動重試", "bad"); return; }
+  const a = answers[index];
+  if (!a) { setStatus(index, "未填", ""); return; }
+  if (!db) setStatus(index, "只存在這台瀏覽器，Claude 還讀不到", "warn");
+  else if (unsynced.has(index)) setStatus(index, "等待連線後上傳", "warn");
+  else setStatus(index, "已儲存", "ok");
+}
+
+// One glyph is one character; anything else stays in the box unsaved.
+function accept(index, value) {
+  const n = [...value].length;
+  if (n > 1) { setStatus(index, "一格只能填一個字，這個還沒儲存", "bad"); return; }
+  if (value) answers[index] = value; else delete answers[index];
+  unsynced.add(index);
+  saveDrafts();
+  refresh();
+  clearTimeout(timers[index]);
+  timers[index] = setTimeout(() => { delete timers[index]; push(index); }, 600);
+  describeSaved(index);
+}
+
+async function push(index) {
+  if (!db) { describeSaved(index); return; }
+  if (saving.has(index)) { timers[index] = setTimeout(() => { delete timers[index]; push(index); }, 300); return; }
+  const value = answers[index] || "";
+  saving.add(index);
+  describeSaved(index);
+  try {
+    const ref = db.doc("answers/" + docId(index));
+    if (value) await ref.set({ index, char: value }); else await ref.delete();
+    delete failed[index];
+    if ((answers[index] || "") === value) unsynced.delete(index);
+    saveDrafts();
+  } catch (e) {
+    failed[index] = (e && e.code) || "unknown";
+    setTimeout(() => { if (unsynced.has(index) && !timers[index]) push(index); }, 5000);
+  } finally {
+    saving.delete(index);
+    describeSaved(index);
+  }
+}
+
+function fill(index, value) {
+  cards[index].input.value = value;
+  accept(index, value);
+}
+
+function buildCard(item) {
+  const root = document.createElement("article");
+  root.className = "card";
+  const head = document.createElement("div");
+  head.className = "head";
+  head.append(glyphCanvas(item.bitmap, "big", true));
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const gid = document.createElement("div");
+  gid.className = "gid";
+  gid.textContent = "0x" + hex4(item.index);
+  const uses = document.createElement("div");
+  uses.className = "uses";
+  uses.textContent = "文字裡出現 " + item.uses + " 次";
+  meta.append(gid, uses);
+  if (item.blank) {
+    const n = document.createElement("div");
+    n.className = "note";
+    n.textContent = "整格全空白，沒有候選字。若是空格請填全形空白（標點列最後一格）。";
+    meta.append(n);
+  }
+  head.append(meta);
+
+  const cands = document.createElement("section");
+  cands.className = "cands";
+  const ch = document.createElement("h3");
+  ch.textContent = "候選（數字是不同的像素數）";
+  const list = document.createElement("div");
+  list.className = "cand-list";
+  for (const c of item.candidates) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cand" + (c.source === "fd2" ? " fd2" : "");
+    b.append(glyphCanvas(c.bitmap, "", true));
+    const chs = document.createElement("span");
+    chs.className = "ch";
+    chs.textContent = c.char || "?";
+    const d = document.createElement("span");
+    d.className = "d";
+    const src = c.source === "fd2" ? "前作 FD2" : c.source === "ascii" ? "倚天 ASCII" : "倚天";
+    d.innerHTML = "<b></b><br>";
+    d.firstChild.textContent = src + " 差 " + c.distance;
+    d.append(document.createTextNode(c.label));
+    b.append(chs, d);
+    b.title = c.source === "fd2"
+      ? "前作字模表給最接近的 FD2 字模的字" + (c.distance === 0 ? "（字模完全相同）" : "")
+      : "倚天字型裡最接近的字";
+    if (c.char) b.addEventListener("click", () => fill(item.index, c.char));
+    else b.disabled = true;
+    list.append(b);
+  }
+  if (!item.candidates.length) {
+    const p = document.createElement("p");
+    p.className = "none";
+    p.textContent = "沒有候選。";
+    list.append(p);
+  }
+  cands.append(ch, list);
+
+  const ctx = document.createElement("section");
+  ctx.className = "ctx";
+
+  const ans = document.createElement("div");
+  ans.className = "answer";
+  const id = "ans-" + hex4(item.index);
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = "這個字模是：";
+  const row = document.createElement("div");
+  row.className = "answer-row";
+  const input = document.createElement("input");
+  input.id = id;
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.addEventListener("focus", () => { lastInput = item.index; });
+  // While an input method (注音, 倉頡…) is still composing, the box holds a
+  // half-typed syllable; only the committed character is an answer.
+  let composing = false;
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => { composing = false; accept(item.index, input.value); });
+  input.addEventListener("input", e => { if (!composing && !e.isComposing) accept(item.index, input.value); });
+  const status = document.createElement("span");
+  status.className = "status";
+  row.append(input, status);
+  ans.append(label, row);
+
+  root.append(head, cands, ctx, ans);
+  cards[item.index] = { root, input, status, ctx, item };
+  return root;
+}
+
+function refresh() {
+  const total = DATA.items.length;
+  const done = DATA.items.filter(i => answers[i.index]).length;
+  document.getElementById("count").textContent = "已填 " + done + " / " + total;
+  document.getElementById("meter").style.width = (100 * done / total) + "%";
+  for (const item of DATA.items) {
+    const c = cards[item.index];
+    c.root.classList.toggle("done", !!answers[item.index]);
+    c.root.hidden = filterTodo && !!answers[item.index] && document.activeElement !== c.input;
+    renderContext(item, c.ctx);
+  }
+}
+
+function redrawAll() {
+  document.querySelectorAll("canvas[data-hex]").forEach(c => drawGlyph(c, c.dataset.hex, c.dataset.ground === "1"));
+}
+
+function init() {
+  const s = DATA.summary;
+  document.getElementById("lede").textContent =
+    "FDETXT.FON 共 " + s.glyph_count + " 個字模，其中 " + s.exact + " 個與倚天 STDFONT.15 逐像素完全相同、已自動對上字；下面 " +
+    s.pending + " 個對不上，需要人工判讀。";
+  const pal = document.getElementById("palette");
+  for (const p of PUNCT) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = p === "　" ? "␣" : p;
+    b.title = p === "　" ? "全形空白" : p;
+    b.addEventListener("mousedown", e => e.preventDefault());
+    b.addEventListener("click", () => {
+      if (lastInput === null) return;
+      fill(lastInput, p);
+      cards[lastInput].input.focus();
+    });
+    pal.append(b);
+  }
+  const grid = document.getElementById("grid");
+  for (const item of DATA.items) grid.append(buildCard(item));
+
+  loadDrafts();
+  for (const item of DATA.items) {
+    cards[item.index].input.value = answers[item.index] || "";
+    describeSaved(item.index);
+  }
+  refresh();
+
+  const fAll = document.getElementById("f-all"), fTodo = document.getElementById("f-todo");
+  fAll.addEventListener("click", () => { filterTodo = false; fAll.setAttribute("aria-pressed", "true"); fTodo.setAttribute("aria-pressed", "false"); refresh(); });
+  fTodo.addEventListener("click", () => { filterTodo = true; fTodo.setAttribute("aria-pressed", "true"); fAll.setAttribute("aria-pressed", "false"); refresh(); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawAll);
+  new MutationObserver(redrawAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  connect();
+}
+
+async function connect() {
+  const conn = document.getElementById("conn");
+  let handle = null;
+  try { handle = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { handle = null; }
+  if (!handle) {
+    conn.textContent = "無法連上共用資料庫：答案只會存在這台瀏覽器，Claude 讀不到";
+    conn.className = "conn bad";
+    return;
+  }
+  db = handle;
+  conn.textContent = "已連線，答案會自動存到雲端";
+  conn.className = "conn ok";
+  // Edits made before the connection (or whose write failed last visit) go up now.
+  for (const index of [...unsynced]) push(index);
+  db.collection("answers").onSnapshot(snap => {
+    const stored = {};
+    for (const d of snap.docs) {
+      const v = d.data();
+      if (v && typeof v.index === "number" && typeof v.char === "string") stored[v.index] = v.char;
+    }
+    // The database wins except where this browser holds an edit it has not
+    // confirmed writing yet; those stay as typed until their write lands.
+    for (const item of DATA.items) {
+      const i = item.index;
+      if (unsynced.has(i)) continue;
+      if (i in stored) answers[i] = stored[i]; else delete answers[i];
+    }
+    saveDrafts();
+    for (const item of DATA.items) {
+      const c = cards[item.index];
+      if (document.activeElement !== c.input) c.input.value = answers[item.index] || "";
+      describeSaved(item.index);
+    }
+    refresh();
+  }, e => {
+    conn.textContent = "與資料庫的連線中斷（" + ((e && e.code) || "unknown") + "），重新整理頁面再試";
+    conn.className = "conn bad";
+  });
+}
+
+init();
+</script>

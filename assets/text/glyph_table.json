@@ -1,0 +1,10695 @@
+{
+ "font": "FDETXT.FON",
+ "glyph_count": 1792,
+ "summary": {
+  "glyph_count": 1792,
+  "et3_exact": 1723,
+  "developer": 0,
+  "pending": 69
+ },
+ "glyphs": [
+  {
+   "index": 0,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 2,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 3,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 4,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 5,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 6,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 7,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 8,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 9,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 10,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 11,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 12,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 13,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 14,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 15,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 16,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 17,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 18,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 19,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 20,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 21,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 22,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 23,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 24,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 25,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 26,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 27,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 28,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 29,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 30,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 31,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 32,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 33,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 34,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 35,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 36,
+   "char": "蘭",
+   "basis": "et3_exact",
+   "big5": "C4F5"
+  },
+  {
+   "index": 37,
+   "char": "迪",
+   "basis": "et3_exact",
+   "big5": "AD7D"
+  },
+  {
+   "index": 38,
+   "char": "斯",
+   "basis": "et3_exact",
+   "big5": "B4B5"
+  },
+  {
+   "index": 39,
+   "char": "法",
+   "basis": "et3_exact",
+   "big5": "AA6B"
+  },
+  {
+   "index": 40,
+   "char": "蓮",
+   "basis": "et3_exact",
+   "big5": "BDAC"
+  },
+  {
+   "index": 41,
+   "char": "娜",
+   "basis": "et3_exact",
+   "big5": "AE52"
+  },
+  {
+   "index": 42,
+   "char": "費",
+   "basis": "et3_exact",
+   "big5": "B64F"
+  },
+  {
+   "index": 43,
+   "char": "塔",
+   "basis": "et3_exact",
+   "big5": "B6F0"
+  },
+  {
+   "index": 44,
+   "char": "加",
+   "basis": "et3_exact",
+   "big5": "A55B"
+  },
+  {
+   "index": 45,
+   "char": "裘",
+   "basis": "et3_exact",
+   "big5": "B8CA"
+  },
+  {
+   "index": 46,
+   "char": "亞",
+   "basis": "et3_exact",
+   "big5": "A8C8"
+  },
+  {
+   "index": 47,
+   "char": "克",
+   "basis": "et3_exact",
+   "big5": "A74A"
+  },
+  {
+   "index": 48,
+   "char": "瑪",
+   "basis": "et3_exact",
+   "big5": "BABF"
+  },
+  {
+   "index": 49,
+   "char": "麗",
+   "basis": "et3_exact",
+   "big5": "C452"
+  },
+  {
+   "index": 50,
+   "char": "安",
+   "basis": "et3_exact",
+   "big5": "A677"
+  },
+  {
+   "index": 51,
+   "char": "尤",
+   "basis": "et3_exact",
+   "big5": "A4D7"
+  },
+  {
+   "index": 52,
+   "char": "利",
+   "basis": "et3_exact",
+   "big5": "A751"
+  },
+  {
+   "index": 53,
+   "char": "琴",
+   "basis": "et3_exact",
+   "big5": "B55E"
+  },
+  {
+   "index": 54,
+   "char": "布",
+   "basis": "et3_exact",
+   "big5": "A5AC"
+  },
+  {
+   "index": 55,
+   "char": "多",
+   "basis": "et3_exact",
+   "big5": "A668"
+  },
+  {
+   "index": 56,
+   "char": "蓋",
+   "basis": "et3_exact",
+   "big5": "BB5C"
+  },
+  {
+   "index": 57,
+   "char": "珊",
+   "basis": "et3_exact",
+   "big5": "ACC0"
+  },
+  {
+   "index": 58,
+   "char": "洛",
+   "basis": "et3_exact",
+   "big5": "ACA5"
+  },
+  {
+   "index": 59,
+   "char": "特",
+   "basis": "et3_exact",
+   "big5": "AF53"
+  },
+  {
+   "index": 60,
+   "char": "索",
+   "basis": "et3_exact",
+   "big5": "AFC1"
+  },
+  {
+   "index": 61,
+   "char": "爾",
+   "basis": "et3_exact",
+   "big5": "BAB8"
+  },
+  {
+   "index": 62,
+   "char": "卡",
+   "basis": "et3_exact",
+   "big5": "A564"
+  },
+  {
+   "index": 63,
+   "char": "里",
+   "basis": "et3_exact",
+   "big5": "A8BD"
+  },
+  {
+   "index": 64,
+   "char": "雷",
+   "basis": "et3_exact",
+   "big5": "B970"
+  },
+  {
+   "index": 65,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 66,
+   "char": "侍",
+   "basis": "et3_exact",
+   "big5": "A8CD"
+  },
+  {
+   "index": 67,
+   "char": "衛",
+   "basis": "et3_exact",
+   "big5": "BDC3"
+  },
+  {
+   "index": 68,
+   "char": "平",
+   "basis": "et3_exact",
+   "big5": "A5AD"
+  },
+  {
+   "index": 69,
+   "char": "衡",
+   "basis": "et3_exact",
+   "big5": "BFC5"
+  },
+  {
+   "index": 70,
+   "char": "之",
+   "basis": "et3_exact",
+   "big5": "A4A7"
+  },
+  {
+   "index": 71,
+   "char": "神",
+   "basis": "et3_exact",
+   "big5": "AFAB"
+  },
+  {
+   "index": 72,
+   "char": "魔",
+   "basis": "et3_exact",
+   "big5": "C55D"
+  },
+  {
+   "index": 73,
+   "char": "導",
+   "basis": "et3_exact",
+   "big5": "BEC9"
+  },
+  {
+   "index": 74,
+   "char": "王",
+   "basis": "et3_exact",
+   "big5": "A4FD"
+  },
+  {
+   "index": 75,
+   "char": "吉",
+   "basis": "et3_exact",
+   "big5": "A64E"
+  },
+  {
+   "index": 76,
+   "char": "歐",
+   "basis": "et3_exact",
+   "big5": "BCDA"
+  },
+  {
+   "index": 77,
+   "char": "塞",
+   "basis": "et3_exact",
+   "big5": "B6EB"
+  },
+  {
+   "index": 78,
+   "char": "魯",
+   "basis": "et3_exact",
+   "big5": "BE7C"
+  },
+  {
+   "index": 79,
+   "char": "森",
+   "basis": "et3_exact",
+   "big5": "B4CB"
+  },
+  {
+   "index": 80,
+   "char": "汎",
+   "basis": "et3_exact",
+   "big5": "A6C6"
+  },
+  {
+   "index": 81,
+   "char": "拉",
+   "basis": "et3_exact",
+   "big5": "A9D4"
+  },
+  {
+   "index": 82,
+   "char": "沛",
+   "basis": "et3_exact",
+   "big5": "A84B"
+  },
+  {
+   "index": 83,
+   "char": "凱",
+   "basis": "et3_exact",
+   "big5": "B3CD"
+  },
+  {
+   "index": 84,
+   "char": "因",
+   "basis": "et3_exact",
+   "big5": "A65D"
+  },
+  {
+   "index": 85,
+   "char": "巴",
+   "basis": "et3_exact",
+   "big5": "A4DA"
+  },
+  {
+   "index": 86,
+   "char": "薩",
+   "basis": "et3_exact",
+   "big5": "C2C4"
+  },
+  {
+   "index": 87,
+   "char": "達",
+   "basis": "et3_exact",
+   "big5": "B946"
+  },
+  {
+   "index": 88,
+   "char": "席",
+   "basis": "et3_exact",
+   "big5": "AE75"
+  },
+  {
+   "index": 89,
+   "char": "石",
+   "basis": "et3_exact",
+   "big5": "A5DB"
+  },
+  {
+   "index": 90,
+   "char": "巨",
+   "basis": "et3_exact",
+   "big5": "A5A8"
+  },
+  {
+   "index": 91,
+   "char": "死",
+   "basis": "et3_exact",
+   "big5": "A6BA"
+  },
+  {
+   "index": 92,
+   "char": "巫",
+   "basis": "et3_exact",
+   "big5": "A7C5"
+  },
+  {
+   "index": 93,
+   "char": "湯",
+   "basis": "et3_exact",
+   "big5": "B4F6"
+  },
+  {
+   "index": 94,
+   "char": "婆",
+   "basis": "et3_exact",
+   "big5": "B143"
+  },
+  {
+   "index": 95,
+   "char": "蛇",
+   "basis": "et3_exact",
+   "big5": "B344"
+  },
+  {
+   "index": 96,
+   "char": "女",
+   "basis": "et3_exact",
+   "big5": "A46B"
+  },
+  {
+   "index": 97,
+   "char": "使",
+   "basis": "et3_exact",
+   "big5": "A8CF"
+  },
+  {
+   "index": 98,
+   "char": "暗",
+   "basis": "et3_exact",
+   "big5": "B774"
+  },
+  {
+   "index": 99,
+   "char": "黑",
+   "basis": "et3_exact",
+   "big5": "B6C2"
+  },
+  {
+   "index": 100,
+   "char": "騎",
+   "basis": "et3_exact",
+   "big5": "C34D"
+  },
+  {
+   "index": 101,
+   "char": "兵",
+   "basis": "et3_exact",
+   "big5": "A74C"
+  },
+  {
+   "index": 102,
+   "char": "士",
+   "basis": "et3_exact",
+   "big5": "A468"
+  },
+  {
+   "index": 103,
+   "char": "地",
+   "basis": "et3_exact",
+   "big5": "A661"
+  },
+  {
+   "index": 104,
+   "char": "獄",
+   "basis": "et3_exact",
+   "big5": "BABB"
+  },
+  {
+   "index": 105,
+   "char": "野",
+   "basis": "et3_exact",
+   "big5": "B3A5"
+  },
+  {
+   "index": 106,
+   "char": "武",
+   "basis": "et3_exact",
+   "big5": "AA5A"
+  },
+  {
+   "index": 107,
+   "char": "蠻",
+   "basis": "et3_exact",
+   "big5": "C65A"
+  },
+  {
+   "index": 108,
+   "char": "戰",
+   "basis": "et3_exact",
+   "big5": "BED4"
+  },
+  {
+   "index": 109,
+   "char": "狂",
+   "basis": "et3_exact",
+   "big5": "A867"
+  },
+  {
+   "index": 110,
+   "char": "狼",
+   "basis": "et3_exact",
+   "big5": "AF54"
+  },
+  {
+   "index": 111,
+   "char": "人",
+   "basis": "et3_exact",
+   "big5": "A448"
+  },
+  {
+   "index": 112,
+   "char": "骷",
+   "basis": "et3_exact",
+   "big5": "BE75"
+  },
+  {
+   "index": 113,
+   "char": "顱",
+   "basis": "et3_exact",
+   "big5": "C660"
+  },
+  {
+   "index": 114,
+   "char": "白",
+   "basis": "et3_exact",
+   "big5": "A5D5"
+  },
+  {
+   "index": 115,
+   "char": "骨",
+   "basis": "et3_exact",
+   "big5": "B0A9"
+  },
+  {
+   "index": 116,
+   "char": "傭",
+   "basis": "et3_exact",
+   "big5": "B6C4"
+  },
+  {
+   "index": 117,
+   "char": "禁",
+   "basis": "et3_exact",
+   "big5": "B854"
+  },
+  {
+   "index": 118,
+   "char": "隊",
+   "basis": "et3_exact",
+   "big5": "B6A4"
+  },
+  {
+   "index": 119,
+   "char": "弓",
+   "basis": "et3_exact",
+   "big5": "A47D"
+  },
+  {
+   "index": 120,
+   "char": "箭",
+   "basis": "et3_exact",
+   "big5": "BD62"
+  },
+  {
+   "index": 121,
+   "char": "手",
+   "basis": "et3_exact",
+   "big5": "A4E2"
+  },
+  {
+   "index": 122,
+   "char": "飛",
+   "basis": "et3_exact",
+   "big5": "ADB8"
+  },
+  {
+   "index": 123,
+   "char": "天",
+   "basis": "et3_exact",
+   "big5": "A4D1"
+  },
+  {
+   "index": 124,
+   "char": "空",
+   "basis": "et3_exact",
+   "big5": "AAC5"
+  },
+  {
+   "index": 125,
+   "char": "步",
+   "basis": "et3_exact",
+   "big5": "A842"
+  },
+  {
+   "index": 126,
+   "char": "鎧",
+   "basis": "et3_exact",
+   "big5": "F15A"
+  },
+  {
+   "index": 127,
+   "char": "甲",
+   "basis": "et3_exact",
+   "big5": "A5D2"
+  },
+  {
+   "index": 128,
+   "char": "冰",
+   "basis": "et3_exact",
+   "big5": "A642"
+  },
+  {
+   "index": 129,
+   "char": "祭",
+   "basis": "et3_exact",
+   "big5": "B2BD"
+  },
+  {
+   "index": 130,
+   "char": "司",
+   "basis": "et3_exact",
+   "big5": "A571"
+  },
+  {
+   "index": 131,
+   "char": "幽",
+   "basis": "et3_exact",
+   "big5": "ABD5"
+  },
+  {
+   "index": 132,
+   "char": "魂",
+   "basis": "et3_exact",
+   "big5": "BBEE"
+  },
+  {
+   "index": 133,
+   "char": "靈",
+   "basis": "et3_exact",
+   "big5": "C646"
+  },
+  {
+   "index": 134,
+   "char": "犬",
+   "basis": "et3_exact",
+   "big5": "A4FC"
+  },
+  {
+   "index": 135,
+   "char": "拳",
+   "basis": "et3_exact",
+   "big5": "AEB1"
+  },
+  {
+   "index": 136,
+   "char": "鬥",
+   "basis": "et3_exact",
+   "big5": "B0AB"
+  },
+  {
+   "index": 137,
+   "char": "家",
+   "basis": "et3_exact",
+   "big5": "AE61"
+  },
+  {
+   "index": 138,
+   "char": "寶",
+   "basis": "et3_exact",
+   "big5": "C45F"
+  },
+  {
+   "index": 139,
+   "char": "箱",
+   "basis": "et3_exact",
+   "big5": "BD63"
+  },
+  {
+   "index": 140,
+   "char": "怪",
+   "basis": "et3_exact",
+   "big5": "A9C7"
+  },
+  {
+   "index": 141,
+   "char": "妖",
+   "basis": "et3_exact",
+   "big5": "A7AF"
+  },
+  {
+   "index": 142,
+   "char": "精",
+   "basis": "et3_exact",
+   "big5": "BAEB"
+  },
+  {
+   "index": 143,
+   "char": "守",
+   "basis": "et3_exact",
+   "big5": "A675"
+  },
+  {
+   "index": 144,
+   "char": "護",
+   "basis": "et3_exact",
+   "big5": "C540"
+  },
+  {
+   "index": 145,
+   "char": "龍",
+   "basis": "et3_exact",
+   "big5": "C073"
+  },
+  {
+   "index": 146,
+   "char": "修",
+   "basis": "et3_exact",
+   "big5": "ADD7"
+  },
+  {
+   "index": 147,
+   "char": "佩",
+   "basis": "et3_exact",
+   "big5": "A8D8"
+  },
+  {
+   "index": 148,
+   "char": "德",
+   "basis": "et3_exact",
+   "big5": "BC77"
+  },
+  {
+   "index": 149,
+   "char": "尼",
+   "basis": "et3_exact",
+   "big5": "A5A7"
+  },
+  {
+   "index": 150,
+   "char": "恩",
+   "basis": "et3_exact",
+   "big5": "AEA6"
+  },
+  {
+   "index": 151,
+   "char": "假",
+   "basis": "et3_exact",
+   "big5": "B0B2"
+  },
+  {
+   "index": 152,
+   "char": "村",
+   "basis": "et3_exact",
+   "big5": "A7F8"
+  },
+  {
+   "index": 153,
+   "char": "民",
+   "basis": "et3_exact",
+   "big5": "A5C1"
+  },
+  {
+   "index": 154,
+   "char": "婦",
+   "basis": "et3_exact",
+   "big5": "B0FC"
+  },
+  {
+   "index": 155,
+   "char": "長",
+   "basis": "et3_exact",
+   "big5": "AAF8"
+  },
+  {
+   "index": 156,
+   "char": "艾",
+   "basis": "et3_exact",
+   "big5": "A6E3"
+  },
+  {
+   "index": 157,
+   "char": "芙",
+   "basis": "et3_exact",
+   "big5": "AADC"
+  },
+  {
+   "index": 158,
+   "char": "羅",
+   "basis": "et3_exact",
+   "big5": "C3B9"
+  },
+  {
+   "index": 159,
+   "char": "絲",
+   "basis": "et3_exact",
+   "big5": "B5B7"
+  },
+  {
+   "index": 160,
+   "char": "蒂",
+   "basis": "et3_exact",
+   "big5": "B8A6"
+  },
+  {
+   "index": 161,
+   "char": "倫",
+   "basis": "et3_exact",
+   "big5": "ADDB"
+  },
+  {
+   "index": 162,
+   "char": "諾",
+   "basis": "et3_exact",
+   "big5": "BFD5"
+  },
+  {
+   "index": 163,
+   "char": "大",
+   "basis": "et3_exact",
+   "big5": "A46A"
+  },
+  {
+   "index": 164,
+   "char": "茜",
+   "basis": "et3_exact",
+   "big5": "D37D"
+  },
+  {
+   "index": 165,
+   "char": "火",
+   "basis": "et3_exact",
+   "big5": "A4F5"
+  },
+  {
+   "index": 166,
+   "char": "光",
+   "basis": "et3_exact",
+   "big5": "A5FA"
+  },
+  {
+   "index": 167,
+   "char": "束",
+   "basis": "et3_exact",
+   "big5": "A7F4"
+  },
+  {
+   "index": 168,
+   "char": "砲",
+   "basis": "et3_exact",
+   "big5": "AFA5"
+  },
+  {
+   "index": 169,
+   "char": "座",
+   "basis": "et3_exact",
+   "big5": "AE79"
+  },
+  {
+   "index": 170,
+   "char": "類",
+   "basis": "et3_exact",
+   "big5": "C3FE"
+  },
+  {
+   "index": 171,
+   "char": "鬼",
+   "basis": "et3_exact",
+   "big5": "B0AD"
+  },
+  {
+   "index": 172,
+   "char": "族",
+   "basis": "et3_exact",
+   "big5": "B1DA"
+  },
+  {
+   "index": 173,
+   "char": "機",
+   "basis": "et3_exact",
+   "big5": "BEF7"
+  },
+  {
+   "index": 174,
+   "char": "械",
+   "basis": "et3_exact",
+   "big5": "B1F1"
+  },
+  {
+   "index": 175,
+   "char": "獸",
+   "basis": "et3_exact",
+   "big5": "C37E"
+  },
+  {
+   "index": 176,
+   "char": "其",
+   "basis": "et3_exact",
+   "big5": "A8E4"
+  },
+  {
+   "index": 177,
+   "char": "他",
+   "basis": "et3_exact",
+   "big5": "A54C"
+  },
+  {
+   "index": 178,
+   "char": "劍",
+   "basis": "et3_exact",
+   "big5": "BC43"
+  },
+  {
+   "index": 179,
+   "char": "聖",
+   "basis": "et3_exact",
+   "big5": "B874"
+  },
+  {
+   "index": 180,
+   "char": "帝",
+   "basis": "et3_exact",
+   "big5": "ABD2"
+  },
+  {
+   "index": 181,
+   "char": "英",
+   "basis": "et3_exact",
+   "big5": "AD5E"
+  },
+  {
+   "index": 182,
+   "char": "雄",
+   "basis": "et3_exact",
+   "big5": "B6AF"
+  },
+  {
+   "index": 183,
+   "char": "狙",
+   "basis": "et3_exact",
+   "big5": "AAAE"
+  },
+  {
+   "index": 184,
+   "char": "擊",
+   "basis": "et3_exact",
+   "big5": "C0BB"
+  },
+  {
+   "index": 185,
+   "char": "師",
+   "basis": "et3_exact",
+   "big5": "AE76"
+  },
+  {
+   "index": 186,
+   "char": "僧",
+   "basis": "et3_exact",
+   "big5": "B9AC"
+  },
+  {
+   "index": 187,
+   "char": "侶",
+   "basis": "et3_exact",
+   "big5": "AB51"
+  },
+  {
+   "index": 188,
+   "char": "道",
+   "basis": "et3_exact",
+   "big5": "B944"
+  },
+  {
+   "index": 189,
+   "char": "技",
+   "basis": "et3_exact",
+   "big5": "A7DE"
+  },
+  {
+   "index": 190,
+   "char": "伯",
+   "basis": "et3_exact",
+   "big5": "A742"
+  },
+  {
+   "index": 191,
+   "char": "爵",
+   "basis": "et3_exact",
+   "big5": "C0EF"
+  },
+  {
+   "index": 192,
+   "char": "重",
+   "basis": "et3_exact",
+   "big5": "ADAB"
+  },
+  {
+   "index": 193,
+   "char": "裝",
+   "basis": "et3_exact",
+   "big5": "B8CB"
+  },
+  {
+   "index": 194,
+   "char": "將",
+   "basis": "et3_exact",
+   "big5": "B14E"
+  },
+  {
+   "index": 195,
+   "char": "軍",
+   "basis": "et3_exact",
+   "big5": "AD78"
+  },
+  {
+   "index": 196,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 197,
+   "char": "惡",
+   "basis": "et3_exact",
+   "big5": "B463"
+  },
+  {
+   "index": 198,
+   "char": "活",
+   "basis": "et3_exact",
+   "big5": "ACA1"
+  },
+  {
+   "index": 199,
+   "char": "屍",
+   "basis": "et3_exact",
+   "big5": "ABCD"
+  },
+  {
+   "index": 200,
+   "char": "岩",
+   "basis": "et3_exact",
+   "big5": "A9A5"
+  },
+  {
+   "index": 201,
+   "char": "鐵",
+   "basis": "et3_exact",
+   "big5": "C54B"
+  },
+  {
+   "index": 202,
+   "char": "刃",
+   "basis": "et3_exact",
+   "big5": "A462"
+  },
+  {
+   "index": 203,
+   "char": "寬",
+   "basis": "et3_exact",
+   "big5": "BC65"
+  },
+  {
+   "index": 204,
+   "char": "鋸",
+   "basis": "et3_exact",
+   "big5": "BFF7"
+  },
+  {
+   "index": 205,
+   "char": "齒",
+   "basis": "et3_exact",
+   "big5": "BEA6"
+  },
+  {
+   "index": 206,
+   "char": "邪",
+   "basis": "et3_exact",
+   "big5": "A8B8"
+  },
+  {
+   "index": 207,
+   "char": "寒",
+   "basis": "et3_exact",
+   "big5": "B448"
+  },
+  {
+   "index": 208,
+   "char": "刀",
+   "basis": "et3_exact",
+   "big5": "A44D"
+  },
+  {
+   "index": 209,
+   "char": "彎",
+   "basis": "et3_exact",
+   "big5": "C573"
+  },
+  {
+   "index": 210,
+   "char": "月",
+   "basis": "et3_exact",
+   "big5": "A4EB"
+  },
+  {
+   "index": 211,
+   "char": "淬",
+   "basis": "et3_exact",
+   "big5": "B266"
+  },
+  {
+   "index": 212,
+   "char": "毒",
+   "basis": "et3_exact",
+   "big5": "AC72"
+  },
+  {
+   "index": 213,
+   "char": "爪",
+   "basis": "et3_exact",
+   "big5": "A4F6"
+  },
+  {
+   "index": 214,
+   "char": "雙",
+   "basis": "et3_exact",
+   "big5": "C2F9"
+  },
+  {
+   "index": 215,
+   "char": "斬",
+   "basis": "et3_exact",
+   "big5": "B1D9"
+  },
+  {
+   "index": 216,
+   "char": "馬",
+   "basis": "et3_exact",
+   "big5": "B0A8"
+  },
+  {
+   "index": 217,
+   "char": "牙",
+   "basis": "et3_exact",
+   "big5": "A4FA"
+  },
+  {
+   "index": 218,
+   "char": "日",
+   "basis": "et3_exact",
+   "big5": "A4E9"
+  },
+  {
+   "index": 219,
+   "char": "輪",
+   "basis": "et3_exact",
+   "big5": "BDFC"
+  },
+  {
+   "index": 220,
+   "char": "水",
+   "basis": "et3_exact",
+   "big5": "A4F4"
+  },
+  {
+   "index": 221,
+   "char": "晶",
+   "basis": "et3_exact",
+   "big5": "B4B9"
+  },
+  {
+   "index": 222,
+   "char": "破",
+   "basis": "et3_exact",
+   "big5": "AF7D"
+  },
+  {
+   "index": 223,
+   "char": "閃",
+   "basis": "et3_exact",
+   "big5": "B07B"
+  },
+  {
+   "index": 224,
+   "char": "指",
+   "basis": "et3_exact",
+   "big5": "ABFC"
+  },
+  {
+   "index": 225,
+   "char": "環",
+   "basis": "et3_exact",
+   "big5": "C0F4"
+  },
+  {
+   "index": 226,
+   "char": "中",
+   "basis": "et3_exact",
+   "big5": "A4A4"
+  },
+  {
+   "index": 227,
+   "char": "子",
+   "basis": "et3_exact",
+   "big5": "A46C"
+  },
+  {
+   "index": 228,
+   "char": "杖",
+   "basis": "et3_exact",
+   "big5": "A7FA"
+  },
+  {
+   "index": 229,
+   "char": "矛",
+   "basis": "et3_exact",
+   "big5": "A5D9"
+  },
+  {
+   "index": 230,
+   "char": "槍",
+   "basis": "et3_exact",
+   "big5": "BA6A"
+  },
+  {
+   "index": 231,
+   "char": "衝",
+   "basis": "et3_exact",
+   "big5": "BDC4"
+  },
+  {
+   "index": 232,
+   "char": "鋒",
+   "basis": "et3_exact",
+   "big5": "BE57"
+  },
+  {
+   "index": 233,
+   "char": "銀",
+   "basis": "et3_exact",
+   "big5": "BBC8"
+  },
+  {
+   "index": 234,
+   "char": "翼",
+   "basis": "et3_exact",
+   "big5": "C16C"
+  },
+  {
+   "index": 235,
+   "char": "鋼",
+   "basis": "et3_exact",
+   "big5": "BFFB"
+  },
+  {
+   "index": 236,
+   "char": "極",
+   "basis": "et3_exact",
+   "big5": "B7A5"
+  },
+  {
+   "index": 237,
+   "char": "陣",
+   "basis": "et3_exact",
+   "big5": "B07D"
+  },
+  {
+   "index": 238,
+   "char": "黃",
+   "basis": "et3_exact",
+   "big5": "B6C0"
+  },
+  {
+   "index": 239,
+   "char": "金",
+   "basis": "et3_exact",
+   "big5": "AAF7"
+  },
+  {
+   "index": 240,
+   "char": "封",
+   "basis": "et3_exact",
+   "big5": "ABCA"
+  },
+  {
+   "index": 241,
+   "char": "檜",
+   "basis": "et3_exact",
+   "big5": "C0CC"
+  },
+  {
+   "index": 242,
+   "char": "木",
+   "basis": "et3_exact",
+   "big5": "A4EC"
+  },
+  {
+   "index": 243,
+   "char": "咒",
+   "basis": "et3_exact",
+   "big5": "A947"
+  },
+  {
+   "index": 244,
+   "char": "梅",
+   "basis": "et3_exact",
+   "big5": "B1F6"
+  },
+  {
+   "index": 245,
+   "char": "林",
+   "basis": "et3_exact",
+   "big5": "AA4C"
+  },
+  {
+   "index": 246,
+   "char": "鑽",
+   "basis": "et3_exact",
+   "big5": "C670"
+  },
+  {
+   "index": 247,
+   "char": "銅",
+   "basis": "et3_exact",
+   "big5": "BBC9"
+  },
+  {
+   "index": 248,
+   "char": "刺",
+   "basis": "et3_exact",
+   "big5": "A8EB"
+  },
+  {
+   "index": 249,
+   "char": "針",
+   "basis": "et3_exact",
+   "big5": "B077"
+  },
+  {
+   "index": 250,
+   "char": "皇",
+   "basis": "et3_exact",
+   "big5": "ACD3"
+  },
+  {
+   "index": 251,
+   "char": "詛",
+   "basis": "et3_exact",
+   "big5": "B641"
+  },
+  {
+   "index": 252,
+   "char": "力",
+   "basis": "et3_exact",
+   "big5": "A44F"
+  },
+  {
+   "index": 253,
+   "char": "量",
+   "basis": "et3_exact",
+   "big5": "B671"
+  },
+  {
+   "index": 254,
+   "char": "套",
+   "basis": "et3_exact",
+   "big5": "AE4D"
+  },
+  {
+   "index": 255,
+   "char": "烈",
+   "basis": "et3_exact",
+   "big5": "AF50"
+  },
+  {
+   "index": 256,
+   "char": "迷",
+   "basis": "et3_exact",
+   "big5": "B067"
+  },
+  {
+   "index": 257,
+   "char": "蹤",
+   "basis": "et3_exact",
+   "big5": "C2DC"
+  },
+  {
+   "index": 258,
+   "char": "短",
+   "basis": "et3_exact",
+   "big5": "B575"
+  },
+  {
+   "index": 259,
+   "char": "十",
+   "basis": "et3_exact",
+   "big5": "A451"
+  },
+  {
+   "index": 260,
+   "char": "字",
+   "basis": "et3_exact",
+   "big5": "A672"
+  },
+  {
+   "index": 261,
+   "char": "風",
+   "basis": "et3_exact",
+   "big5": "ADB7"
+  },
+  {
+   "index": 262,
+   "char": "珠",
+   "basis": "et3_exact",
+   "big5": "AF5D"
+  },
+  {
+   "index": 263,
+   "char": "弩",
+   "basis": "et3_exact",
+   "big5": "A9B8"
+  },
+  {
+   "index": 264,
+   "char": "電",
+   "basis": "et3_exact",
+   "big5": "B971"
+  },
+  {
+   "index": 265,
+   "char": "激",
+   "basis": "et3_exact",
+   "big5": "BF45"
+  },
+  {
+   "index": 266,
+   "char": "粒",
+   "basis": "et3_exact",
+   "big5": "B2C9"
+  },
+  {
+   "index": 267,
+   "char": "鐮",
+   "basis": "et3_exact",
+   "big5": "C549"
+  },
+  {
+   "index": 268,
+   "char": "門",
+   "basis": "et3_exact",
+   "big5": "AAF9"
+  },
+  {
+   "index": 269,
+   "char": "斧",
+   "basis": "et3_exact",
+   "big5": "A9F2"
+  },
+  {
+   "index": 270,
+   "char": "球",
+   "basis": "et3_exact",
+   "big5": "B279"
+  },
+  {
+   "index": 271,
+   "char": "炎",
+   "basis": "et3_exact",
+   "big5": "AAA2"
+  },
+  {
+   "index": 272,
+   "char": "青",
+   "basis": "et3_exact",
+   "big5": "AB43"
+  },
+  {
+   "index": 273,
+   "char": "鱗",
+   "basis": "et3_exact",
+   "big5": "C5EC"
+  },
+  {
+   "index": 274,
+   "char": "衣",
+   "basis": "et3_exact",
+   "big5": "A6E7"
+  },
+  {
+   "index": 275,
+   "char": "旅",
+   "basis": "et3_exact",
+   "big5": "AEC8"
+  },
+  {
+   "index": 276,
+   "char": "行",
+   "basis": "et3_exact",
+   "big5": "A6E6"
+  },
+  {
+   "index": 277,
+   "char": "元",
+   "basis": "et3_exact",
+   "big5": "A4B8"
+  },
+  {
+   "index": 278,
+   "char": "素",
+   "basis": "et3_exact",
+   "big5": "AFC0"
+  },
+  {
+   "index": 279,
+   "char": "服",
+   "basis": "et3_exact",
+   "big5": "AA41"
+  },
+  {
+   "index": 280,
+   "char": "硬",
+   "basis": "et3_exact",
+   "big5": "B577"
+  },
+  {
+   "index": 281,
+   "char": "皮",
+   "basis": "et3_exact",
+   "big5": "A5D6"
+  },
+  {
+   "index": 282,
+   "char": "浸",
+   "basis": "et3_exact",
+   "big5": "AEFB"
+  },
+  {
+   "index": 283,
+   "char": "漬",
+   "basis": "et3_exact",
+   "big5": "BA7B"
+  },
+  {
+   "index": 284,
+   "char": "符",
+   "basis": "et3_exact",
+   "big5": "B2C5"
+  },
+  {
+   "index": 285,
+   "char": "鍊",
+   "basis": "et3_exact",
+   "big5": "C1E5"
+  },
+  {
+   "index": 286,
+   "char": "合",
+   "basis": "et3_exact",
+   "big5": "A658"
+  },
+  {
+   "index": 287,
+   "char": "鎖",
+   "basis": "et3_exact",
+   "big5": "C2EA"
+  },
+  {
+   "index": 288,
+   "char": "紋",
+   "basis": "et3_exact",
+   "big5": "AFBE"
+  },
+  {
+   "index": 289,
+   "char": "闇",
+   "basis": "et3_exact",
+   "big5": "EEEE"
+  },
+  {
+   "index": 290,
+   "char": "血",
+   "basis": "et3_exact",
+   "big5": "A6E5"
+  },
+  {
+   "index": 291,
+   "char": "赤",
+   "basis": "et3_exact",
+   "big5": "A8AA"
+  },
+  {
+   "index": 292,
+   "char": "袍",
+   "basis": "et3_exact",
+   "big5": "B354"
+  },
+  {
+   "index": 293,
+   "char": "賢",
+   "basis": "et3_exact",
+   "big5": "BDE5"
+  },
+  {
+   "index": 294,
+   "char": "者",
+   "basis": "et3_exact",
+   "big5": "AACC"
+  },
+  {
+   "index": 295,
+   "char": "星",
+   "basis": "et3_exact",
+   "big5": "AC50"
+  },
+  {
+   "index": 296,
+   "char": "虛",
+   "basis": "et3_exact",
+   "big5": "B5EA"
+  },
+  {
+   "index": 297,
+   "char": "無",
+   "basis": "et3_exact",
+   "big5": "B54C"
+  },
+  {
+   "index": 298,
+   "char": "披",
+   "basis": "et3_exact",
+   "big5": "A9DC"
+  },
+  {
+   "index": 299,
+   "char": "縷",
+   "basis": "et3_exact",
+   "big5": "C15C"
+  },
+  {
+   "index": 300,
+   "char": "國",
+   "basis": "et3_exact",
+   "big5": "B0EA"
+  },
+  {
+   "index": 301,
+   "char": "新",
+   "basis": "et3_exact",
+   "big5": "B773"
+  },
+  {
+   "index": 302,
+   "char": "鏽",
+   "basis": "et3_exact",
+   "big5": "C4C3"
+  },
+  {
+   "index": 303,
+   "char": "鳳",
+   "basis": "et3_exact",
+   "big5": "BBF1"
+  },
+  {
+   "index": 304,
+   "char": "舞",
+   "basis": "et3_exact",
+   "big5": "BB52"
+  },
+  {
+   "index": 305,
+   "char": "九",
+   "basis": "et3_exact",
+   "big5": "A445"
+  },
+  {
+   "index": 306,
+   "char": "陽",
+   "basis": "et3_exact",
+   "big5": "B6A7"
+  },
+  {
+   "index": 307,
+   "char": "威",
+   "basis": "et3_exact",
+   "big5": "ABC2"
+  },
+  {
+   "index": 308,
+   "char": "面",
+   "basis": "et3_exact",
+   "big5": "ADB1"
+  },
+  {
+   "index": 309,
+   "char": "混",
+   "basis": "et3_exact",
+   "big5": "B256"
+  },
+  {
+   "index": 310,
+   "char": "沌",
+   "basis": "et3_exact",
+   "big5": "A850"
+  },
+  {
+   "index": 311,
+   "char": "複",
+   "basis": "et3_exact",
+   "big5": "BDC6"
+  },
+  {
+   "index": 312,
+   "char": "式",
+   "basis": "et3_exact",
+   "big5": "A6A1"
+  },
+  {
+   "index": 313,
+   "char": "強",
+   "basis": "et3_exact",
+   "big5": "B16A"
+  },
+  {
+   "index": 314,
+   "char": "化",
+   "basis": "et3_exact",
+   "big5": "A4C6"
+  },
+  {
+   "index": 315,
+   "char": "殊",
+   "basis": "et3_exact",
+   "big5": "AEED"
+  },
+  {
+   "index": 316,
+   "char": "灼",
+   "basis": "et3_exact",
+   "big5": "A860"
+  },
+  {
+   "index": 317,
+   "char": "真",
+   "basis": "et3_exact",
+   "big5": "AF75"
+  },
+  {
+   "index": 318,
+   "char": "屬",
+   "basis": "et3_exact",
+   "big5": "C4DD"
+  },
+  {
+   "index": 319,
+   "char": "礦",
+   "basis": "et3_exact",
+   "big5": "C471"
+  },
+  {
+   "index": 320,
+   "char": "件",
+   "basis": "et3_exact",
+   "big5": "A5F3"
+  },
+  {
+   "index": 321,
+   "char": "雨",
+   "basis": "et3_exact",
+   "big5": "AB42"
+  },
+  {
+   "index": 322,
+   "char": "正",
+   "basis": "et3_exact",
+   "big5": "A5BF"
+  },
+  {
+   "index": 323,
+   "char": "宗",
+   "basis": "et3_exact",
+   "big5": "A976"
+  },
+  {
+   "index": 324,
+   "char": "的",
+   "basis": "et3_exact",
+   "big5": "AABA"
+  },
+  {
+   "index": 325,
+   "char": "印",
+   "basis": "et3_exact",
+   "big5": "A64C"
+  },
+  {
+   "index": 326,
+   "char": "猛",
+   "basis": "et3_exact",
+   "big5": "B272"
+  },
+  {
+   "index": 327,
+   "char": "古",
+   "basis": "et3_exact",
+   "big5": "A56A"
+  },
+  {
+   "index": 328,
+   "char": "代",
+   "basis": "et3_exact",
+   "big5": "A54E"
+  },
+  {
+   "index": 329,
+   "char": "體",
+   "basis": "et3_exact",
+   "big5": "C5E9"
+  },
+  {
+   "index": 330,
+   "char": "壁",
+   "basis": "et3_exact",
+   "big5": "BEC0"
+  },
+  {
+   "index": 331,
+   "char": "形",
+   "basis": "et3_exact",
+   "big5": "A7CE"
+  },
+  {
+   "index": 332,
+   "char": "見",
+   "basis": "et3_exact",
+   "big5": "A8A3"
+  },
+  {
+   "index": 333,
+   "char": "碎",
+   "basis": "et3_exact",
+   "big5": "B848"
+  },
+  {
+   "index": 334,
+   "char": "片",
+   "basis": "et3_exact",
+   "big5": "A4F9"
+  },
+  {
+   "index": 335,
+   "char": "藥",
+   "basis": "et3_exact",
+   "big5": "C3C4"
+  },
+  {
+   "index": 336,
+   "char": "草",
+   "basis": "et3_exact",
+   "big5": "AFF3"
+  },
+  {
+   "index": 337,
+   "char": "回",
+   "basis": "et3_exact",
+   "big5": "A65E"
+  },
+  {
+   "index": 338,
+   "char": "復",
+   "basis": "et3_exact",
+   "big5": "B45F"
+  },
+  {
+   "index": 339,
+   "char": "劑",
+   "basis": "et3_exact",
+   "big5": "BEAF"
+  },
+  {
+   "index": 340,
+   "char": "再",
+   "basis": "et3_exact",
+   "big5": "A641"
+  },
+  {
+   "index": 341,
+   "char": "生",
+   "basis": "et3_exact",
+   "big5": "A5CD"
+  },
+  {
+   "index": 342,
+   "char": "契",
+   "basis": "et3_exact",
+   "big5": "ABB4"
+  },
+  {
+   "index": 343,
+   "char": "約",
+   "basis": "et3_exact",
+   "big5": "ACF9"
+  },
+  {
+   "index": 344,
+   "char": "高",
+   "basis": "et3_exact",
+   "big5": "B0AA"
+  },
+  {
+   "index": 345,
+   "char": "能",
+   "basis": "et3_exact",
+   "big5": "AFE0"
+  },
+  {
+   "index": 346,
+   "char": "置",
+   "basis": "et3_exact",
+   "big5": "B86D"
+  },
+  {
+   "index": 347,
+   "char": "焰",
+   "basis": "et3_exact",
+   "big5": "B54B"
+  },
+  {
+   "index": 348,
+   "char": "命",
+   "basis": "et3_exact",
+   "big5": "A952"
+  },
+  {
+   "index": 349,
+   "char": "實",
+   "basis": "et3_exact",
+   "big5": "B9EA"
+  },
+  {
+   "index": 350,
+   "char": "耐",
+   "basis": "et3_exact",
+   "big5": "AD40"
+  },
+  {
+   "index": 351,
+   "char": "速",
+   "basis": "et3_exact",
+   "big5": "B374"
+  },
+  {
+   "index": 352,
+   "char": "度",
+   "basis": "et3_exact",
+   "big5": "ABD7"
+  },
+  {
+   "index": 353,
+   "char": "勇",
+   "basis": "et3_exact",
+   "big5": "AB69"
+  },
+  {
+   "index": 354,
+   "char": "徽",
+   "basis": "et3_exact",
+   "big5": "C0B2"
+  },
+  {
+   "index": 355,
+   "char": "章",
+   "basis": "et3_exact",
+   "big5": "B3B9"
+  },
+  {
+   "index": 356,
+   "char": "反",
+   "basis": "et3_exact",
+   "big5": "A4CF"
+  },
+  {
+   "index": 357,
+   "char": "制",
+   "basis": "et3_exact",
+   "big5": "A8EE"
+  },
+  {
+   "index": 358,
+   "char": "器",
+   "basis": "et3_exact",
+   "big5": "BEB9"
+  },
+  {
+   "index": 359,
+   "char": "羽",
+   "basis": "et3_exact",
+   "big5": "A6D0"
+  },
+  {
+   "index": 360,
+   "char": "解",
+   "basis": "et3_exact",
+   "big5": "B8D1"
+  },
+  {
+   "index": 361,
+   "char": "退",
+   "basis": "et3_exact",
+   "big5": "B068"
+  },
+  {
+   "index": 362,
+   "char": "麻",
+   "basis": "et3_exact",
+   "big5": "B3C2"
+  },
+  {
+   "index": 363,
+   "char": "業",
+   "basis": "et3_exact",
+   "big5": "B77E"
+  },
+  {
+   "index": 364,
+   "char": "暴",
+   "basis": "et3_exact",
+   "big5": "BCC9"
+  },
+  {
+   "index": 365,
+   "char": "燄",
+   "basis": "et3_exact",
+   "big5": "BF56"
+  },
+  {
+   "index": 366,
+   "char": "柱",
+   "basis": "et3_exact",
+   "big5": "AC57"
+  },
+  {
+   "index": 367,
+   "char": "落",
+   "basis": "et3_exact",
+   "big5": "B8A8"
+  },
+  {
+   "index": 368,
+   "char": "術",
+   "basis": "et3_exact",
+   "big5": "B34E"
+  },
+  {
+   "index": 369,
+   "char": "奔",
+   "basis": "et3_exact",
+   "big5": "A962"
+  },
+  {
+   "index": 370,
+   "char": "彈",
+   "basis": "et3_exact",
+   "big5": "BC75"
+  },
+  {
+   "index": 371,
+   "char": "絕",
+   "basis": "et3_exact",
+   "big5": "B5B4"
+  },
+  {
+   "index": 372,
+   "char": "爆",
+   "basis": "et3_exact",
+   "big5": "C37A"
+  },
+  {
+   "index": 373,
+   "char": "殺",
+   "basis": "et3_exact",
+   "big5": "B1FE"
+  },
+  {
+   "index": 374,
+   "char": "裂",
+   "basis": "et3_exact",
+   "big5": "B5F5"
+  },
+  {
+   "index": 375,
+   "char": "震",
+   "basis": "et3_exact",
+   "big5": "BE5F"
+  },
+  {
+   "index": 376,
+   "char": "動",
+   "basis": "et3_exact",
+   "big5": "B0CA"
+  },
+  {
+   "index": 377,
+   "char": "恢",
+   "basis": "et3_exact",
+   "big5": "ABEC"
+  },
+  {
+   "index": 378,
+   "char": "治",
+   "basis": "et3_exact",
+   "big5": "AA76"
+  },
+  {
+   "index": 379,
+   "char": "癒",
+   "basis": "et3_exact",
+   "big5": "C2A1"
+  },
+  {
+   "index": 380,
+   "char": "痊",
+   "basis": "et3_exact",
+   "big5": "B2AC"
+  },
+  {
+   "index": 381,
+   "char": "泉",
+   "basis": "et3_exact",
+   "big5": "AC75"
+  },
+  {
+   "index": 382,
+   "char": "腐",
+   "basis": "et3_exact",
+   "big5": "BB47"
+  },
+  {
+   "index": 383,
+   "char": "痺",
+   "basis": "et3_exact",
+   "big5": "B7F4"
+  },
+  {
+   "index": 384,
+   "char": "祝",
+   "basis": "et3_exact",
+   "big5": "AFAC"
+  },
+  {
+   "index": 385,
+   "char": "福",
+   "basis": "et3_exact",
+   "big5": "BAD6"
+  },
+  {
+   "index": 386,
+   "char": "傳",
+   "basis": "et3_exact",
+   "big5": "B6C7"
+  },
+  {
+   "index": 387,
+   "char": "送",
+   "basis": "et3_exact",
+   "big5": "B065"
+  },
+  {
+   "index": 388,
+   "char": "甦",
+   "basis": "et3_exact",
+   "big5": "B564"
+  },
+  {
+   "index": 389,
+   "char": "霸",
+   "basis": "et3_exact",
+   "big5": "C551"
+  },
+  {
+   "index": 390,
+   "char": "剛",
+   "basis": "et3_exact",
+   "big5": "ADE8"
+  },
+  {
+   "index": 391,
+   "char": "轟",
+   "basis": "et3_exact",
+   "big5": "C546"
+  },
+  {
+   "index": 392,
+   "char": "流",
+   "basis": "et3_exact",
+   "big5": "AC79"
+  },
+  {
+   "index": 393,
+   "char": "超",
+   "basis": "et3_exact",
+   "big5": "B657"
+  },
+  {
+   "index": 394,
+   "char": "必",
+   "basis": "et3_exact",
+   "big5": "A5B2"
+  },
+  {
+   "index": 395,
+   "char": "審",
+   "basis": "et3_exact",
+   "big5": "BC66"
+  },
+  {
+   "index": 396,
+   "char": "判",
+   "basis": "et3_exact",
+   "big5": "A750"
+  },
+  {
+   "index": 397,
+   "char": "鎮",
+   "basis": "et3_exact",
+   "big5": "C2ED"
+  },
+  {
+   "index": 398,
+   "char": "歌",
+   "basis": "et3_exact",
+   "big5": "BA71"
+  },
+  {
+   "index": 399,
+   "char": "洞",
+   "basis": "et3_exact",
+   "big5": "AC7D"
+  },
+  {
+   "index": 400,
+   "char": "凍",
+   "basis": "et3_exact",
+   "big5": "ADE1"
+  },
+  {
+   "index": 401,
+   "char": "萬",
+   "basis": "et3_exact",
+   "big5": "B855"
+  },
+  {
+   "index": 402,
+   "char": "降",
+   "basis": "et3_exact",
+   "big5": "ADB0"
+  },
+  {
+   "index": 403,
+   "char": "臨",
+   "basis": "et3_exact",
+   "big5": "C17B"
+  },
+  {
+   "index": 404,
+   "char": "撿",
+   "basis": "et3_exact",
+   "big5": "BEDF"
+  },
+  {
+   "index": 405,
+   "char": "到",
+   "basis": "et3_exact",
+   "big5": "A8EC"
+  },
+  {
+   "index": 406,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 407,
+   "char": "具",
+   "basis": "et3_exact",
+   "big5": "A8E3"
+  },
+  {
+   "index": 408,
+   "char": "滿",
+   "basis": "et3_exact",
+   "big5": "BAA1"
+  },
+  {
+   "index": 409,
+   "char": "了",
+   "basis": "et3_exact",
+   "big5": "A446"
+  },
+  {
+   "index": 410,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 411,
+   "char": "要",
+   "basis": "et3_exact",
+   "big5": "AD6E"
+  },
+  {
+   "index": 412,
+   "char": "丟",
+   "basis": "et3_exact",
+   "big5": "A5E1"
+  },
+  {
+   "index": 413,
+   "char": "棄",
+   "basis": "et3_exact",
+   "big5": "B1F3"
+  },
+  {
+   "index": 414,
+   "char": "嗎",
+   "basis": "et3_exact",
+   "big5": "B6DC"
+  },
+  {
+   "index": 415,
+   "char": "那",
+   "basis": "et3_exact",
+   "big5": "A8BA"
+  },
+  {
+   "index": 416,
+   "char": "麼",
+   "basis": "et3_exact",
+   "big5": "BBF2"
+  },
+  {
+   "index": 417,
+   "char": "就",
+   "basis": "et3_exact",
+   "big5": "B44E"
+  },
+  {
+   "index": 418,
+   "char": "把",
+   "basis": "et3_exact",
+   "big5": "A7E2"
+  },
+  {
+   "index": 419,
+   "char": "掉",
+   "basis": "et3_exact",
+   "big5": "B1BC"
+  },
+  {
+   "index": 420,
+   "char": "吧",
+   "basis": "et3_exact",
+   "big5": "A761"
+  },
+  {
+   "index": 421,
+   "char": "確",
+   "basis": "et3_exact",
+   "big5": "BD54"
+  },
+  {
+   "index": 422,
+   "char": "定",
+   "basis": "et3_exact",
+   "big5": "A977"
+  },
+  {
+   "index": 423,
+   "char": "開",
+   "basis": "et3_exact",
+   "big5": "B67D"
+  },
+  {
+   "index": 424,
+   "char": "始",
+   "basis": "et3_exact",
+   "big5": "A96C"
+  },
+  {
+   "index": 425,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 426,
+   "char": "放",
+   "basis": "et3_exact",
+   "big5": "A9F1"
+  },
+  {
+   "index": 427,
+   "char": "結",
+   "basis": "et3_exact",
+   "big5": "B5B2"
+  },
+  {
+   "index": 428,
+   "char": "本",
+   "basis": "et3_exact",
+   "big5": "A5BB"
+  },
+  {
+   "index": 429,
+   "char": "是",
+   "basis": "et3_exact",
+   "big5": "AC4F"
+  },
+  {
+   "index": 430,
+   "char": "不",
+   "basis": "et3_exact",
+   "big5": "A4A3"
+  },
+  {
+   "index": 431,
+   "char": "離",
+   "basis": "et3_exact",
+   "big5": "C2F7"
+  },
+  {
+   "index": 432,
+   "char": "遊",
+   "basis": "et3_exact",
+   "big5": "B943"
+  },
+  {
+   "index": 433,
+   "char": "戲",
+   "basis": "et3_exact",
+   "big5": "C0B8"
+  },
+  {
+   "index": 434,
+   "char": "請",
+   "basis": "et3_exact",
+   "big5": "BDD0"
+  },
+  {
+   "index": 435,
+   "char": "休",
+   "basis": "et3_exact",
+   "big5": "A5F0"
+  },
+  {
+   "index": 436,
+   "char": "息",
+   "basis": "et3_exact",
+   "big5": "AEA7"
+  },
+  {
+   "index": 437,
+   "char": "繼",
+   "basis": "et3_exact",
+   "big5": "C47E"
+  },
+  {
+   "index": 438,
+   "char": "續",
+   "basis": "et3_exact",
+   "big5": "C4F2"
+  },
+  {
+   "index": 439,
+   "char": "記",
+   "basis": "et3_exact",
+   "big5": "B04F"
+  },
+  {
+   "index": 440,
+   "char": "錄",
+   "basis": "et3_exact",
+   "big5": "BFFD"
+  },
+  {
+   "index": 441,
+   "char": "目",
+   "basis": "et3_exact",
+   "big5": "A5D8"
+  },
+  {
+   "index": 442,
+   "char": "前",
+   "basis": "et3_exact",
+   "big5": "AB65"
+  },
+  {
+   "index": 443,
+   "char": "況",
+   "basis": "et3_exact",
+   "big5": "AA70"
+  },
+  {
+   "index": 444,
+   "char": "歡",
+   "basis": "et3_exact",
+   "big5": "C577"
+  },
+  {
+   "index": 445,
+   "char": "迎",
+   "basis": "et3_exact",
+   "big5": "AAEF"
+  },
+  {
+   "index": 446,
+   "char": "需",
+   "basis": "et3_exact",
+   "big5": "BBDD"
+  },
+  {
+   "index": 447,
+   "char": "什",
+   "basis": "et3_exact",
+   "big5": "A4B0"
+  },
+  {
+   "index": 448,
+   "char": "還",
+   "basis": "et3_exact",
+   "big5": "C1D9"
+  },
+  {
+   "index": 449,
+   "char": "備",
+   "basis": "et3_exact",
+   "big5": "B3C6"
+  },
+  {
+   "index": 450,
+   "char": "賣",
+   "basis": "et3_exact",
+   "big5": "BDE6"
+  },
+  {
+   "index": 451,
+   "char": "您",
+   "basis": "et3_exact",
+   "big5": "B17A"
+  },
+  {
+   "index": 452,
+   "char": "付",
+   "basis": "et3_exact",
+   "big5": "A549"
+  },
+  {
+   "index": 453,
+   "char": "接",
+   "basis": "et3_exact",
+   "big5": "B1B5"
+  },
+  {
+   "index": 454,
+   "char": "受",
+   "basis": "et3_exact",
+   "big5": "A8FC"
+  },
+  {
+   "index": 455,
+   "char": "我",
+   "basis": "et3_exact",
+   "big5": "A7DA"
+  },
+  {
+   "index": 456,
+   "char": "帶",
+   "basis": "et3_exact",
+   "big5": "B161"
+  },
+  {
+   "index": 457,
+   "char": "下",
+   "basis": "et3_exact",
+   "big5": "A455"
+  },
+  {
+   "index": 458,
+   "char": "身",
+   "basis": "et3_exact",
+   "big5": "A8AD"
+  },
+  {
+   "index": 459,
+   "char": "上",
+   "basis": "et3_exact",
+   "big5": "A457"
+  },
+  {
+   "index": 460,
+   "char": "沒",
+   "basis": "et3_exact",
+   "big5": "A853"
+  },
+  {
+   "index": 461,
+   "char": "有",
+   "basis": "et3_exact",
+   "big5": "A6B3"
+  },
+  {
+   "index": 462,
+   "char": "攜",
+   "basis": "et3_exact",
+   "big5": "C4E2"
+  },
+  {
+   "index": 463,
+   "char": "任",
+   "basis": "et3_exact",
+   "big5": "A5F4"
+  },
+  {
+   "index": 464,
+   "char": "何",
+   "basis": "et3_exact",
+   "big5": "A6F3"
+  },
+  {
+   "index": 465,
+   "char": "價",
+   "basis": "et3_exact",
+   "big5": "BBF9"
+  },
+  {
+   "index": 466,
+   "char": "值",
+   "basis": "et3_exact",
+   "big5": "ADC8"
+  },
+  {
+   "index": 467,
+   "char": "交",
+   "basis": "et3_exact",
+   "big5": "A5E6"
+  },
+  {
+   "index": 468,
+   "char": "給",
+   "basis": "et3_exact",
+   "big5": "B5B9"
+  },
+  {
+   "index": 469,
+   "char": "誰",
+   "basis": "et3_exact",
+   "big5": "BDD6"
+  },
+  {
+   "index": 470,
+   "char": "呃",
+   "basis": "et3_exact",
+   "big5": "A763"
+  },
+  {
+   "index": 471,
+   "char": "幫",
+   "basis": "et3_exact",
+   "big5": "C0B0"
+  },
+  {
+   "index": 472,
+   "char": "忙",
+   "basis": "et3_exact",
+   "big5": "A6A3"
+  },
+  {
+   "index": 473,
+   "char": "事",
+   "basis": "et3_exact",
+   "big5": "A8C6"
+  },
+  {
+   "index": 474,
+   "char": "來",
+   "basis": "et3_exact",
+   "big5": "A8D3"
+  },
+  {
+   "index": 475,
+   "char": "秘",
+   "basis": "et3_exact",
+   "big5": "AFB5"
+  },
+  {
+   "index": 476,
+   "char": "密",
+   "basis": "et3_exact",
+   "big5": "B14B"
+  },
+  {
+   "index": 477,
+   "char": "商",
+   "basis": "et3_exact",
+   "big5": "B0D3"
+  },
+  {
+   "index": 478,
+   "char": "店",
+   "basis": "et3_exact",
+   "big5": "A9B1"
+  },
+  {
+   "index": 479,
+   "char": "被",
+   "basis": "et3_exact",
+   "big5": "B351"
+  },
+  {
+   "index": 480,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 481,
+   "char": "讀",
+   "basis": "et3_exact",
+   "big5": "C5AA"
+  },
+  {
+   "index": 482,
+   "char": "取",
+   "basis": "et3_exact",
+   "big5": "A8FA"
+  },
+  {
+   "index": 483,
+   "char": "先",
+   "basis": "et3_exact",
+   "big5": "A5FD"
+  },
+  {
+   "index": 484,
+   "char": "儲",
+   "basis": "et3_exact",
+   "big5": "C078"
+  },
+  {
+   "index": 485,
+   "char": "存",
+   "basis": "et3_exact",
+   "big5": "A673"
+  },
+  {
+   "index": 486,
+   "char": "發",
+   "basis": "et3_exact",
+   "big5": "B56F"
+  },
+  {
+   "index": 487,
+   "char": "現",
+   "basis": "et3_exact",
+   "big5": "B27B"
+  },
+  {
+   "index": 488,
+   "char": "打",
+   "basis": "et3_exact",
+   "big5": "A5B4"
+  },
+  {
+   "index": 489,
+   "char": "物",
+   "basis": "et3_exact",
+   "big5": "AAAB"
+  },
+  {
+   "index": 490,
+   "char": "挖",
+   "basis": "et3_exact",
+   "big5": "ABF5"
+  },
+  {
+   "index": 491,
+   "char": "掘",
+   "basis": "et3_exact",
+   "big5": "B1B8"
+  },
+  {
+   "index": 492,
+   "char": "與",
+   "basis": "et3_exact",
+   "big5": "BB50"
+  },
+  {
+   "index": 493,
+   "char": "品",
+   "basis": "et3_exact",
+   "big5": "AB7E"
+  },
+  {
+   "index": 494,
+   "char": "換",
+   "basis": "et3_exact",
+   "big5": "B4AB"
+  },
+  {
+   "index": 495,
+   "char": "拿",
+   "basis": "et3_exact",
+   "big5": "AEB3"
+  },
+  {
+   "index": 496,
+   "char": "起",
+   "basis": "et3_exact",
+   "big5": "B05F"
+  },
+  {
+   "index": 497,
+   "char": "去",
+   "basis": "et3_exact",
+   "big5": "A568"
+  },
+  {
+   "index": 498,
+   "char": "裡",
+   "basis": "et3_exact",
+   "big5": "B8CC"
+  },
+  {
+   "index": 499,
+   "char": "錢",
+   "basis": "et3_exact",
+   "big5": "BFFA"
+  },
+  {
+   "index": 500,
+   "char": "夠",
+   "basis": "et3_exact",
+   "big5": "B0F7"
+  },
+  {
+   "index": 501,
+   "char": "可",
+   "basis": "et3_exact",
+   "big5": "A569"
+  },
+  {
+   "index": 502,
+   "char": "以",
+   "basis": "et3_exact",
+   "big5": "A548"
+  },
+  {
+   "index": 503,
+   "char": "轉",
+   "basis": "et3_exact",
+   "big5": "C2E0"
+  },
+  {
+   "index": 504,
+   "char": "職",
+   "basis": "et3_exact",
+   "big5": "C2BE"
+  },
+  {
+   "index": 505,
+   "char": "成",
+   "basis": "et3_exact",
+   "big5": "A6A8"
+  },
+  {
+   "index": 506,
+   "char": "移",
+   "basis": "et3_exact",
+   "big5": "B2BE"
+  },
+  {
+   "index": 507,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 508,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 509,
+   "char": "增",
+   "basis": "et3_exact",
+   "big5": "BC57"
+  },
+  {
+   "index": 510,
+   "char": "點",
+   "basis": "et3_exact",
+   "big5": "C249"
+  },
+  {
+   "index": 511,
+   "char": "攻",
+   "basis": "et3_exact",
+   "big5": "A7F0"
+  },
+  {
+   "index": 512,
+   "char": "防",
+   "basis": "et3_exact",
+   "big5": "A8BE"
+  },
+  {
+   "index": 513,
+   "char": "禦",
+   "basis": "et3_exact",
+   "big5": "BF6D"
+  },
+  {
+   "index": 514,
+   "char": "這",
+   "basis": "et3_exact",
+   "big5": "B36F"
+  },
+  {
+   "index": 515,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 516,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 517,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 518,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 519,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 520,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 521,
+   "char": "完",
+   "basis": "et3_exact",
+   "big5": "A7B9"
+  },
+  {
+   "index": 522,
+   "char": "畢",
+   "basis": "et3_exact",
+   "big5": "B2A6"
+  },
+  {
+   "index": 523,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 524,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 525,
+   "char": "除",
+   "basis": "et3_exact",
+   "big5": "B0A3"
+  },
+  {
+   "index": 526,
+   "char": "好",
+   "basis": "et3_exact",
+   "big5": "A66E"
+  },
+  {
+   "index": 527,
+   "char": "棒",
+   "basis": "et3_exact",
+   "big5": "B4CE"
+  },
+  {
+   "index": 528,
+   "char": "外",
+   "basis": "et3_exact",
+   "big5": "A57E"
+  },
+  {
+   "index": 529,
+   "char": "殼",
+   "basis": "et3_exact",
+   "big5": "B4DF"
+  },
+  {
+   "index": 530,
+   "char": "材",
+   "basis": "et3_exact",
+   "big5": "A7F7"
+  },
+  {
+   "index": 531,
+   "char": "料",
+   "basis": "et3_exact",
+   "big5": "AEC6"
+  },
+  {
+   "index": 532,
+   "char": "做",
+   "basis": "et3_exact",
+   "big5": "B0B5"
+  },
+  {
+   "index": 533,
+   "char": "出",
+   "basis": "et3_exact",
+   "big5": "A558"
+  },
+  {
+   "index": 534,
+   "char": "一",
+   "basis": "et3_exact",
+   "big5": "A440"
+  },
+  {
+   "index": 535,
+   "char": "很",
+   "basis": "et3_exact",
+   "big5": "ABDC"
+  },
+  {
+   "index": 536,
+   "char": "讓",
+   "basis": "et3_exact",
+   "big5": "C5FD"
+  },
+  {
+   "index": 537,
+   "char": "顯",
+   "basis": "et3_exact",
+   "big5": "C5E3"
+  },
+  {
+   "index": 538,
+   "char": "番",
+   "basis": "et3_exact",
+   "big5": "B566"
+  },
+  {
+   "index": 539,
+   "char": "入",
+   "basis": "et3_exact",
+   "big5": "A44A"
+  },
+  {
+   "index": 540,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 541,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 542,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 543,
+   "char": "年",
+   "basis": "et3_exact",
+   "big5": "A67E"
+  },
+  {
+   "index": 544,
+   "char": "快",
+   "basis": "et3_exact",
+   "big5": "A7D6"
+  },
+  {
+   "index": 545,
+   "char": "樂",
+   "basis": "et3_exact",
+   "big5": "BCD6"
+  },
+  {
+   "index": 546,
+   "char": "位",
+   "basis": "et3_exact",
+   "big5": "A6EC"
+  },
+  {
+   "index": 547,
+   "char": "客",
+   "basis": "et3_exact",
+   "big5": "ABC8"
+  },
+  {
+   "index": 548,
+   "char": "參",
+   "basis": "et3_exact",
+   "big5": "B0D1"
+  },
+  {
+   "index": 549,
+   "char": "們",
+   "basis": "et3_exact",
+   "big5": "ADCC"
+  },
+  {
+   "index": 550,
+   "char": "摸",
+   "basis": "et3_exact",
+   "big5": "BA4E"
+  },
+  {
+   "index": 551,
+   "char": "彩",
+   "basis": "et3_exact",
+   "big5": "B16D"
+  },
+  {
+   "index": 552,
+   "char": "喔",
+   "basis": "et3_exact",
+   "big5": "B3E1"
+  },
+  {
+   "index": 553,
+   "char": "哇",
+   "basis": "et3_exact",
+   "big5": "AB7A"
+  },
+  {
+   "index": 554,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 555,
+   "char": "恭",
+   "basis": "et3_exact",
+   "big5": "AEA5"
+  },
+  {
+   "index": 556,
+   "char": "喜",
+   "basis": "et3_exact",
+   "big5": "B3DF"
+  },
+  {
+   "index": 557,
+   "char": "得",
+   "basis": "et3_exact",
+   "big5": "B16F"
+  },
+  {
+   "index": 558,
+   "char": "次",
+   "basis": "et3_exact",
+   "big5": "A6B8"
+  },
+  {
+   "index": 559,
+   "char": "獎",
+   "basis": "et3_exact",
+   "big5": "BCFA"
+  },
+  {
+   "index": 560,
+   "char": "二",
+   "basis": "et3_exact",
+   "big5": "A447"
+  },
+  {
+   "index": 561,
+   "char": "顆",
+   "basis": "et3_exact",
+   "big5": "C1FB"
+  },
+  {
+   "index": 562,
+   "char": "三",
+   "basis": "et3_exact",
+   "big5": "A454"
+  },
+  {
+   "index": 563,
+   "char": "賞",
+   "basis": "et3_exact",
+   "big5": "BDE0"
+  },
+  {
+   "index": 564,
+   "char": "噗",
+   "basis": "et3_exact",
+   "big5": "BC50"
+  },
+  {
+   "index": 565,
+   "char": "遺",
+   "basis": "et3_exact",
+   "big5": "BFF2"
+  },
+  {
+   "index": 566,
+   "char": "憾",
+   "basis": "et3_exact",
+   "big5": "BED1"
+  },
+  {
+   "index": 567,
+   "char": "冒",
+   "basis": "et3_exact",
+   "big5": "AB5F"
+  },
+  {
+   "index": 568,
+   "char": "險",
+   "basis": "et3_exact",
+   "big5": "C049"
+  },
+  {
+   "index": 569,
+   "char": "稍",
+   "basis": "et3_exact",
+   "big5": "B579"
+  },
+  {
+   "index": 570,
+   "char": "待",
+   "basis": "et3_exact",
+   "big5": "ABDD"
+  },
+  {
+   "index": 571,
+   "char": "刻",
+   "basis": "et3_exact",
+   "big5": "A8E8"
+  },
+  {
+   "index": 572,
+   "char": "第",
+   "basis": "et3_exact",
+   "big5": "B2C4"
+  },
+  {
+   "index": 573,
+   "char": "敵",
+   "basis": "et3_exact",
+   "big5": "BCC4"
+  },
+  {
+   "index": 574,
+   "char": "全",
+   "basis": "et3_exact",
+   "big5": "A5FE"
+  },
+  {
+   "index": 575,
+   "char": "滅",
+   "basis": "et3_exact",
+   "big5": "B7C0"
+  },
+  {
+   "index": 576,
+   "char": "亡",
+   "basis": "et3_exact",
+   "big5": "A460"
+  },
+  {
+   "index": 577,
+   "char": "酒",
+   "basis": "et3_exact",
+   "big5": "B073"
+  },
+  {
+   "index": 578,
+   "char": "啊",
+   "basis": "et3_exact",
+   "big5": "B0DA"
+  },
+  {
+   "index": 579,
+   "char": "氣",
+   "basis": "et3_exact",
+   "big5": "AEF0"
+  },
+  {
+   "index": 580,
+   "char": "今",
+   "basis": "et3_exact",
+   "big5": "A4B5"
+  },
+  {
+   "index": 581,
+   "char": "應",
+   "basis": "et3_exact",
+   "big5": "C0B3"
+  },
+  {
+   "index": 582,
+   "char": "該",
+   "basis": "et3_exact",
+   "big5": "B8D3"
+  },
+  {
+   "index": 583,
+   "char": "獵",
+   "basis": "et3_exact",
+   "big5": "C279"
+  },
+  {
+   "index": 584,
+   "char": "少",
+   "basis": "et3_exact",
+   "big5": "A4D6"
+  },
+  {
+   "index": 585,
+   "char": "咦",
+   "basis": "et3_exact",
+   "big5": "AB78"
+  },
+  {
+   "index": 586,
+   "char": "像",
+   "basis": "et3_exact",
+   "big5": "B9B3"
+  },
+  {
+   "index": 587,
+   "char": "聽",
+   "basis": "et3_exact",
+   "big5": "C5A5"
+  },
+  {
+   "index": 588,
+   "char": "聲",
+   "basis": "et3_exact",
+   "big5": "C16E"
+  },
+  {
+   "index": 589,
+   "char": "音",
+   "basis": "et3_exact",
+   "big5": "ADB5"
+  },
+  {
+   "index": 590,
+   "char": "小",
+   "basis": "et3_exact",
+   "big5": "A470"
+  },
+  {
+   "index": 591,
+   "char": "別",
+   "basis": "et3_exact",
+   "big5": "A74F"
+  },
+  {
+   "index": 592,
+   "char": "跑",
+   "basis": "et3_exact",
+   "big5": "B65D"
+  },
+  {
+   "index": 593,
+   "char": "往",
+   "basis": "et3_exact",
+   "big5": "A9B9"
+  },
+  {
+   "index": 594,
+   "char": "幾",
+   "basis": "et3_exact",
+   "big5": "B458"
+  },
+  {
+   "index": 595,
+   "char": "個",
+   "basis": "et3_exact",
+   "big5": "ADD3"
+  },
+  {
+   "index": 596,
+   "char": "阻",
+   "basis": "et3_exact",
+   "big5": "AAFD"
+  },
+  {
+   "index": 597,
+   "char": "擋",
+   "basis": "et3_exact",
+   "big5": "BED7"
+  },
+  {
+   "index": 598,
+   "char": "住",
+   "basis": "et3_exact",
+   "big5": "A6ED"
+  },
+  {
+   "index": 599,
+   "char": "哈",
+   "basis": "et3_exact",
+   "big5": "ABA2"
+  },
+  {
+   "index": 600,
+   "char": "算",
+   "basis": "et3_exact",
+   "big5": "BAE2"
+  },
+  {
+   "index": 601,
+   "char": "你",
+   "basis": "et3_exact",
+   "big5": "A741"
+  },
+  {
+   "index": 602,
+   "char": "厲",
+   "basis": "et3_exact",
+   "big5": "BC46"
+  },
+  {
+   "index": 603,
+   "char": "害",
+   "basis": "et3_exact",
+   "big5": "AE60"
+  },
+  {
+   "index": 604,
+   "char": "也",
+   "basis": "et3_exact",
+   "big5": "A45D"
+  },
+  {
+   "index": 605,
+   "char": "捱",
+   "basis": "et3_exact",
+   "big5": "B1BA"
+  },
+  {
+   "index": 606,
+   "char": "久",
+   "basis": "et3_exact",
+   "big5": "A45B"
+  },
+  {
+   "index": 607,
+   "char": "喂",
+   "basis": "et3_exact",
+   "big5": "B3DE"
+  },
+  {
+   "index": 608,
+   "char": "伙",
+   "basis": "et3_exact",
+   "big5": "A5EB"
+  },
+  {
+   "index": 609,
+   "char": "計",
+   "basis": "et3_exact",
+   "big5": "AD70"
+  },
+  {
+   "index": 610,
+   "char": "呀",
+   "basis": "et3_exact",
+   "big5": "A772"
+  },
+  {
+   "index": 611,
+   "char": "怎",
+   "basis": "et3_exact",
+   "big5": "ABE7"
+  },
+  {
+   "index": 612,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 613,
+   "char": "心",
+   "basis": "et3_exact",
+   "big5": "A4DF"
+  },
+  {
+   "index": 614,
+   "char": "說",
+   "basis": "et3_exact",
+   "big5": "BBA1"
+  },
+  {
+   "index": 615,
+   "char": "傢",
+   "basis": "et3_exact",
+   "big5": "B3C3"
+  },
+  {
+   "index": 616,
+   "char": "趕",
+   "basis": "et3_exact",
+   "big5": "BBB0"
+  },
+  {
+   "index": 617,
+   "char": "已",
+   "basis": "et3_exact",
+   "big5": "A477"
+  },
+  {
+   "index": 618,
+   "char": "經",
+   "basis": "et3_exact",
+   "big5": "B867"
+  },
+  {
+   "index": 619,
+   "char": "療",
+   "basis": "et3_exact",
+   "big5": "C0F8"
+  },
+  {
+   "index": 620,
+   "char": "會",
+   "basis": "et3_exact",
+   "big5": "B77C"
+  },
+  {
+   "index": 621,
+   "char": "呵",
+   "basis": "et3_exact",
+   "big5": "A8FE"
+  },
+  {
+   "index": 622,
+   "char": "看",
+   "basis": "et3_exact",
+   "big5": "ACDD"
+  },
+  {
+   "index": 623,
+   "char": "良",
+   "basis": "et3_exact",
+   "big5": "A87D"
+  },
+  {
+   "index": 624,
+   "char": "作",
+   "basis": "et3_exact",
+   "big5": "A740"
+  },
+  {
+   "index": 625,
+   "char": "伴",
+   "basis": "et3_exact",
+   "big5": "A6F1"
+  },
+  {
+   "index": 626,
+   "char": "省",
+   "basis": "et3_exact",
+   "big5": "ACD9"
+  },
+  {
+   "index": 627,
+   "char": "洩",
+   "basis": "et3_exact",
+   "big5": "ACAA"
+  },
+  {
+   "index": 628,
+   "char": "露",
+   "basis": "et3_exact",
+   "big5": "C553"
+  },
+  {
+   "index": 629,
+   "char": "消",
+   "basis": "et3_exact",
+   "big5": "AEF8"
+  },
+  {
+   "index": 630,
+   "char": "哼",
+   "basis": "et3_exact",
+   "big5": "ADF3"
+  },
+  {
+   "index": 631,
+   "char": "恐",
+   "basis": "et3_exact",
+   "big5": "AEA3"
+  },
+  {
+   "index": 632,
+   "char": "怕",
+   "basis": "et3_exact",
+   "big5": "A9C8"
+  },
+  {
+   "index": 633,
+   "char": "時",
+   "basis": "et3_exact",
+   "big5": "AEC9"
+  },
+  {
+   "index": 634,
+   "char": "候",
+   "basis": "et3_exact",
+   "big5": "ADD4"
+  },
+  {
+   "index": 635,
+   "char": "呢",
+   "basis": "et3_exact",
+   "big5": "A94F"
+  },
+  {
+   "index": 636,
+   "char": "在",
+   "basis": "et3_exact",
+   "big5": "A662"
+  },
+  {
+   "index": 637,
+   "char": "如",
+   "basis": "et3_exact",
+   "big5": "A670"
+  },
+  {
+   "index": 638,
+   "char": "果",
+   "basis": "et3_exact",
+   "big5": "AA47"
+  },
+  {
+   "index": 639,
+   "char": "亂",
+   "basis": "et3_exact",
+   "big5": "B6C3"
+  },
+  {
+   "index": 640,
+   "char": "性",
+   "basis": "et3_exact",
+   "big5": "A9CA"
+  },
+  {
+   "index": 641,
+   "char": "叫",
+   "basis": "et3_exact",
+   "big5": "A573"
+  },
+  {
+   "index": 642,
+   "char": "名",
+   "basis": "et3_exact",
+   "big5": "A657"
+  },
+  {
+   "index": 643,
+   "char": "知",
+   "basis": "et3_exact",
+   "big5": "AABE"
+  },
+  {
+   "index": 644,
+   "char": "想",
+   "basis": "et3_exact",
+   "big5": "B751"
+  },
+  {
+   "index": 645,
+   "char": "當",
+   "basis": "et3_exact",
+   "big5": "B7ED"
+  },
+  {
+   "index": 646,
+   "char": "紀",
+   "basis": "et3_exact",
+   "big5": "ACF6"
+  },
+  {
+   "index": 647,
+   "char": "浪",
+   "basis": "et3_exact",
+   "big5": "AEF6"
+  },
+  {
+   "index": 648,
+   "char": "闖",
+   "basis": "et3_exact",
+   "big5": "C2F4"
+  },
+  {
+   "index": 649,
+   "char": "過",
+   "basis": "et3_exact",
+   "big5": "B94C"
+  },
+  {
+   "index": 650,
+   "char": "區",
+   "basis": "et3_exact",
+   "big5": "B0CF"
+  },
+  {
+   "index": 651,
+   "char": "清",
+   "basis": "et3_exact",
+   "big5": "B24D"
+  },
+  {
+   "index": 652,
+   "char": "楚",
+   "basis": "et3_exact",
+   "big5": "B7A1"
+  },
+  {
+   "index": 653,
+   "char": "只",
+   "basis": "et3_exact",
+   "big5": "A575"
+  },
+  {
+   "index": 654,
+   "char": "幹",
+   "basis": "et3_exact",
+   "big5": "B746"
+  },
+  {
+   "index": 655,
+   "char": "辦",
+   "basis": "et3_exact",
+   "big5": "BFEC"
+  },
+  {
+   "index": 656,
+   "char": "唉",
+   "basis": "et3_exact",
+   "big5": "ADFC"
+  },
+  {
+   "index": 657,
+   "char": "太",
+   "basis": "et3_exact",
+   "big5": "A4D3"
+  },
+  {
+   "index": 658,
+   "char": "勉",
+   "basis": "et3_exact",
+   "big5": "AB6A"
+  },
+  {
+   "index": 659,
+   "char": "倔",
+   "basis": "et3_exact",
+   "big5": "ADCF"
+  },
+  {
+   "index": 660,
+   "char": "叔",
+   "basis": "et3_exact",
+   "big5": "A8FB"
+  },
+  {
+   "index": 661,
+   "char": "喪",
+   "basis": "et3_exact",
+   "big5": "B3E0"
+  },
+  {
+   "index": 662,
+   "char": "於",
+   "basis": "et3_exact",
+   "big5": "A9F3"
+  },
+  {
+   "index": 663,
+   "char": "此",
+   "basis": "et3_exact",
+   "big5": "A6B9"
+  },
+  {
+   "index": 664,
+   "char": "窟",
+   "basis": "et3_exact",
+   "big5": "B85D"
+  },
+  {
+   "index": 665,
+   "char": "般",
+   "basis": "et3_exact",
+   "big5": "AFEB"
+  },
+  {
+   "index": 666,
+   "char": "場",
+   "basis": "et3_exact",
+   "big5": "B3F5"
+  },
+  {
+   "index": 667,
+   "char": "為",
+   "basis": "et3_exact",
+   "big5": "ACB0"
+  },
+  {
+   "index": 668,
+   "char": "用",
+   "basis": "et3_exact",
+   "big5": "A5CE"
+  },
+  {
+   "index": 669,
+   "char": "途",
+   "basis": "et3_exact",
+   "big5": "B37E"
+  },
+  {
+   "index": 670,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 671,
+   "char": "非",
+   "basis": "et3_exact",
+   "big5": "AB44"
+  },
+  {
+   "index": 672,
+   "char": "常",
+   "basis": "et3_exact",
+   "big5": "B160"
+  },
+  {
+   "index": 673,
+   "char": "廣",
+   "basis": "et3_exact",
+   "big5": "BC73"
+  },
+  {
+   "index": 674,
+   "char": "若",
+   "basis": "et3_exact",
+   "big5": "AD59"
+  },
+  {
+   "index": 675,
+   "char": "運",
+   "basis": "et3_exact",
+   "big5": "B942"
+  },
+  {
+   "index": 676,
+   "char": "相",
+   "basis": "et3_exact",
+   "big5": "ACDB"
+  },
+  {
+   "index": 677,
+   "char": "信",
+   "basis": "et3_exact",
+   "big5": "AB48"
+  },
+  {
+   "index": 678,
+   "char": "對",
+   "basis": "et3_exact",
+   "big5": "B9EF"
+  },
+  {
+   "index": 679,
+   "char": "後",
+   "basis": "et3_exact",
+   "big5": "ABE1"
+  },
+  {
+   "index": 680,
+   "char": "助",
+   "basis": "et3_exact",
+   "big5": "A755"
+  },
+  {
+   "index": 681,
+   "char": "益",
+   "basis": "et3_exact",
+   "big5": "AF71"
+  },
+  {
+   "index": 682,
+   "char": "提",
+   "basis": "et3_exact",
+   "big5": "B4A3"
+  },
+  {
+   "index": 683,
+   "char": "員",
+   "basis": "et3_exact",
+   "big5": "ADFB"
+  },
+  {
+   "index": 684,
+   "char": "及",
+   "basis": "et3_exact",
+   "big5": "A4CE"
+  },
+  {
+   "index": 685,
+   "char": "率",
+   "basis": "et3_exact",
+   "big5": "B276"
+  },
+  {
+   "index": 686,
+   "char": "減",
+   "basis": "et3_exact",
+   "big5": "B4EE"
+  },
+  {
+   "index": 687,
+   "char": "避",
+   "basis": "et3_exact",
+   "big5": "C1D7"
+  },
+  {
+   "index": 688,
+   "char": "購",
+   "basis": "et3_exact",
+   "big5": "C1CA"
+  },
+  {
+   "index": 689,
+   "char": "買",
+   "basis": "et3_exact",
+   "big5": "B652"
+  },
+  {
+   "index": 690,
+   "char": "配",
+   "basis": "et3_exact",
+   "big5": "B074"
+  },
+  {
+   "index": 691,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 692,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 693,
+   "char": "穿",
+   "basis": "et3_exact",
+   "big5": "ACEF"
+  },
+  {
+   "index": 694,
+   "char": "戴",
+   "basis": "et3_exact",
+   "big5": "C0B9"
+  },
+  {
+   "index": 695,
+   "char": "欄",
+   "basis": "et3_exact",
+   "big5": "C4E6"
+  },
+  {
+   "index": 696,
+   "char": "須",
+   "basis": "et3_exact",
+   "big5": "B6B7"
+  },
+  {
+   "index": 697,
+   "char": "才",
+   "basis": "et3_exact",
+   "big5": "A47E"
+  },
+  {
+   "index": 698,
+   "char": "東",
+   "basis": "et3_exact",
+   "big5": "AA46"
+  },
+  {
+   "index": 699,
+   "char": "西",
+   "basis": "et3_exact",
+   "big5": "A6E8"
+  },
+  {
+   "index": 700,
+   "char": "杯",
+   "basis": "et3_exact",
+   "big5": "AA4D"
+  },
+  {
+   "index": 701,
+   "char": "隨",
+   "basis": "et3_exact",
+   "big5": "C048"
+  },
+  {
+   "index": 702,
+   "char": "便",
+   "basis": "et3_exact",
+   "big5": "AB4B"
+  },
+  {
+   "index": 703,
+   "char": "坐",
+   "basis": "et3_exact",
+   "big5": "A7A4"
+  },
+  {
+   "index": 704,
+   "char": "進",
+   "basis": "et3_exact",
+   "big5": "B669"
+  },
+  {
+   "index": 705,
+   "char": "嚇",
+   "basis": "et3_exact",
+   "big5": "C07E"
+  },
+  {
+   "index": 706,
+   "char": "拔",
+   "basis": "et3_exact",
+   "big5": "A9DE"
+  },
+  {
+   "index": 707,
+   "char": "腿",
+   "basis": "et3_exact",
+   "big5": "BB4C"
+  },
+  {
+   "index": 708,
+   "char": "頭",
+   "basis": "et3_exact",
+   "big5": "C059"
+  },
+  {
+   "index": 709,
+   "char": "查",
+   "basis": "et3_exact",
+   "big5": "AC64"
+  },
+  {
+   "index": 710,
+   "char": "資",
+   "basis": "et3_exact",
+   "big5": "B8EA"
+  },
+  {
+   "index": 711,
+   "char": "教",
+   "basis": "et3_exact",
+   "big5": "B1D0"
+  },
+  {
+   "index": 712,
+   "char": "問",
+   "basis": "et3_exact",
+   "big5": "B0DD"
+  },
+  {
+   "index": 713,
+   "char": "弟",
+   "basis": "et3_exact",
+   "big5": "A7CC"
+  },
+  {
+   "index": 714,
+   "char": "兄",
+   "basis": "et3_exact",
+   "big5": "A553"
+  },
+  {
+   "index": 715,
+   "char": "五",
+   "basis": "et3_exact",
+   "big5": "A4AD"
+  },
+  {
+   "index": 716,
+   "char": "六",
+   "basis": "et3_exact",
+   "big5": "A4BB"
+  },
+  {
+   "index": 717,
+   "char": "歲",
+   "basis": "et3_exact",
+   "big5": "B7B3"
+  },
+  {
+   "index": 718,
+   "char": "供",
+   "basis": "et3_exact",
+   "big5": "A8D1"
+  },
+  {
+   "index": 719,
+   "char": "務",
+   "basis": "et3_exact",
+   "big5": "B0C8"
+  },
+  {
+   "index": 720,
+   "char": "等",
+   "basis": "et3_exact",
+   "big5": "B5A5"
+  },
+  {
+   "index": 721,
+   "char": "級",
+   "basis": "et3_exact",
+   "big5": "AFC5"
+  },
+  {
+   "index": 722,
+   "char": "由",
+   "basis": "et3_exact",
+   "big5": "A5D1"
+  },
+  {
+   "index": 723,
+   "char": "升",
+   "basis": "et3_exact",
+   "big5": "A4C9"
+  },
+  {
+   "index": 724,
+   "char": "獲",
+   "basis": "et3_exact",
+   "big5": "C0F2"
+  },
+  {
+   "index": 725,
+   "char": "更",
+   "basis": "et3_exact",
+   "big5": "A7F3"
+  },
+  {
+   "index": 726,
+   "char": "功",
+   "basis": "et3_exact",
+   "big5": "A55C"
+  },
+  {
+   "index": 727,
+   "char": "找",
+   "basis": "et3_exact",
+   "big5": "A7E4"
+  },
+  {
+   "index": 728,
+   "char": "藏",
+   "basis": "et3_exact",
+   "big5": "C2C3"
+  },
+  {
+   "index": 729,
+   "char": "兇",
+   "basis": "et3_exact",
+   "big5": "A5FB"
+  },
+  {
+   "index": 730,
+   "char": "遭",
+   "basis": "et3_exact",
+   "big5": "BE44"
+  },
+  {
+   "index": 731,
+   "char": "殃",
+   "basis": "et3_exact",
+   "big5": "AC6F"
+  },
+  {
+   "index": 732,
+   "char": "樣",
+   "basis": "et3_exact",
+   "big5": "BCCB"
+  },
+  {
+   "index": 733,
+   "char": "而",
+   "basis": "et3_exact",
+   "big5": "A6D3"
+  },
+  {
+   "index": 734,
+   "char": "且",
+   "basis": "et3_exact",
+   "big5": "A542"
+  },
+  {
+   "index": 735,
+   "char": "越",
+   "basis": "et3_exact",
+   "big5": "B656"
+  },
+  {
+   "index": 736,
+   "char": "救",
+   "basis": "et3_exact",
+   "big5": "B1CF"
+  },
+  {
+   "index": 737,
+   "char": "貴",
+   "basis": "et3_exact",
+   "big5": "B651"
+  },
+  {
+   "index": 738,
+   "char": "願",
+   "basis": "et3_exact",
+   "big5": "C440"
+  },
+  {
+   "index": 739,
+   "char": "難",
+   "basis": "et3_exact",
+   "big5": "C3F8"
+  },
+  {
+   "index": 740,
+   "char": "危",
+   "basis": "et3_exact",
+   "big5": "A64D"
+  },
+  {
+   "index": 741,
+   "char": "筆",
+   "basis": "et3_exact",
+   "big5": "B5A7"
+  },
+  {
+   "index": 742,
+   "char": "館",
+   "basis": "et3_exact",
+   "big5": "C05D"
+  },
+  {
+   "index": 743,
+   "char": "睡",
+   "basis": "et3_exact",
+   "big5": "BACE"
+  },
+  {
+   "index": 744,
+   "char": "覺",
+   "basis": "et3_exact",
+   "big5": "C4B1"
+  },
+  {
+   "index": 745,
+   "char": "原",
+   "basis": "et3_exact",
+   "big5": "ADEC"
+  },
+  {
+   "index": 746,
+   "char": "老",
+   "basis": "et3_exact",
+   "big5": "A6D1"
+  },
+  {
+   "index": 747,
+   "char": "闆",
+   "basis": "et3_exact",
+   "big5": "C1F3"
+  },
+  {
+   "index": 748,
+   "char": "娘",
+   "basis": "et3_exact",
+   "big5": "AE51"
+  },
+  {
+   "index": 749,
+   "char": "弄",
+   "basis": "et3_exact",
+   "big5": "A7CB"
+  },
+  {
+   "index": 750,
+   "char": "慌",
+   "basis": "et3_exact",
+   "big5": "B757"
+  },
+  {
+   "index": 751,
+   "char": "張",
+   "basis": "et3_exact",
+   "big5": "B169"
+  },
+  {
+   "index": 752,
+   "char": "感",
+   "basis": "et3_exact",
+   "big5": "B750"
+  },
+  {
+   "index": 753,
+   "char": "謝",
+   "basis": "et3_exact",
+   "big5": "C1C2"
+  },
+  {
+   "index": 754,
+   "char": "驚",
+   "basis": "et3_exact",
+   "big5": "C5E5"
+  },
+  {
+   "index": 755,
+   "char": "未",
+   "basis": "et3_exact",
+   "big5": "A5BC"
+  },
+  {
+   "index": 756,
+   "char": "領",
+   "basis": "et3_exact",
+   "big5": "BBE2"
+  },
+  {
+   "index": 757,
+   "char": "錯",
+   "basis": "et3_exact",
+   "big5": "BFF9"
+  },
+  {
+   "index": 758,
+   "char": "嘛",
+   "basis": "et3_exact",
+   "big5": "B9C0"
+  },
+  {
+   "index": 759,
+   "char": "種",
+   "basis": "et3_exact",
+   "big5": "BAD8"
+  },
+  {
+   "index": 760,
+   "char": "奇",
+   "basis": "et3_exact",
+   "big5": "A95F"
+  },
+  {
+   "index": 761,
+   "char": "方",
+   "basis": "et3_exact",
+   "big5": "A4E8"
+  },
+  {
+   "index": 762,
+   "char": "敢",
+   "basis": "et3_exact",
+   "big5": "B4B1"
+  },
+  {
+   "index": 763,
+   "char": "榮",
+   "basis": "et3_exact",
+   "big5": "BA61"
+  },
+  {
+   "index": 764,
+   "char": "幸",
+   "basis": "et3_exact",
+   "big5": "A9AF"
+  },
+  {
+   "index": 765,
+   "char": "和",
+   "basis": "et3_exact",
+   "big5": "A94D"
+  },
+  {
+   "index": 766,
+   "char": "同",
+   "basis": "et3_exact",
+   "big5": "A650"
+  },
+  {
+   "index": 767,
+   "char": "跟",
+   "basis": "et3_exact",
+   "big5": "B8F2"
+  },
+  {
+   "index": 768,
+   "char": "著",
+   "basis": "et3_exact",
+   "big5": "B5DB"
+  },
+  {
+   "index": 769,
+   "char": "尚",
+   "basis": "et3_exact",
+   "big5": "A97C"
+  },
+  {
+   "index": 770,
+   "char": "固",
+   "basis": "et3_exact",
+   "big5": "A954"
+  },
+  {
+   "index": 771,
+   "char": "補",
+   "basis": "et3_exact",
+   "big5": "B8C9"
+  },
+  {
+   "index": 772,
+   "char": "充",
+   "basis": "et3_exact",
+   "big5": "A552"
+  },
+  {
+   "index": 773,
+   "char": "嗜",
+   "basis": "et3_exact",
+   "big5": "B6DD"
+  },
+  {
+   "index": 774,
+   "char": "鼾",
+   "basis": "et3_exact",
+   "big5": "C24D"
+  },
+  {
+   "index": 775,
+   "char": "吃",
+   "basis": "et3_exact",
+   "big5": "A659"
+  },
+  {
+   "index": 776,
+   "char": "耳",
+   "basis": "et3_exact",
+   "big5": "A6D5"
+  },
+  {
+   "index": 777,
+   "char": "邊",
+   "basis": "et3_exact",
+   "big5": "C3E4"
+  },
+  {
+   "index": 778,
+   "char": "話",
+   "basis": "et3_exact",
+   "big5": "B8DC"
+  },
+  {
+   "index": 779,
+   "char": "簡",
+   "basis": "et3_exact",
+   "big5": "C2B2"
+  },
+  {
+   "index": 780,
+   "char": "直",
+   "basis": "et3_exact",
+   "big5": "AABD"
+  },
+  {
+   "index": 781,
+   "char": "答",
+   "basis": "et3_exact",
+   "big5": "B5AA"
+  },
+  {
+   "index": 782,
+   "char": "切",
+   "basis": "et3_exact",
+   "big5": "A4C1"
+  },
+  {
+   "index": 783,
+   "char": "都",
+   "basis": "et3_exact",
+   "big5": "B3A3"
+  },
+  {
+   "index": 784,
+   "char": "排",
+   "basis": "et3_exact",
+   "big5": "B1C6"
+  },
+  {
+   "index": 785,
+   "char": "走",
+   "basis": "et3_exact",
+   "big5": "A8AB"
+  },
+  {
+   "index": 786,
+   "char": "趁",
+   "basis": "et3_exact",
+   "big5": "B658"
+  },
+  {
+   "index": 787,
+   "char": "晚",
+   "basis": "et3_exact",
+   "big5": "B1DF"
+  },
+  {
+   "index": 788,
+   "char": "肆",
+   "basis": "et3_exact",
+   "big5": "B876"
+  },
+  {
+   "index": 789,
+   "char": "慶",
+   "basis": "et3_exact",
+   "big5": "BC79"
+  },
+  {
+   "index": 790,
+   "char": "廿",
+   "basis": "et3_exact",
+   "big5": "A4DC"
+  },
+  {
+   "index": 791,
+   "char": "內",
+   "basis": "et3_exact",
+   "big5": "A4BA"
+  },
+  {
+   "index": 792,
+   "char": "倒",
+   "basis": "et3_exact",
+   "big5": "ADCB"
+  },
+  {
+   "index": 793,
+   "char": "些",
+   "basis": "et3_exact",
+   "big5": "A8C7"
+  },
+  {
+   "index": 794,
+   "char": "造",
+   "basis": "et3_exact",
+   "big5": "B379"
+  },
+  {
+   "index": 795,
+   "char": "它",
+   "basis": "et3_exact",
+   "big5": "A5A6"
+  },
+  {
+   "index": 796,
+   "char": "吹",
+   "basis": "et3_exact",
+   "big5": "A76A"
+  },
+  {
+   "index": 797,
+   "char": "牛",
+   "basis": "et3_exact",
+   "big5": "A4FB"
+  },
+  {
+   "index": 798,
+   "char": "柄",
+   "basis": "et3_exact",
+   "big5": "AC60"
+  },
+  {
+   "index": 799,
+   "char": "準",
+   "basis": "et3_exact",
+   "big5": "B7C7"
+  },
+  {
+   "index": 800,
+   "char": "附",
+   "basis": "et3_exact",
+   "big5": "AAFE"
+  },
+  {
+   "index": 801,
+   "char": "近",
+   "basis": "et3_exact",
+   "big5": "AAF1"
+  },
+  {
+   "index": 802,
+   "char": "廢",
+   "basis": "et3_exact",
+   "big5": "BC6F"
+  },
+  {
+   "index": 803,
+   "char": "墟",
+   "basis": "et3_exact",
+   "big5": "BC56"
+  },
+  {
+   "index": 804,
+   "char": "跡",
+   "basis": "et3_exact",
+   "big5": "B8F1"
+  },
+  {
+   "index": 805,
+   "char": "興",
+   "basis": "et3_exact",
+   "big5": "BFB3"
+  },
+  {
+   "index": 806,
+   "char": "趣",
+   "basis": "et3_exact",
+   "big5": "BDEC"
+  },
+  {
+   "index": 807,
+   "char": "逛",
+   "basis": "et3_exact",
+   "big5": "B37D"
+  },
+  {
+   "index": 808,
+   "char": "許",
+   "basis": "et3_exact",
+   "big5": "B35C"
+  },
+  {
+   "index": 809,
+   "char": "意",
+   "basis": "et3_exact",
+   "big5": "B74E"
+  },
+  {
+   "index": 810,
+   "char": "嘻",
+   "basis": "et3_exact",
+   "big5": "BC48"
+  },
+  {
+   "index": 811,
+   "char": "庇",
+   "basis": "et3_exact",
+   "big5": "A7C8"
+  },
+  {
+   "index": 812,
+   "char": "嗨",
+   "basis": "et3_exact",
+   "big5": "B6D9"
+  },
+  {
+   "index": 813,
+   "char": "又",
+   "basis": "et3_exact",
+   "big5": "A453"
+  },
+  {
+   "index": 814,
+   "char": "荒",
+   "basis": "et3_exact",
+   "big5": "AFEE"
+  },
+  {
+   "index": 815,
+   "char": "涼",
+   "basis": "et3_exact",
+   "big5": "B244"
+  },
+  {
+   "index": 816,
+   "char": "兩",
+   "basis": "et3_exact",
+   "big5": "A8E2"
+  },
+  {
+   "index": 817,
+   "char": "處",
+   "basis": "et3_exact",
+   "big5": "B342"
+  },
+  {
+   "index": 818,
+   "char": "煽",
+   "basis": "et3_exact",
+   "big5": "BAB4"
+  },
+  {
+   "index": 819,
+   "char": "農",
+   "basis": "et3_exact",
+   "big5": "B941"
+  },
+  {
+   "index": 820,
+   "char": "叛",
+   "basis": "et3_exact",
+   "big5": "AB71"
+  },
+  {
+   "index": 821,
+   "char": "主",
+   "basis": "et3_exact",
+   "big5": "A544"
+  },
+  {
+   "index": 822,
+   "char": "搶",
+   "basis": "et3_exact",
+   "big5": "B76D"
+  },
+  {
+   "index": 823,
+   "char": "劫",
+   "basis": "et3_exact",
+   "big5": "A754"
+  },
+  {
+   "index": 824,
+   "char": "路",
+   "basis": "et3_exact",
+   "big5": "B8F4"
+  },
+  {
+   "index": 825,
+   "char": "宣",
+   "basis": "et3_exact",
+   "big5": "ABC5"
+  },
+  {
+   "index": 826,
+   "char": "揚",
+   "basis": "et3_exact",
+   "big5": "B4AD"
+  },
+  {
+   "index": 827,
+   "char": "義",
+   "basis": "et3_exact",
+   "big5": "B871"
+  },
+  {
+   "index": 828,
+   "char": "逮",
+   "basis": "et3_exact",
+   "big5": "B665"
+  },
+  {
+   "index": 829,
+   "char": "捕",
+   "basis": "et3_exact",
+   "big5": "AEB7"
+  },
+  {
+   "index": 830,
+   "char": "嘗",
+   "basis": "et3_exact",
+   "big5": "B9C1"
+  },
+  {
+   "index": 831,
+   "char": "監",
+   "basis": "et3_exact",
+   "big5": "BACA"
+  },
+  {
+   "index": 832,
+   "char": "牢",
+   "basis": "et3_exact",
+   "big5": "A863"
+  },
+  {
+   "index": 833,
+   "char": "關",
+   "basis": "et3_exact",
+   "big5": "C3F6"
+  },
+  {
+   "index": 834,
+   "char": "窗",
+   "basis": "et3_exact",
+   "big5": "B5A1"
+  },
+  {
+   "index": 835,
+   "char": "滋",
+   "basis": "et3_exact",
+   "big5": "B4FE"
+  },
+  {
+   "index": 836,
+   "char": "味",
+   "basis": "et3_exact",
+   "big5": "A8FD"
+  },
+  {
+   "index": 837,
+   "char": "嘿",
+   "basis": "et3_exact",
+   "big5": "BC4B"
+  },
+  {
+   "index": 838,
+   "char": "毛",
+   "basis": "et3_exact",
+   "big5": "A4F2"
+  },
+  {
+   "index": 839,
+   "char": "仗",
+   "basis": "et3_exact",
+   "big5": "A54D"
+  },
+  {
+   "index": 840,
+   "char": "夫",
+   "basis": "et3_exact",
+   "big5": "A4D2"
+  },
+  {
+   "index": 841,
+   "char": "擺",
+   "basis": "et3_exact",
+   "big5": "C25C"
+  },
+  {
+   "index": 842,
+   "char": "佈",
+   "basis": "et3_exact",
+   "big5": "A747"
+  },
+  {
+   "index": 843,
+   "char": "纏",
+   "basis": "et3_exact",
+   "big5": "C4F1"
+  },
+  {
+   "index": 844,
+   "char": "壞",
+   "basis": "et3_exact",
+   "big5": "C361"
+  },
+  {
+   "index": 845,
+   "char": "識",
+   "basis": "et3_exact",
+   "big5": "C3D1"
+  },
+  {
+   "index": 846,
+   "char": "語",
+   "basis": "et3_exact",
+   "big5": "BB79"
+  },
+  {
+   "index": 847,
+   "char": "糟",
+   "basis": "et3_exact",
+   "big5": "C156"
+  },
+  {
+   "index": 848,
+   "char": "唸",
+   "basis": "et3_exact",
+   "big5": "B0E1"
+  },
+  {
+   "index": 849,
+   "char": "所",
+   "basis": "et3_exact",
+   "big5": "A9D2"
+  },
+  {
+   "index": 850,
+   "char": "瘋",
+   "basis": "et3_exact",
+   "big5": "BAC6"
+  },
+  {
+   "index": 851,
+   "char": "止",
+   "basis": "et3_exact",
+   "big5": "A4EE"
+  },
+  {
+   "index": 852,
+   "char": "數",
+   "basis": "et3_exact",
+   "big5": "BCC6"
+  },
+  {
+   "index": 853,
+   "char": "慢",
+   "basis": "et3_exact",
+   "big5": "BA43"
+  },
+  {
+   "index": 854,
+   "char": "埋",
+   "basis": "et3_exact",
+   "big5": "AE49"
+  },
+  {
+   "index": 855,
+   "char": "伏",
+   "basis": "et3_exact",
+   "big5": "A5F1"
+  },
+  {
+   "index": 856,
+   "char": "哦",
+   "basis": "et3_exact",
+   "big5": "AE40"
+  },
+  {
+   "index": 857,
+   "char": "支",
+   "basis": "et3_exact",
+   "big5": "A4E4"
+  },
+  {
+   "index": 858,
+   "char": "援",
+   "basis": "et3_exact",
+   "big5": "B4A9"
+  },
+  {
+   "index": 859,
+   "char": "朋",
+   "basis": "et3_exact",
+   "big5": "AA42"
+  },
+  {
+   "index": 860,
+   "char": "友",
+   "basis": "et3_exact",
+   "big5": "A4CD"
+  },
+  {
+   "index": 861,
+   "char": "統",
+   "basis": "et3_exact",
+   "big5": "B2CE"
+  },
+  {
+   "index": 862,
+   "char": "終",
+   "basis": "et3_exact",
+   "big5": "B2D7"
+  },
+  {
+   "index": 863,
+   "char": "整",
+   "basis": "et3_exact",
+   "big5": "BEE3"
+  },
+  {
+   "index": 864,
+   "char": "陸",
+   "basis": "et3_exact",
+   "big5": "B3B0"
+  },
+  {
+   "index": 865,
+   "char": "萊",
+   "basis": "et3_exact",
+   "big5": "B5DC"
+  },
+  {
+   "index": 866,
+   "char": "習",
+   "basis": "et3_exact",
+   "big5": "B2DF"
+  },
+  {
+   "index": 867,
+   "char": "呼",
+   "basis": "et3_exact",
+   "big5": "A949"
+  },
+  {
+   "index": 868,
+   "char": "花",
+   "basis": "et3_exact",
+   "big5": "AAE1"
+  },
+  {
+   "index": 869,
+   "char": "梟",
+   "basis": "et3_exact",
+   "big5": "B1FA"
+  },
+  {
+   "index": 870,
+   "char": "情",
+   "basis": "et3_exact",
+   "big5": "B1A1"
+  },
+  {
+   "index": 871,
+   "char": "哪",
+   "basis": "et3_exact",
+   "big5": "ADFE"
+  },
+  {
+   "index": 872,
+   "char": "富",
+   "basis": "et3_exact",
+   "big5": "B449"
+  },
+  {
+   "index": 873,
+   "char": "陌",
+   "basis": "et3_exact",
+   "big5": "ADAF"
+  },
+  {
+   "index": 874,
+   "char": "希",
+   "basis": "et3_exact",
+   "big5": "A7C6"
+  },
+  {
+   "index": 875,
+   "char": "望",
+   "basis": "et3_exact",
+   "big5": "B1E6"
+  },
+  {
+   "index": 876,
+   "char": "報",
+   "basis": "et3_exact",
+   "big5": "B3F8"
+  },
+  {
+   "index": 877,
+   "char": "伍",
+   "basis": "et3_exact",
+   "big5": "A5EE"
+  },
+  {
+   "index": 878,
+   "char": "至",
+   "basis": "et3_exact",
+   "big5": "A6DC"
+  },
+  {
+   "index": 879,
+   "char": "帥",
+   "basis": "et3_exact",
+   "big5": "ABD3"
+  },
+  {
+   "index": 880,
+   "char": "忠",
+   "basis": "et3_exact",
+   "big5": "A9BE"
+  },
+  {
+   "index": 881,
+   "char": "僕",
+   "basis": "et3_exact",
+   "big5": "B9B2"
+  },
+  {
+   "index": 882,
+   "char": "收",
+   "basis": "et3_exact",
+   "big5": "A6AC"
+  },
+  {
+   "index": 883,
+   "char": "拾",
+   "basis": "et3_exact",
+   "big5": "AC42"
+  },
+  {
+   "index": 884,
+   "char": "陷",
+   "basis": "et3_exact",
+   "big5": "B3B4"
+  },
+  {
+   "index": 885,
+   "char": "阱",
+   "basis": "et3_exact",
+   "big5": "A8C0"
+  },
+  {
+   "index": 886,
+   "char": "留",
+   "basis": "et3_exact",
+   "big5": "AF64"
+  },
+  {
+   "index": 887,
+   "char": "偉",
+   "basis": "et3_exact",
+   "big5": "B0B6"
+  },
+  {
+   "index": 888,
+   "char": "遵",
+   "basis": "et3_exact",
+   "big5": "BFED"
+  },
+  {
+   "index": 889,
+   "char": "照",
+   "basis": "et3_exact",
+   "big5": "B7D3"
+  },
+  {
+   "index": 890,
+   "char": "妨",
+   "basis": "et3_exact",
+   "big5": "A7AB"
+  },
+  {
+   "index": 891,
+   "char": "礙",
+   "basis": "et3_exact",
+   "big5": "C3AA"
+  },
+  {
+   "index": 892,
+   "char": "漸",
+   "basis": "et3_exact",
+   "big5": "BAA5"
+  },
+  {
+   "index": 893,
+   "char": "召",
+   "basis": "et3_exact",
+   "big5": "A56C"
+  },
+  {
+   "index": 894,
+   "char": "喚",
+   "basis": "et3_exact",
+   "big5": "B3EA"
+  },
+  {
+   "index": 895,
+   "char": "醒",
+   "basis": "et3_exact",
+   "big5": "BFF4"
+  },
+  {
+   "index": 896,
+   "char": "勁",
+   "basis": "et3_exact",
+   "big5": "AB6C"
+  },
+  {
+   "index": 897,
+   "char": "承",
+   "basis": "et3_exact",
+   "big5": "A9D3"
+  },
+  {
+   "index": 898,
+   "char": "糕",
+   "basis": "et3_exact",
+   "big5": "BF7C"
+  },
+  {
+   "index": 899,
+   "char": "予",
+   "basis": "et3_exact",
+   "big5": "A4A9"
+  },
+  {
+   "index": 900,
+   "char": "擾",
+   "basis": "et3_exact",
+   "big5": "C25A"
+  },
+  {
+   "index": 901,
+   "char": "部",
+   "basis": "et3_exact",
+   "big5": "B3A1"
+  },
+  {
+   "index": 902,
+   "char": "四",
+   "basis": "et3_exact",
+   "big5": "A57C"
+  },
+  {
+   "index": 903,
+   "char": "謎",
+   "basis": "et3_exact",
+   "big5": "C1BC"
+  },
+  {
+   "index": 904,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 905,
+   "char": "群",
+   "basis": "et3_exact",
+   "big5": "B873"
+  },
+  {
+   "index": 906,
+   "char": "追",
+   "basis": "et3_exact",
+   "big5": "B06C"
+  },
+  {
+   "index": 907,
+   "char": "姐",
+   "basis": "et3_exact",
+   "big5": "A96A"
+  },
+  {
+   "index": 908,
+   "char": "城",
+   "basis": "et3_exact",
+   "big5": "ABB0"
+  },
+  {
+   "index": 909,
+   "char": "向",
+   "basis": "et3_exact",
+   "big5": "A656"
+  },
+  {
+   "index": 910,
+   "char": "她",
+   "basis": "et3_exact",
+   "big5": "A66F"
+  },
+  {
+   "index": 911,
+   "char": "親",
+   "basis": "et3_exact",
+   "big5": "BFCB"
+  },
+  {
+   "index": 912,
+   "char": "招",
+   "basis": "et3_exact",
+   "big5": "A9DB"
+  },
+  {
+   "index": 913,
+   "char": "惹",
+   "basis": "et3_exact",
+   "big5": "B753"
+  },
+  {
+   "index": 914,
+   "char": "擔",
+   "basis": "et3_exact",
+   "big5": "BEE1"
+  },
+  {
+   "index": 915,
+   "char": "據",
+   "basis": "et3_exact",
+   "big5": "BEDA"
+  },
+  {
+   "index": 916,
+   "char": "隱",
+   "basis": "et3_exact",
+   "big5": "C1F4"
+  },
+  {
+   "index": 917,
+   "char": "專",
+   "basis": "et3_exact",
+   "big5": "B14D"
+  },
+  {
+   "index": 918,
+   "char": "或",
+   "basis": "et3_exact",
+   "big5": "A9CE"
+  },
+  {
+   "index": 919,
+   "char": "圈",
+   "basis": "et3_exact",
+   "big5": "B0E9"
+  },
+  {
+   "index": 920,
+   "char": "美",
+   "basis": "et3_exact",
+   "big5": "ACFC"
+  },
+  {
+   "index": 921,
+   "char": "抱",
+   "basis": "et3_exact",
+   "big5": "A9EA"
+  },
+  {
+   "index": 922,
+   "char": "歉",
+   "basis": "et3_exact",
+   "big5": "BA70"
+  },
+  {
+   "index": 923,
+   "char": "引",
+   "basis": "et3_exact",
+   "big5": "A4DE"
+  },
+  {
+   "index": 924,
+   "char": "世",
+   "basis": "et3_exact",
+   "big5": "A540"
+  },
+  {
+   "index": 925,
+   "char": "替",
+   "basis": "et3_exact",
+   "big5": "B4C0"
+  },
+  {
+   "index": 926,
+   "char": "諒",
+   "basis": "et3_exact",
+   "big5": "BDCC"
+  },
+  {
+   "index": 927,
+   "char": "妳",
+   "basis": "et3_exact",
+   "big5": "A970"
+  },
+  {
+   "index": 928,
+   "char": "禮",
+   "basis": "et3_exact",
+   "big5": "C2A7"
+  },
+  {
+   "index": 929,
+   "char": "但",
+   "basis": "et3_exact",
+   "big5": "A6FD"
+  },
+  {
+   "index": 930,
+   "char": "父",
+   "basis": "et3_exact",
+   "big5": "A4F7"
+  },
+  {
+   "index": 931,
+   "char": "嚴",
+   "basis": "et3_exact",
+   "big5": "C459"
+  },
+  {
+   "index": 932,
+   "char": "令",
+   "basis": "et3_exact",
+   "big5": "A54F"
+  },
+  {
+   "index": 933,
+   "char": "罰",
+   "basis": "et3_exact",
+   "big5": "BB40"
+  },
+  {
+   "index": 934,
+   "char": "求",
+   "basis": "et3_exact",
+   "big5": "A844"
+  },
+  {
+   "index": 935,
+   "char": "曉",
+   "basis": "et3_exact",
+   "big5": "BEE5"
+  },
+  {
+   "index": 936,
+   "char": "圖",
+   "basis": "et3_exact",
+   "big5": "B9CF"
+  },
+  {
+   "index": 937,
+   "char": "痛",
+   "basis": "et3_exact",
+   "big5": "B568"
+  },
+  {
+   "index": 938,
+   "char": "傷",
+   "basis": "et3_exact",
+   "big5": "B6CB"
+  },
+  {
+   "index": 939,
+   "char": "輕",
+   "basis": "et3_exact",
+   "big5": "BBB4"
+  },
+  {
+   "index": 940,
+   "char": "嗚",
+   "basis": "et3_exact",
+   "big5": "B6E3"
+  },
+  {
+   "index": 941,
+   "char": "從",
+   "basis": "et3_exact",
+   "big5": "B171"
+  },
+  {
+   "index": 942,
+   "char": "山",
+   "basis": "et3_exact",
+   "big5": "A473"
+  },
+  {
+   "index": 943,
+   "char": "跌",
+   "basis": "et3_exact",
+   "big5": "B65E"
+  },
+  {
+   "index": 944,
+   "char": "撞",
+   "basis": "et3_exact",
+   "big5": "BCB2"
+  },
+  {
+   "index": 945,
+   "char": "失",
+   "basis": "et3_exact",
+   "big5": "A5A2"
+  },
+  {
+   "index": 946,
+   "char": "憶",
+   "basis": "et3_exact",
+   "big5": "BED0"
+  },
+  {
+   "index": 947,
+   "char": "管",
+   "basis": "et3_exact",
+   "big5": "BADE"
+  },
+  {
+   "index": 948,
+   "char": "暫",
+   "basis": "et3_exact",
+   "big5": "BCC8"
+  },
+  {
+   "index": 949,
+   "char": "顧",
+   "basis": "et3_exact",
+   "big5": "C555"
+  },
+  {
+   "index": 950,
+   "char": "悠",
+   "basis": "et3_exact",
+   "big5": "B179"
+  },
+  {
+   "index": 951,
+   "char": "妮",
+   "basis": "et3_exact",
+   "big5": "A967"
+  },
+  {
+   "index": 952,
+   "char": "總",
+   "basis": "et3_exact",
+   "big5": "C160"
+  },
+  {
+   "index": 953,
+   "char": "憑",
+   "basis": "et3_exact",
+   "big5": "BECC"
+  },
+  {
+   "index": 954,
+   "char": "閒",
+   "basis": "et3_exact",
+   "big5": "B6A2"
+  },
+  {
+   "index": 955,
+   "char": "認",
+   "basis": "et3_exact",
+   "big5": "BB7B"
+  },
+  {
+   "index": 956,
+   "char": "臭",
+   "basis": "et3_exact",
+   "big5": "AFE4"
+  },
+  {
+   "index": 957,
+   "char": "概",
+   "basis": "et3_exact",
+   "big5": "B7A7"
+  },
+  {
+   "index": 958,
+   "char": "爺",
+   "basis": "et3_exact",
+   "big5": "B7DD"
+  },
+  {
+   "index": 959,
+   "char": "鬆",
+   "basis": "et3_exact",
+   "big5": "C350"
+  },
+  {
+   "index": 960,
+   "char": "散",
+   "basis": "et3_exact",
+   "big5": "B4B2"
+  },
+  {
+   "index": 961,
+   "char": "筋",
+   "basis": "et3_exact",
+   "big5": "B5AC"
+  },
+  {
+   "index": 962,
+   "char": "告",
+   "basis": "et3_exact",
+   "big5": "A769"
+  },
+  {
+   "index": 963,
+   "char": "營",
+   "basis": "et3_exact",
+   "big5": "C0E7"
+  },
+  {
+   "index": 964,
+   "char": "撐",
+   "basis": "et3_exact",
+   "big5": "BCB5"
+  },
+  {
+   "index": 965,
+   "char": "巡",
+   "basis": "et3_exact",
+   "big5": "A8B5"
+  },
+  {
+   "index": 966,
+   "char": "邏",
+   "basis": "et3_exact",
+   "big5": "C5DE"
+  },
+  {
+   "index": 967,
+   "char": "夥",
+   "basis": "et3_exact",
+   "big5": "B9D9"
+  },
+  {
+   "index": 968,
+   "char": "疾",
+   "basis": "et3_exact",
+   "big5": "AF65"
+  },
+  {
+   "index": 969,
+   "char": "最",
+   "basis": "et3_exact",
+   "big5": "B3CC"
+  },
+  {
+   "index": 970,
+   "char": "權",
+   "basis": "et3_exact",
+   "big5": "C576"
+  },
+  {
+   "index": 971,
+   "char": "勢",
+   "basis": "et3_exact",
+   "big5": "B6D5"
+  },
+  {
+   "index": 972,
+   "char": "遍",
+   "basis": "et3_exact",
+   "big5": "B94D"
+  },
+  {
+   "index": 973,
+   "char": "缺",
+   "basis": "et3_exact",
+   "big5": "AFCA"
+  },
+  {
+   "index": 974,
+   "char": "貨",
+   "basis": "et3_exact",
+   "big5": "B366"
+  },
+  {
+   "index": 975,
+   "char": "格",
+   "basis": "et3_exact",
+   "big5": "AEE6"
+  },
+  {
+   "index": 976,
+   "char": "比",
+   "basis": "et3_exact",
+   "big5": "A4F1"
+  },
+  {
+   "index": 977,
+   "char": "較",
+   "basis": "et3_exact",
+   "big5": "B8FB"
+  },
+  {
+   "index": 978,
+   "char": "臣",
+   "basis": "et3_exact",
+   "big5": "A6DA"
+  },
+  {
+   "index": 979,
+   "char": "囚",
+   "basis": "et3_exact",
+   "big5": "A57D"
+  },
+  {
+   "index": 980,
+   "char": "宮",
+   "basis": "et3_exact",
+   "big5": "AE63"
+  },
+  {
+   "index": 981,
+   "char": "惶",
+   "basis": "et3_exact",
+   "big5": "B471"
+  },
+  {
+   "index": 982,
+   "char": "囉",
+   "basis": "et3_exact",
+   "big5": "C56F"
+  },
+  {
+   "index": 983,
+   "char": "然",
+   "basis": "et3_exact",
+   "big5": "B54D"
+  },
+  {
+   "index": 984,
+   "char": "單",
+   "basis": "et3_exact",
+   "big5": "B3E6"
+  },
+  {
+   "index": 985,
+   "char": "純",
+   "basis": "et3_exact",
+   "big5": "AFC2"
+  },
+  {
+   "index": 986,
+   "char": "遇",
+   "basis": "et3_exact",
+   "big5": "B94A"
+  },
+  {
+   "index": 987,
+   "char": "拘",
+   "basis": "et3_exact",
+   "big5": "A9EB"
+  },
+  {
+   "index": 988,
+   "char": "彷",
+   "basis": "et3_exact",
+   "big5": "A7CF"
+  },
+  {
+   "index": 989,
+   "char": "彿",
+   "basis": "et3_exact",
+   "big5": "A9BB"
+  },
+  {
+   "index": 990,
+   "char": "幕",
+   "basis": "et3_exact",
+   "big5": "B9F5"
+  },
+  {
+   "index": 991,
+   "char": "否",
+   "basis": "et3_exact",
+   "big5": "A75F"
+  },
+  {
+   "index": 992,
+   "char": "則",
+   "basis": "et3_exact",
+   "big5": "AB68"
+  },
+  {
+   "index": 993,
+   "char": "永",
+   "basis": "et3_exact",
+   "big5": "A5C3"
+  },
+  {
+   "index": 994,
+   "char": "寧",
+   "basis": "et3_exact",
+   "big5": "B9E7"
+  },
+  {
+   "index": 995,
+   "char": "設",
+   "basis": "et3_exact",
+   "big5": "B35D"
+  },
+  {
+   "index": 996,
+   "char": "趟",
+   "basis": "et3_exact",
+   "big5": "BDEB"
+  },
+  {
+   "index": 997,
+   "char": "調",
+   "basis": "et3_exact",
+   "big5": "BDD5"
+  },
+  {
+   "index": 998,
+   "char": "嗯",
+   "basis": "et3_exact",
+   "big5": "B6E2"
+  },
+  {
+   "index": 999,
+   "char": "理",
+   "basis": "et3_exact",
+   "big5": "B27A"
+  },
+  {
+   "index": 1000,
+   "char": "段",
+   "basis": "et3_exact",
+   "big5": "AC71"
+  },
+  {
+   "index": 1001,
+   "char": "間",
+   "basis": "et3_exact",
+   "big5": "B6A1"
+  },
+  {
+   "index": 1002,
+   "char": "陛",
+   "basis": "et3_exact",
+   "big5": "B0A1"
+  },
+  {
+   "index": 1003,
+   "char": "哎",
+   "basis": "et3_exact",
+   "big5": "AB75"
+  },
+  {
+   "index": 1004,
+   "char": "卑",
+   "basis": "et3_exact",
+   "big5": "A8F5"
+  },
+  {
+   "index": 1005,
+   "char": "鄙",
+   "basis": "et3_exact",
+   "big5": "BBC0"
+  },
+  {
+   "index": 1006,
+   "char": "竟",
+   "basis": "et3_exact",
+   "big5": "B3BA"
+  },
+  {
+   "index": 1007,
+   "char": "溜",
+   "basis": "et3_exact",
+   "big5": "B7C8"
+  },
+  {
+   "index": 1008,
+   "char": "酬",
+   "basis": "et3_exact",
+   "big5": "B953"
+  },
+  {
+   "index": 1009,
+   "char": "勞",
+   "basis": "et3_exact",
+   "big5": "B3D2"
+  },
+  {
+   "index": 1010,
+   "char": "捉",
+   "basis": "et3_exact",
+   "big5": "AEBB"
+  },
+  {
+   "index": 1011,
+   "char": "千",
+   "basis": "et3_exact",
+   "big5": "A464"
+  },
+  {
+   "index": 1012,
+   "char": "幣",
+   "basis": "et3_exact",
+   "big5": "B9F4"
+  },
+  {
+   "index": 1013,
+   "char": "碰",
+   "basis": "et3_exact",
+   "big5": "B849"
+  },
+  {
+   "index": 1014,
+   "char": "胡",
+   "basis": "et3_exact",
+   "big5": "AD4A"
+  },
+  {
+   "index": 1015,
+   "char": "牌",
+   "basis": "et3_exact",
+   "big5": "B550"
+  },
+  {
+   "index": 1016,
+   "char": "瞎",
+   "basis": "et3_exact",
+   "big5": "BD4D"
+  },
+  {
+   "index": 1017,
+   "char": "眼",
+   "basis": "et3_exact",
+   "big5": "B2B4"
+  },
+  {
+   "index": 1018,
+   "char": "分",
+   "basis": "et3_exact",
+   "big5": "A4C0"
+  },
+  {
+   "index": 1019,
+   "char": "乖",
+   "basis": "et3_exact",
+   "big5": "A8C4"
+  },
+  {
+   "index": 1020,
+   "char": "苦",
+   "basis": "et3_exact",
+   "big5": "AD57"
+  },
+  {
+   "index": 1021,
+   "char": "連",
+   "basis": "et3_exact",
+   "big5": "B373"
+  },
+  {
+   "index": 1022,
+   "char": "居",
+   "basis": "et3_exact",
+   "big5": "A97E"
+  },
+  {
+   "index": 1023,
+   "char": "肯",
+   "basis": "et3_exact",
+   "big5": "AAD6"
+  },
+  {
+   "index": 1024,
+   "char": "耗",
+   "basis": "et3_exact",
+   "big5": "AFD3"
+  },
+  {
+   "index": 1025,
+   "char": "釋",
+   "basis": "et3_exact",
+   "big5": "C4C0"
+  },
+  {
+   "index": 1026,
+   "char": "餘",
+   "basis": "et3_exact",
+   "big5": "BE6C"
+  },
+  {
+   "index": 1027,
+   "char": "突",
+   "basis": "et3_exact",
+   "big5": "ACF0"
+  },
+  {
+   "index": 1028,
+   "char": "圍",
+   "basis": "et3_exact",
+   "big5": "B3F2"
+  },
+  {
+   "index": 1029,
+   "char": "兒",
+   "basis": "et3_exact",
+   "big5": "A8E0"
+  },
+  {
+   "index": 1030,
+   "char": "噓",
+   "basis": "et3_exact",
+   "big5": "BC4E"
+  },
+  {
+   "index": 1031,
+   "char": "改",
+   "basis": "et3_exact",
+   "big5": "A7EF"
+  },
+  {
+   "index": 1032,
+   "char": "變",
+   "basis": "et3_exact",
+   "big5": "C5DC"
+  },
+  {
+   "index": 1033,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1034,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1035,
+   "char": "自",
+   "basis": "et3_exact",
+   "big5": "A6DB"
+  },
+  {
+   "index": 1036,
+   "char": "己",
+   "basis": "et3_exact",
+   "big5": "A476"
+  },
+  {
+   "index": 1037,
+   "char": "猜",
+   "basis": "et3_exact",
+   "big5": "B271"
+  },
+  {
+   "index": 1038,
+   "char": "保",
+   "basis": "et3_exact",
+   "big5": "AB4F"
+  },
+  {
+   "index": 1039,
+   "char": "佑",
+   "basis": "et3_exact",
+   "big5": "A6F6"
+  },
+  {
+   "index": 1040,
+   "char": "雖",
+   "basis": "et3_exact",
+   "big5": "C1F6"
+  },
+  {
+   "index": 1041,
+   "char": "脫",
+   "basis": "et3_exact",
+   "big5": "B2E6"
+  },
+  {
+   "index": 1042,
+   "char": "恥",
+   "basis": "et3_exact",
+   "big5": "AEA2"
+  },
+  {
+   "index": 1043,
+   "char": "偏",
+   "basis": "et3_exact",
+   "big5": "B0BE"
+  },
+  {
+   "index": 1044,
+   "char": "污",
+   "basis": "et3_exact",
+   "big5": "A6C3"
+  },
+  {
+   "index": 1045,
+   "char": "辱",
+   "basis": "et3_exact",
+   "big5": "B064"
+  },
+  {
+   "index": 1046,
+   "char": "冷",
+   "basis": "et3_exact",
+   "big5": "A74E"
+  },
+  {
+   "index": 1047,
+   "char": "靜",
+   "basis": "et3_exact",
+   "big5": "C052"
+  },
+  {
+   "index": 1048,
+   "char": "橋",
+   "basis": "et3_exact",
+   "big5": "BEF4"
+  },
+  {
+   "index": 1049,
+   "char": "捲",
+   "basis": "et3_exact",
+   "big5": "B1B2"
+  },
+  {
+   "index": 1050,
+   "char": "煩",
+   "basis": "et3_exact",
+   "big5": "B7D0"
+  },
+  {
+   "index": 1051,
+   "char": "負",
+   "basis": "et3_exact",
+   "big5": "AD74"
+  },
+  {
+   "index": 1052,
+   "char": "責",
+   "basis": "et3_exact",
+   "big5": "B364"
+  },
+  {
+   "index": 1053,
+   "char": "尊",
+   "basis": "et3_exact",
+   "big5": "B44C"
+  },
+  {
+   "index": 1054,
+   "char": "衷",
+   "basis": "et3_exact",
+   "big5": "B04A"
+  },
+  {
+   "index": 1055,
+   "char": "拖",
+   "basis": "et3_exact",
+   "big5": "A9EC"
+  },
+  {
+   "index": 1056,
+   "char": "累",
+   "basis": "et3_exact",
+   "big5": "B2D6"
+  },
+  {
+   "index": 1057,
+   "char": "論",
+   "basis": "et3_exact",
+   "big5": "BDD7"
+  },
+  {
+   "index": 1058,
+   "char": "獨",
+   "basis": "et3_exact",
+   "big5": "BF57"
+  },
+  {
+   "index": 1059,
+   "char": "愧",
+   "basis": "et3_exact",
+   "big5": "B75C"
+  },
+  {
+   "index": 1060,
+   "char": "每",
+   "basis": "et3_exact",
+   "big5": "A843"
+  },
+  {
+   "index": 1061,
+   "char": "順",
+   "basis": "et3_exact",
+   "big5": "B6B6"
+  },
+  {
+   "index": 1062,
+   "char": "境",
+   "basis": "et3_exact",
+   "big5": "B9D2"
+  },
+  {
+   "index": 1063,
+   "char": "逆",
+   "basis": "et3_exact",
+   "big5": "B066"
+  },
+  {
+   "index": 1064,
+   "char": "唯",
+   "basis": "et3_exact",
+   "big5": "B0DF"
+  },
+  {
+   "index": 1065,
+   "char": "選",
+   "basis": "et3_exact",
+   "big5": "BFEF"
+  },
+  {
+   "index": 1066,
+   "char": "擇",
+   "basis": "et3_exact",
+   "big5": "BEDC"
+  },
+  {
+   "index": 1067,
+   "char": "膽",
+   "basis": "et3_exact",
+   "big5": "C178"
+  },
+  {
+   "index": 1068,
+   "char": "卻",
+   "basis": "et3_exact",
+   "big5": "AB6F"
+  },
+  {
+   "index": 1069,
+   "char": "逃",
+   "basis": "et3_exact",
+   "big5": "B06B"
+  },
+  {
+   "index": 1070,
+   "char": "忘",
+   "basis": "et3_exact",
+   "big5": "A7D1"
+  },
+  {
+   "index": 1071,
+   "char": "七",
+   "basis": "et3_exact",
+   "big5": "A443"
+  },
+  {
+   "index": 1072,
+   "char": "競",
+   "basis": "et3_exact",
+   "big5": "C476"
+  },
+  {
+   "index": 1073,
+   "char": "號",
+   "basis": "et3_exact",
+   "big5": "B8B9"
+  },
+  {
+   "index": 1074,
+   "char": "訣",
+   "basis": "et3_exact",
+   "big5": "B35A"
+  },
+  {
+   "index": 1075,
+   "char": "託",
+   "basis": "et3_exact",
+   "big5": "B055"
+  },
+  {
+   "index": 1076,
+   "char": "團",
+   "basis": "et3_exact",
+   "big5": "B9CE"
+  },
+  {
+   "index": 1077,
+   "char": "蟬",
+   "basis": "et3_exact",
+   "big5": "C2CD"
+  },
+  {
+   "index": 1078,
+   "char": "聯",
+   "basis": "et3_exact",
+   "big5": "C170"
+  },
+  {
+   "index": 1079,
+   "char": "冠",
+   "basis": "et3_exact",
+   "big5": "AB61"
+  },
+  {
+   "index": 1080,
+   "char": "愛",
+   "basis": "et3_exact",
+   "big5": "B752"
+  },
+  {
+   "index": 1081,
+   "char": "腥",
+   "basis": "et3_exact",
+   "big5": "B87B"
+  },
+  {
+   "index": 1082,
+   "char": "觸",
+   "basis": "et3_exact",
+   "big5": "C4B2"
+  },
+  {
+   "index": 1083,
+   "char": "犯",
+   "basis": "et3_exact",
+   "big5": "A5C7"
+  },
+  {
+   "index": 1084,
+   "char": "怒",
+   "basis": "et3_exact",
+   "big5": "ABE3"
+  },
+  {
+   "index": 1085,
+   "char": "碼",
+   "basis": "et3_exact",
+   "big5": "BD58"
+  },
+  {
+   "index": 1086,
+   "char": "聰",
+   "basis": "et3_exact",
+   "big5": "C16F"
+  },
+  {
+   "index": 1087,
+   "char": "明",
+   "basis": "et3_exact",
+   "big5": "A9FA"
+  },
+  {
+   "index": 1088,
+   "char": "紙",
+   "basis": "et3_exact",
+   "big5": "AFC8"
+  },
+  {
+   "index": 1089,
+   "char": "寫",
+   "basis": "et3_exact",
+   "big5": "BC67"
+  },
+  {
+   "index": 1090,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1091,
+   "char": "撕",
+   "basis": "et3_exact",
+   "big5": "BCB9"
+  },
+  {
+   "index": 1092,
+   "char": "觀",
+   "basis": "et3_exact",
+   "big5": "C65B"
+  },
+  {
+   "index": 1093,
+   "char": "賽",
+   "basis": "et3_exact",
+   "big5": "C1C9"
+  },
+  {
+   "index": 1094,
+   "char": "榜",
+   "basis": "et3_exact",
+   "big5": "BA5D"
+  },
+  {
+   "index": 1095,
+   "char": "善",
+   "basis": "et3_exact",
+   "big5": "B5BD"
+  },
+  {
+   "index": 1096,
+   "char": "藝",
+   "basis": "et3_exact",
+   "big5": "C3C0"
+  },
+  {
+   "index": 1097,
+   "char": "懂",
+   "basis": "et3_exact",
+   "big5": "C0B4"
+  },
+  {
+   "index": 1098,
+   "char": "慘",
+   "basis": "et3_exact",
+   "big5": "BA47"
+  },
+  {
+   "index": 1099,
+   "char": "唔",
+   "basis": "et3_exact",
+   "big5": "ADF8"
+  },
+  {
+   "index": 1100,
+   "char": "愁",
+   "basis": "et3_exact",
+   "big5": "B754"
+  },
+  {
+   "index": 1101,
+   "char": "眉",
+   "basis": "et3_exact",
+   "big5": "ACDC"
+  },
+  {
+   "index": 1102,
+   "char": "臉",
+   "basis": "et3_exact",
+   "big5": "C179"
+  },
+  {
+   "index": 1103,
+   "char": "討",
+   "basis": "et3_exact",
+   "big5": "B051"
+  },
+  {
+   "index": 1104,
+   "char": "厭",
+   "basis": "et3_exact",
+   "big5": "B9BD"
+  },
+  {
+   "index": 1105,
+   "char": "耶",
+   "basis": "et3_exact",
+   "big5": "AD43"
+  },
+  {
+   "index": 1106,
+   "char": "男",
+   "basis": "et3_exact",
+   "big5": "A86B"
+  },
+  {
+   "index": 1107,
+   "char": "挑",
+   "basis": "et3_exact",
+   "big5": "AC44"
+  },
+  {
+   "index": 1108,
+   "char": "狀",
+   "basis": "et3_exact",
+   "big5": "AAAC"
+  },
+  {
+   "index": 1109,
+   "char": "架",
+   "basis": "et3_exact",
+   "big5": "AC5B"
+  },
+  {
+   "index": 1110,
+   "char": "思",
+   "basis": "et3_exact",
+   "big5": "ABE4"
+  },
+  {
+   "index": 1111,
+   "char": "壓",
+   "basis": "et3_exact",
+   "big5": "C0A3"
+  },
+  {
+   "index": 1112,
+   "char": "壯",
+   "basis": "et3_exact",
+   "big5": "A7A7"
+  },
+  {
+   "index": 1113,
+   "char": "倍",
+   "basis": "et3_exact",
+   "big5": "ADBF"
+  },
+  {
+   "index": 1114,
+   "char": "題",
+   "basis": "et3_exact",
+   "big5": "C344"
+  },
+  {
+   "index": 1115,
+   "char": "介",
+   "basis": "et3_exact",
+   "big5": "A4B6"
+  },
+  {
+   "index": 1116,
+   "char": "紹",
+   "basis": "et3_exact",
+   "big5": "B2D0"
+  },
+  {
+   "index": 1117,
+   "char": "訴",
+   "basis": "et3_exact",
+   "big5": "B644"
+  },
+  {
+   "index": 1118,
+   "char": "輸",
+   "basis": "et3_exact",
+   "big5": "BFE9"
+  },
+  {
+   "index": 1119,
+   "char": "敗",
+   "basis": "et3_exact",
+   "big5": "B1D1"
+  },
+  {
+   "index": 1120,
+   "char": "贏",
+   "basis": "et3_exact",
+   "big5": "C4B9"
+  },
+  {
+   "index": 1121,
+   "char": "早",
+   "basis": "et3_exact",
+   "big5": "A6AD"
+  },
+  {
+   "index": 1122,
+   "char": "喝",
+   "basis": "et3_exact",
+   "big5": "B3DC"
+  },
+  {
+   "index": 1123,
+   "char": "醉",
+   "basis": "et3_exact",
+   "big5": "BE4B"
+  },
+  {
+   "index": 1124,
+   "char": "既",
+   "basis": "et3_exact",
+   "big5": "AC4A"
+  },
+  {
+   "index": 1125,
+   "char": "豈",
+   "basis": "et3_exact",
+   "big5": "B05A"
+  },
+  {
+   "index": 1126,
+   "char": "飯",
+   "basis": "et3_exact",
+   "big5": "B6BA"
+  },
+  {
+   "index": 1127,
+   "char": "波",
+   "basis": "et3_exact",
+   "big5": "AA69"
+  },
+  {
+   "index": 1128,
+   "char": "折",
+   "basis": "et3_exact",
+   "big5": "A7E9"
+  },
+  {
+   "index": 1129,
+   "char": "爽",
+   "basis": "et3_exact",
+   "big5": "B26E"
+  },
+  {
+   "index": 1130,
+   "char": "投",
+   "basis": "et3_exact",
+   "big5": "A7EB"
+  },
+  {
+   "index": 1131,
+   "char": "網",
+   "basis": "et3_exact",
+   "big5": "BAF4"
+  },
+  {
+   "index": 1132,
+   "char": "抓",
+   "basis": "et3_exact",
+   "big5": "A7EC"
+  },
+  {
+   "index": 1133,
+   "char": "夢",
+   "basis": "et3_exact",
+   "big5": "B9DA"
+  },
+  {
+   "index": 1134,
+   "char": "昔",
+   "basis": "et3_exact",
+   "big5": "A9F5"
+  },
+  {
+   "index": 1135,
+   "char": "鼎",
+   "basis": "et3_exact",
+   "big5": "B9A9"
+  },
+  {
+   "index": 1136,
+   "char": "凡",
+   "basis": "et3_exact",
+   "big5": "A45A"
+  },
+  {
+   "index": 1137,
+   "char": "疏",
+   "basis": "et3_exact",
+   "big5": "B2A8"
+  },
+  {
+   "index": 1138,
+   "char": "忽",
+   "basis": "et3_exact",
+   "big5": "A9BF"
+  },
+  {
+   "index": 1139,
+   "char": "抗",
+   "basis": "et3_exact",
+   "big5": "A7DC"
+  },
+  {
+   "index": 1140,
+   "char": "呸",
+   "basis": "et3_exact",
+   "big5": "A941"
+  },
+  {
+   "index": 1141,
+   "char": "智",
+   "basis": "et3_exact",
+   "big5": "B4BC"
+  },
+  {
+   "index": 1142,
+   "char": "八",
+   "basis": "et3_exact",
+   "big5": "A44B"
+  },
+  {
+   "index": 1143,
+   "char": "底",
+   "basis": "et3_exact",
+   "big5": "A9B3"
+  },
+  {
+   "index": 1144,
+   "char": "持",
+   "basis": "et3_exact",
+   "big5": "ABF9"
+  },
+  {
+   "index": 1145,
+   "char": "沈",
+   "basis": "et3_exact",
+   "big5": "A848"
+  },
+  {
+   "index": 1146,
+   "char": "默",
+   "basis": "et3_exact",
+   "big5": "C071"
+  },
+  {
+   "index": 1147,
+   "char": "謂",
+   "basis": "et3_exact",
+   "big5": "BFD7"
+  },
+  {
+   "index": 1148,
+   "char": "講",
+   "basis": "et3_exact",
+   "big5": "C1BF"
+  },
+  {
+   "index": 1149,
+   "char": "北",
+   "basis": "et3_exact",
+   "big5": "A55F"
+  },
+  {
+   "index": 1150,
+   "char": "疑",
+   "basis": "et3_exact",
+   "big5": "BAC3"
+  },
+  {
+   "index": 1151,
+   "char": "口",
+   "basis": "et3_exact",
+   "big5": "A466"
+  },
+  {
+   "index": 1152,
+   "char": "尋",
+   "basis": "et3_exact",
+   "big5": "B44D"
+  },
+  {
+   "index": 1153,
+   "char": "注",
+   "basis": "et3_exact",
+   "big5": "AA60"
+  },
+  {
+   "index": 1154,
+   "char": "另",
+   "basis": "et3_exact",
+   "big5": "A574"
+  },
+  {
+   "index": 1155,
+   "char": "繞",
+   "basis": "et3_exact",
+   "big5": "C2B6"
+  },
+  {
+   "index": 1156,
+   "char": "誘",
+   "basis": "et3_exact",
+   "big5": "BBA4"
+  },
+  {
+   "index": 1157,
+   "char": "柵",
+   "basis": "et3_exact",
+   "big5": "AC5D"
+  },
+  {
+   "index": 1158,
+   "char": "炸",
+   "basis": "et3_exact",
+   "big5": "ACB5"
+  },
+  {
+   "index": 1159,
+   "char": "狠",
+   "basis": "et3_exact",
+   "big5": "ACBD"
+  },
+  {
+   "index": 1160,
+   "char": "奴",
+   "basis": "et3_exact",
+   "big5": "A5A3"
+  },
+  {
+   "index": 1161,
+   "char": "工",
+   "basis": "et3_exact",
+   "big5": "A475"
+  },
+  {
+   "index": 1162,
+   "char": "急",
+   "basis": "et3_exact",
+   "big5": "ABE6"
+  },
+  {
+   "index": 1163,
+   "char": "拯",
+   "basis": "et3_exact",
+   "big5": "AC40"
+  },
+  {
+   "index": 1164,
+   "char": "辜",
+   "basis": "et3_exact",
+   "big5": "B664"
+  },
+  {
+   "index": 1165,
+   "char": "背",
+   "basis": "et3_exact",
+   "big5": "AD49"
+  },
+  {
+   "index": 1166,
+   "char": "陰",
+   "basis": "et3_exact",
+   "big5": "B3B1"
+  },
+  {
+   "index": 1167,
+   "char": "謀",
+   "basis": "et3_exact",
+   "big5": "BFD1"
+  },
+  {
+   "index": 1168,
+   "char": "按",
+   "basis": "et3_exact",
+   "big5": "ABF6"
+  },
+  {
+   "index": 1169,
+   "char": "推",
+   "basis": "et3_exact",
+   "big5": "B1C0"
+  },
+  {
+   "index": 1170,
+   "char": "噩",
+   "basis": "et3_exact",
+   "big5": "BEB5"
+  },
+  {
+   "index": 1171,
+   "char": "洗",
+   "basis": "et3_exact",
+   "big5": "AC7E"
+  },
+  {
+   "index": 1172,
+   "char": "刷",
+   "basis": "et3_exact",
+   "big5": "A8EA"
+  },
+  {
+   "index": 1173,
+   "char": "冤",
+   "basis": "et3_exact",
+   "big5": "ADDE"
+  },
+  {
+   "index": 1174,
+   "char": "屈",
+   "basis": "et3_exact",
+   "big5": "A97D"
+  },
+  {
+   "index": 1175,
+   "char": "妙",
+   "basis": "et3_exact",
+   "big5": "A7AE"
+  },
+  {
+   "index": 1176,
+   "char": "鬧",
+   "basis": "et3_exact",
+   "big5": "BE78"
+  },
+  {
+   "index": 1177,
+   "char": "贊",
+   "basis": "et3_exact",
+   "big5": "C3D9"
+  },
+  {
+   "index": 1178,
+   "char": "份",
+   "basis": "et3_exact",
+   "big5": "A5F7"
+  },
+  {
+   "index": 1179,
+   "char": "奸",
+   "basis": "et3_exact",
+   "big5": "A66C"
+  },
+  {
+   "index": 1180,
+   "char": "細",
+   "basis": "et3_exact",
+   "big5": "B2D3"
+  },
+  {
+   "index": 1181,
+   "char": "決",
+   "basis": "et3_exact",
+   "big5": "A84D"
+  },
+  {
+   "index": 1182,
+   "char": "各",
+   "basis": "et3_exact",
+   "big5": "A655"
+  },
+  {
+   "index": 1183,
+   "char": "儘",
+   "basis": "et3_exact",
+   "big5": "BEA8"
+  },
+  {
+   "index": 1184,
+   "char": "容",
+   "basis": "et3_exact",
+   "big5": "AE65"
+  },
+  {
+   "index": 1185,
+   "char": "易",
+   "basis": "et3_exact",
+   "big5": "A9F6"
+  },
+  {
+   "index": 1186,
+   "char": "堵",
+   "basis": "et3_exact",
+   "big5": "B0F4"
+  },
+  {
+   "index": 1187,
+   "char": "似",
+   "basis": "et3_exact",
+   "big5": "A6FC"
+  },
+  {
+   "index": 1188,
+   "char": "乎",
+   "basis": "et3_exact",
+   "big5": "A547"
+  },
+  {
+   "index": 1189,
+   "char": "吵",
+   "basis": "et3_exact",
+   "big5": "A76E"
+  },
+  {
+   "index": 1190,
+   "char": "鼠",
+   "basis": "et3_exact",
+   "big5": "B9AB"
+  },
+  {
+   "index": 1191,
+   "char": "練",
+   "basis": "et3_exact",
+   "big5": "BD6D"
+  },
+  {
+   "index": 1192,
+   "char": "劃",
+   "basis": "et3_exact",
+   "big5": "B9BA"
+  },
+  {
+   "index": 1193,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1194,
+   "char": "紅",
+   "basis": "et3_exact",
+   "big5": "ACF5"
+  },
+  {
+   "index": 1195,
+   "char": "表",
+   "basis": "et3_exact",
+   "big5": "AAED"
+  },
+  {
+   "index": 1196,
+   "char": "演",
+   "basis": "et3_exact",
+   "big5": "BA74"
+  },
+  {
+   "index": 1197,
+   "char": "舉",
+   "basis": "et3_exact",
+   "big5": "C17C"
+  },
+  {
+   "index": 1198,
+   "char": "試",
+   "basis": "et3_exact",
+   "big5": "B8D5"
+  },
+  {
+   "index": 1199,
+   "char": "典",
+   "basis": "et3_exact",
+   "big5": "A8E5"
+  },
+  {
+   "index": 1200,
+   "char": "站",
+   "basis": "et3_exact",
+   "big5": "AFB8"
+  },
+  {
+   "index": 1201,
+   "char": "擁",
+   "basis": "et3_exact",
+   "big5": "BED6"
+  },
+  {
+   "index": 1202,
+   "char": "虧",
+   "basis": "et3_exact",
+   "big5": "C1AB"
+  },
+  {
+   "index": 1203,
+   "char": "喲",
+   "basis": "et3_exact",
+   "big5": "B3E9"
+  },
+  {
+   "index": 1204,
+   "char": "靠",
+   "basis": "et3_exact",
+   "big5": "BE61"
+  },
+  {
+   "index": 1205,
+   "char": "咳",
+   "basis": "et3_exact",
+   "big5": "AB79"
+  },
+  {
+   "index": 1206,
+   "char": "睜",
+   "basis": "et3_exact",
+   "big5": "B843"
+  },
+  {
+   "index": 1207,
+   "char": "睛",
+   "basis": "et3_exact",
+   "big5": "B7FA"
+  },
+  {
+   "index": 1208,
+   "char": "啦",
+   "basis": "et3_exact",
+   "big5": "B0D5"
+  },
+  {
+   "index": 1209,
+   "char": "創",
+   "basis": "et3_exact",
+   "big5": "B3D0"
+  },
+  {
+   "index": 1210,
+   "char": "袋",
+   "basis": "et3_exact",
+   "big5": "B355"
+  },
+  {
+   "index": 1211,
+   "char": "池",
+   "basis": "et3_exact",
+   "big5": "A6C0"
+  },
+  {
+   "index": 1212,
+   "char": "嗶",
+   "basis": "et3_exact",
+   "big5": "B9CD"
+  },
+  {
+   "index": 1213,
+   "char": "吱",
+   "basis": "et3_exact",
+   "big5": "A773"
+  },
+  {
+   "index": 1214,
+   "char": "咯",
+   "basis": "et3_exact",
+   "big5": "ABA3"
+  },
+  {
+   "index": 1215,
+   "char": "鮮",
+   "basis": "et3_exact",
+   "big5": "C241"
+  },
+  {
+   "index": 1216,
+   "char": "盜",
+   "basis": "et3_exact",
+   "big5": "B573"
+  },
+  {
+   "index": 1217,
+   "char": "賊",
+   "basis": "et3_exact",
+   "big5": "B8E9"
+  },
+  {
+   "index": 1218,
+   "char": "歷",
+   "basis": "et3_exact",
+   "big5": "BEFA"
+  },
+  {
+   "index": 1219,
+   "char": "腦",
+   "basis": "et3_exact",
+   "big5": "B8A3"
+  },
+  {
+   "index": 1220,
+   "char": "嗦",
+   "basis": "et3_exact",
+   "big5": "B6DB"
+  },
+  {
+   "index": 1221,
+   "char": "牆",
+   "basis": "et3_exact",
+   "big5": "C0F0"
+  },
+  {
+   "index": 1222,
+   "char": "敲",
+   "basis": "et3_exact",
+   "big5": "BA56"
+  },
+  {
+   "index": 1223,
+   "char": "枉",
+   "basis": "et3_exact",
+   "big5": "AA50"
+  },
+  {
+   "index": 1224,
+   "char": "摔",
+   "basis": "et3_exact",
+   "big5": "BA4C"
+  },
+  {
+   "index": 1225,
+   "char": "疼",
+   "basis": "et3_exact",
+   "big5": "AF6B"
+  },
+  {
+   "index": 1226,
+   "char": "偷",
+   "basis": "et3_exact",
+   "big5": "B0BD"
+  },
+  {
+   "index": 1227,
+   "char": "盡",
+   "basis": "et3_exact",
+   "big5": "BAC9"
+  },
+  {
+   "index": 1228,
+   "char": "殿",
+   "basis": "et3_exact",
+   "big5": "B7B5"
+  },
+  {
+   "index": 1229,
+   "char": "列",
+   "basis": "et3_exact",
+   "big5": "A643"
+  },
+  {
+   "index": 1230,
+   "char": "懸",
+   "basis": "et3_exact",
+   "big5": "C461"
+  },
+  {
+   "index": 1231,
+   "char": "庭",
+   "basis": "et3_exact",
+   "big5": "AE78"
+  },
+  {
+   "index": 1232,
+   "char": "璞",
+   "basis": "et3_exact",
+   "big5": "BF5C"
+  },
+  {
+   "index": 1233,
+   "char": "歸",
+   "basis": "et3_exact",
+   "big5": "C26B"
+  },
+  {
+   "index": 1234,
+   "char": "乃",
+   "basis": "et3_exact",
+   "big5": "A444"
+  },
+  {
+   "index": 1235,
+   "char": "搜",
+   "basis": "et3_exact",
+   "big5": "B76A"
+  },
+  {
+   "index": 1236,
+   "char": "括",
+   "basis": "et3_exact",
+   "big5": "AC41"
+  },
+  {
+   "index": 1237,
+   "char": "眾",
+   "basis": "et3_exact",
+   "big5": "B2B3"
+  },
+  {
+   "index": 1238,
+   "char": "財",
+   "basis": "et3_exact",
+   "big5": "B05D"
+  },
+  {
+   "index": 1239,
+   "char": "產",
+   "basis": "et3_exact",
+   "big5": "B2A3"
+  },
+  {
+   "index": 1240,
+   "char": "恕",
+   "basis": "et3_exact",
+   "big5": "AEA4"
+  },
+  {
+   "index": 1241,
+   "char": "繳",
+   "basis": "et3_exact",
+   "big5": "C3BA"
+  },
+  {
+   "index": 1242,
+   "char": "稅",
+   "basis": "et3_exact",
+   "big5": "B57C"
+  },
+  {
+   "index": 1243,
+   "char": "頂",
+   "basis": "et3_exact",
+   "big5": "B3BB"
+  },
+  {
+   "index": 1244,
+   "char": "嘴",
+   "basis": "et3_exact",
+   "big5": "BC4C"
+  },
+  {
+   "index": 1245,
+   "char": "肅",
+   "basis": "et3_exact",
+   "big5": "B5C2"
+  },
+  {
+   "index": 1246,
+   "char": "案",
+   "basis": "et3_exact",
+   "big5": "AED7"
+  },
+  {
+   "index": 1247,
+   "char": "聚",
+   "basis": "et3_exact",
+   "big5": "BB45"
+  },
+  {
+   "index": 1248,
+   "char": "干",
+   "basis": "et3_exact",
+   "big5": "A47A"
+  },
+  {
+   "index": 1249,
+   "char": "預",
+   "basis": "et3_exact",
+   "big5": "B977"
+  },
+  {
+   "index": 1250,
+   "char": "警",
+   "basis": "et3_exact",
+   "big5": "C4B5"
+  },
+  {
+   "index": 1251,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1252,
+   "char": "述",
+   "basis": "et3_exact",
+   "big5": "AD7A"
+  },
+  {
+   "index": 1253,
+   "char": "控",
+   "basis": "et3_exact",
+   "big5": "B1B1"
+  },
+  {
+   "index": 1254,
+   "char": "項",
+   "basis": "et3_exact",
+   "big5": "B6B5"
+  },
+  {
+   "index": 1255,
+   "char": "旁",
+   "basis": "et3_exact",
+   "big5": "AEC7"
+  },
+  {
+   "index": 1256,
+   "char": "申",
+   "basis": "et3_exact",
+   "big5": "A5D3"
+  },
+  {
+   "index": 1257,
+   "char": "駁",
+   "basis": "et3_exact",
+   "big5": "BBE9"
+  },
+  {
+   "index": 1258,
+   "char": "通",
+   "basis": "et3_exact",
+   "big5": "B371"
+  },
+  {
+   "index": 1259,
+   "char": "融",
+   "basis": "et3_exact",
+   "big5": "BFC4"
+  },
+  {
+   "index": 1260,
+   "char": "抵",
+   "basis": "et3_exact",
+   "big5": "A9E8"
+  },
+  {
+   "index": 1261,
+   "char": "拒",
+   "basis": "et3_exact",
+   "big5": "A9DA"
+  },
+  {
+   "index": 1262,
+   "char": "根",
+   "basis": "et3_exact",
+   "big5": "AEDA"
+  },
+  {
+   "index": 1263,
+   "char": "私",
+   "basis": "et3_exact",
+   "big5": "A870"
+  },
+  {
+   "index": 1264,
+   "char": "刑",
+   "basis": "et3_exact",
+   "big5": "A644"
+  },
+  {
+   "index": 1265,
+   "char": "褻",
+   "basis": "et3_exact",
+   "big5": "C1B6"
+  },
+  {
+   "index": 1266,
+   "char": "瀆",
+   "basis": "et3_exact",
+   "big5": "C270"
+  },
+  {
+   "index": 1267,
+   "char": "罪",
+   "basis": "et3_exact",
+   "big5": "B86F"
+  },
+  {
+   "index": 1268,
+   "char": "併",
+   "basis": "et3_exact",
+   "big5": "A8D6"
+  },
+  {
+   "index": 1269,
+   "char": "違",
+   "basis": "et3_exact",
+   "big5": "B948"
+  },
+  {
+   "index": 1270,
+   "char": "條",
+   "basis": "et3_exact",
+   "big5": "B1F8"
+  },
+  {
+   "index": 1271,
+   "char": "律",
+   "basis": "et3_exact",
+   "big5": "ABDF"
+  },
+  {
+   "index": 1272,
+   "char": "訂",
+   "basis": "et3_exact",
+   "big5": "AD71"
+  },
+  {
+   "index": 1273,
+   "char": "執",
+   "basis": "et3_exact",
+   "big5": "B0F5"
+  },
+  {
+   "index": 1274,
+   "char": "姑",
+   "basis": "et3_exact",
+   "big5": "A968"
+  },
+  {
+   "index": 1275,
+   "char": "念",
+   "basis": "et3_exact",
+   "big5": "A9C0"
+  },
+  {
+   "index": 1276,
+   "char": "熟",
+   "basis": "et3_exact",
+   "big5": "BCF4"
+  },
+  {
+   "index": 1277,
+   "char": "悉",
+   "basis": "et3_exact",
+   "big5": "B178"
+  },
+  {
+   "index": 1278,
+   "char": "初",
+   "basis": "et3_exact",
+   "big5": "AAEC"
+  },
+  {
+   "index": 1279,
+   "char": "百",
+   "basis": "et3_exact",
+   "big5": "A6CA"
+  },
+  {
+   "index": 1280,
+   "char": "贖",
+   "basis": "et3_exact",
+   "big5": "C5AB"
+  },
+  {
+   "index": 1281,
+   "char": "考",
+   "basis": "et3_exact",
+   "big5": "A6D2"
+  },
+  {
+   "index": 1282,
+   "char": "慮",
+   "basis": "et3_exact",
+   "big5": "BC7B"
+  },
+  {
+   "index": 1283,
+   "char": "停",
+   "basis": "et3_exact",
+   "big5": "B0B1"
+  },
+  {
+   "index": 1284,
+   "char": "並",
+   "basis": "et3_exact",
+   "big5": "A8C3"
+  },
+  {
+   "index": 1285,
+   "char": "央",
+   "basis": "et3_exact",
+   "big5": "A5A1"
+  },
+  {
+   "index": 1286,
+   "char": "樞",
+   "basis": "et3_exact",
+   "big5": "BCCF"
+  },
+  {
+   "index": 1287,
+   "char": "卿",
+   "basis": "et3_exact",
+   "big5": "ADEB"
+  },
+  {
+   "index": 1288,
+   "char": "愣",
+   "basis": "et3_exact",
+   "big5": "B468"
+  },
+  {
+   "index": 1289,
+   "char": "呆",
+   "basis": "et3_exact",
+   "big5": "A762"
+  },
+  {
+   "index": 1290,
+   "char": "證",
+   "basis": "et3_exact",
+   "big5": "C3D2"
+  },
+  {
+   "index": 1291,
+   "char": "抬",
+   "basis": "et3_exact",
+   "big5": "A9EF"
+  },
+  {
+   "index": 1292,
+   "char": "杜",
+   "basis": "et3_exact",
+   "big5": "A7F9"
+  },
+  {
+   "index": 1293,
+   "char": "彌",
+   "basis": "et3_exact",
+   "big5": "C0B1"
+  },
+  {
+   "index": 1294,
+   "char": "撒",
+   "basis": "et3_exact",
+   "big5": "BCBB"
+  },
+  {
+   "index": 1295,
+   "char": "跪",
+   "basis": "et3_exact",
+   "big5": "B8F7"
+  },
+  {
+   "index": 1296,
+   "char": "拜",
+   "basis": "et3_exact",
+   "big5": "ABF4"
+  },
+  {
+   "index": 1297,
+   "char": "傻",
+   "basis": "et3_exact",
+   "big5": "B6CC"
+  },
+  {
+   "index": 1298,
+   "char": "辛",
+   "basis": "et3_exact",
+   "big5": "A8AF"
+  },
+  {
+   "index": 1299,
+   "char": "集",
+   "basis": "et3_exact",
+   "big5": "B6B0"
+  },
+  {
+   "index": 1300,
+   "char": "遠",
+   "basis": "et3_exact",
+   "big5": "BBB7"
+  },
+  {
+   "index": 1301,
+   "char": "騙",
+   "basis": "et3_exact",
+   "big5": "C446"
+  },
+  {
+   "index": 1302,
+   "char": "揭",
+   "basis": "et3_exact",
+   "big5": "B4A6"
+  },
+  {
+   "index": 1303,
+   "char": "曝",
+   "basis": "et3_exact",
+   "big5": "C36E"
+  },
+  {
+   "index": 1304,
+   "char": "仍",
+   "basis": "et3_exact",
+   "big5": "A4B4"
+  },
+  {
+   "index": 1305,
+   "char": "誓",
+   "basis": "et3_exact",
+   "big5": "BB7D"
+  },
+  {
+   "index": 1306,
+   "char": "迫",
+   "basis": "et3_exact",
+   "big5": "ADA2"
+  },
+  {
+   "index": 1307,
+   "char": "祈",
+   "basis": "et3_exact",
+   "big5": "ACE8"
+  },
+  {
+   "index": 1308,
+   "char": "禱",
+   "basis": "et3_exact",
+   "big5": "C3AB"
+  },
+  {
+   "index": 1309,
+   "char": "藐",
+   "basis": "et3_exact",
+   "big5": "C2C6"
+  },
+  {
+   "index": 1310,
+   "char": "視",
+   "basis": "et3_exact",
+   "big5": "B5F8"
+  },
+  {
+   "index": 1311,
+   "char": "依",
+   "basis": "et3_exact",
+   "big5": "A8CC"
+  },
+  {
+   "index": 1312,
+   "char": "序",
+   "basis": "et3_exact",
+   "big5": "A7C7"
+  },
+  {
+   "index": 1313,
+   "char": "穫",
+   "basis": "et3_exact",
+   "big5": "C3AC"
+  },
+  {
+   "index": 1314,
+   "char": "孩",
+   "basis": "et3_exact",
+   "big5": "ABC4"
+  },
+  {
+   "index": 1315,
+   "char": "搞",
+   "basis": "et3_exact",
+   "big5": "B764"
+  },
+  {
+   "index": 1316,
+   "char": "緊",
+   "basis": "et3_exact",
+   "big5": "BAF2"
+  },
+  {
+   "index": 1317,
+   "char": "喊",
+   "basis": "et3_exact",
+   "big5": "B3DB"
+  },
+  {
+   "index": 1318,
+   "char": "郊",
+   "basis": "et3_exact",
+   "big5": "ADA5"
+  },
+  {
+   "index": 1319,
+   "char": "憐",
+   "basis": "et3_exact",
+   "big5": "BCA6"
+  },
+  {
+   "index": 1320,
+   "char": "梭",
+   "basis": "et3_exact",
+   "big5": "B1F4"
+  },
+  {
+   "index": 1321,
+   "char": "潑",
+   "basis": "et3_exact",
+   "big5": "BCE2"
+  },
+  {
+   "index": 1322,
+   "char": "辣",
+   "basis": "et3_exact",
+   "big5": "BBB6"
+  },
+  {
+   "index": 1323,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1324,
+   "char": "揍",
+   "basis": "et3_exact",
+   "big5": "B47E"
+  },
+  {
+   "index": 1325,
+   "char": "昏",
+   "basis": "et3_exact",
+   "big5": "A9FC"
+  },
+  {
+   "index": 1326,
+   "char": "咧",
+   "basis": "et3_exact",
+   "big5": "ABA8"
+  },
+  {
+   "index": 1327,
+   "char": "磕",
+   "basis": "et3_exact",
+   "big5": "BD57"
+  },
+  {
+   "index": 1328,
+   "char": "哥",
+   "basis": "et3_exact",
+   "big5": "ADF4"
+  },
+  {
+   "index": 1329,
+   "char": "剃",
+   "basis": "et3_exact",
+   "big5": "AB63"
+  },
+  {
+   "index": 1330,
+   "char": "帽",
+   "basis": "et3_exact",
+   "big5": "B455"
+  },
+  {
+   "index": 1331,
+   "char": "妹",
+   "basis": "et3_exact",
+   "big5": "A966"
+  },
+  {
+   "index": 1332,
+   "char": "驗",
+   "basis": "et3_exact",
+   "big5": "C5E7"
+  },
+  {
+   "index": 1333,
+   "char": "譜",
+   "basis": "et3_exact",
+   "big5": "C3D0"
+  },
+  {
+   "index": 1334,
+   "char": "包",
+   "basis": "et3_exact",
+   "big5": "A55D"
+  },
+  {
+   "index": 1335,
+   "char": "涵",
+   "basis": "et3_exact",
+   "big5": "B25B"
+  },
+  {
+   "index": 1336,
+   "char": "適",
+   "basis": "et3_exact",
+   "big5": "BE41"
+  },
+  {
+   "index": 1337,
+   "char": "描",
+   "basis": "et3_exact",
+   "big5": "B479"
+  },
+  {
+   "index": 1338,
+   "char": "繪",
+   "basis": "et3_exact",
+   "big5": "C3B8"
+  },
+  {
+   "index": 1339,
+   "char": "角",
+   "basis": "et3_exact",
+   "big5": "A8A4"
+  },
+  {
+   "index": 1340,
+   "char": "效",
+   "basis": "et3_exact",
+   "big5": "AEC4"
+  },
+  {
+   "index": 1341,
+   "char": "困",
+   "basis": "et3_exact",
+   "big5": "A778"
+  },
+  {
+   "index": 1342,
+   "char": "議",
+   "basis": "et3_exact",
+   "big5": "C4B3"
+  },
+  {
+   "index": 1343,
+   "char": "南",
+   "basis": "et3_exact",
+   "big5": "AB6E"
+  },
+  {
+   "index": 1344,
+   "char": "閉",
+   "basis": "et3_exact",
+   "big5": "B3AC"
+  },
+  {
+   "index": 1345,
+   "char": "咭",
+   "basis": "et3_exact",
+   "big5": "CDFC"
+  },
+  {
+   "index": 1346,
+   "char": "油",
+   "basis": "et3_exact",
+   "big5": "AA6F"
+  },
+  {
+   "index": 1347,
+   "char": "燈",
+   "basis": "et3_exact",
+   "big5": "BF4F"
+  },
+  {
+   "index": 1348,
+   "char": "笑",
+   "basis": "et3_exact",
+   "big5": "AFBA"
+  },
+  {
+   "index": 1349,
+   "char": "賠",
+   "basis": "et3_exact",
+   "big5": "BDDF"
+  },
+  {
+   "index": 1350,
+   "char": "半",
+   "basis": "et3_exact",
+   "big5": "A562"
+  },
+  {
+   "index": 1351,
+   "char": "殘",
+   "basis": "et3_exact",
+   "big5": "B4DD"
+  },
+  {
+   "index": 1352,
+   "char": "忍",
+   "basis": "et3_exact",
+   "big5": "A7D4"
+  },
+  {
+   "index": 1353,
+   "char": "恨",
+   "basis": "et3_exact",
+   "big5": "ABEB"
+  },
+  {
+   "index": 1354,
+   "char": "究",
+   "basis": "et3_exact",
+   "big5": "A873"
+  },
+  {
+   "index": 1355,
+   "char": "沉",
+   "basis": "et3_exact",
+   "big5": "A849"
+  },
+  {
+   "index": 1356,
+   "char": "莫",
+   "basis": "et3_exact",
+   "big5": "B2F6"
+  },
+  {
+   "index": 1357,
+   "char": "辯",
+   "basis": "et3_exact",
+   "big5": "C547"
+  },
+  {
+   "index": 1358,
+   "char": "宜",
+   "basis": "et3_exact",
+   "big5": "A979"
+  },
+  {
+   "index": 1359,
+   "char": "遲",
+   "basis": "et3_exact",
+   "big5": "BFF0"
+  },
+  {
+   "index": 1360,
+   "char": "振",
+   "basis": "et3_exact",
+   "big5": "AEB6"
+  },
+  {
+   "index": 1361,
+   "char": "吩",
+   "basis": "et3_exact",
+   "big5": "A768"
+  },
+  {
+   "index": 1362,
+   "char": "咐",
+   "basis": "et3_exact",
+   "big5": "A94A"
+  },
+  {
+   "index": 1363,
+   "char": "錮",
+   "basis": "et3_exact",
+   "big5": "C044"
+  },
+  {
+   "index": 1364,
+   "char": "含",
+   "basis": "et3_exact",
+   "big5": "A774"
+  },
+  {
+   "index": 1365,
+   "char": "葛",
+   "basis": "et3_exact",
+   "big5": "B8AF"
+  },
+  {
+   "index": 1366,
+   "char": "喀",
+   "basis": "et3_exact",
+   "big5": "B3D8"
+  },
+  {
+   "index": 1367,
+   "char": "徒",
+   "basis": "et3_exact",
+   "big5": "AE7B"
+  },
+  {
+   "index": 1368,
+   "char": "故",
+   "basis": "et3_exact",
+   "big5": "AC47"
+  },
+  {
+   "index": 1369,
+   "char": "鄉",
+   "basis": "et3_exact",
+   "big5": "B66D"
+  },
+  {
+   "index": 1370,
+   "char": "羊",
+   "basis": "et3_exact",
+   "big5": "A6CF"
+  },
+  {
+   "index": 1371,
+   "char": "叱",
+   "basis": "et3_exact",
+   "big5": "A577"
+  },
+  {
+   "index": 1372,
+   "char": "吒",
+   "basis": "et3_exact",
+   "big5": "A65C"
+  },
+  {
+   "index": 1373,
+   "char": "雲",
+   "basis": "et3_exact",
+   "big5": "B6B3"
+  },
+  {
+   "index": 1374,
+   "char": "輩",
+   "basis": "et3_exact",
+   "big5": "BDFA"
+  },
+  {
+   "index": 1375,
+   "char": "亮",
+   "basis": "et3_exact",
+   "big5": "AB47"
+  },
+  {
+   "index": 1376,
+   "char": "夜",
+   "basis": "et3_exact",
+   "big5": "A95D"
+  },
+  {
+   "index": 1377,
+   "char": "璀",
+   "basis": "et3_exact",
+   "big5": "BD41"
+  },
+  {
+   "index": 1378,
+   "char": "璨",
+   "basis": "et3_exact",
+   "big5": "C0F6"
+  },
+  {
+   "index": 1379,
+   "char": "學",
+   "basis": "et3_exact",
+   "big5": "BEC7"
+  },
+  {
+   "index": 1380,
+   "char": "派",
+   "basis": "et3_exact",
+   "big5": "ACA3"
+  },
+  {
+   "index": 1381,
+   "char": "奉",
+   "basis": "et3_exact",
+   "big5": "A95E"
+  },
+  {
+   "index": 1382,
+   "char": "祇",
+   "basis": "et3_exact",
+   "big5": "ACE9"
+  },
+  {
+   "index": 1383,
+   "char": "掌",
+   "basis": "et3_exact",
+   "big5": "B478"
+  },
+  {
+   "index": 1384,
+   "char": "聞",
+   "basis": "et3_exact",
+   "big5": "BB44"
+  },
+  {
+   "index": 1385,
+   "char": "蹟",
+   "basis": "et3_exact",
+   "big5": "C2DD"
+  },
+  {
+   "index": 1386,
+   "char": "盛",
+   "basis": "et3_exact",
+   "big5": "B2B1"
+  },
+  {
+   "index": 1387,
+   "char": "差",
+   "basis": "et3_exact",
+   "big5": "AE74"
+  },
+  {
+   "index": 1388,
+   "char": "脈",
+   "basis": "et3_exact",
+   "big5": "AFDF"
+  },
+  {
+   "index": 1389,
+   "char": "絡",
+   "basis": "et3_exact",
+   "big5": "B5B8"
+  },
+  {
+   "index": 1390,
+   "char": "均",
+   "basis": "et3_exact",
+   "big5": "A7A1"
+  },
+  {
+   "index": 1391,
+   "char": "驅",
+   "basis": "et3_exact",
+   "big5": "C558"
+  },
+  {
+   "index": 1392,
+   "char": "界",
+   "basis": "et3_exact",
+   "big5": "ACC9"
+  },
+  {
+   "index": 1393,
+   "char": "秤",
+   "basis": "et3_exact",
+   "big5": "AFAF"
+  },
+  {
+   "index": 1394,
+   "char": "鉈",
+   "basis": "et3_exact",
+   "big5": "E0AE"
+  },
+  {
+   "index": 1395,
+   "char": "削",
+   "basis": "et3_exact",
+   "big5": "AB64"
+  },
+  {
+   "index": 1396,
+   "char": "弱",
+   "basis": "et3_exact",
+   "big5": "AE7A"
+  },
+  {
+   "index": 1397,
+   "char": "態",
+   "basis": "et3_exact",
+   "big5": "BA41"
+  },
+  {
+   "index": 1398,
+   "char": "史",
+   "basis": "et3_exact",
+   "big5": "A576"
+  },
+  {
+   "index": 1399,
+   "char": "懼",
+   "basis": "et3_exact",
+   "big5": "C4DF"
+  },
+  {
+   "index": 1400,
+   "char": "仰",
+   "basis": "et3_exact",
+   "big5": "A5F5"
+  },
+  {
+   "index": 1401,
+   "char": "植",
+   "basis": "et3_exact",
+   "big5": "B4D3"
+  },
+  {
+   "index": 1402,
+   "char": "諸",
+   "basis": "et3_exact",
+   "big5": "BDD1"
+  },
+  {
+   "index": 1403,
+   "char": "際",
+   "basis": "et3_exact",
+   "big5": "BBDA"
+  },
+  {
+   "index": 1404,
+   "char": "犧",
+   "basis": "et3_exact",
+   "big5": "C4EB"
+  },
+  {
+   "index": 1405,
+   "char": "牲",
+   "basis": "et3_exact",
+   "big5": "ACB9"
+  },
+  {
+   "index": 1406,
+   "char": "損",
+   "basis": "et3_exact",
+   "big5": "B76C"
+  },
+  {
+   "index": 1407,
+   "char": "帳",
+   "basis": "et3_exact",
+   "big5": "B162"
+  },
+  {
+   "index": 1408,
+   "char": "仁",
+   "basis": "et3_exact",
+   "big5": "A4AF"
+  },
+  {
+   "index": 1409,
+   "char": "慈",
+   "basis": "et3_exact",
+   "big5": "B74F"
+  },
+  {
+   "index": 1410,
+   "char": "旦",
+   "basis": "et3_exact",
+   "big5": "A5B9"
+  },
+  {
+   "index": 1411,
+   "char": "坦",
+   "basis": "et3_exact",
+   "big5": "A95A"
+  },
+  {
+   "index": 1412,
+   "char": "凌",
+   "basis": "et3_exact",
+   "big5": "ADE2"
+  },
+  {
+   "index": 1413,
+   "char": "企",
+   "basis": "et3_exact",
+   "big5": "A5F8"
+  },
+  {
+   "index": 1414,
+   "char": "顛",
+   "basis": "et3_exact",
+   "big5": "C441"
+  },
+  {
+   "index": 1415,
+   "char": "覆",
+   "basis": "et3_exact",
+   "big5": "C2D0"
+  },
+  {
+   "index": 1416,
+   "char": "即",
+   "basis": "et3_exact",
+   "big5": "A759"
+  },
+  {
+   "index": 1417,
+   "char": "欽",
+   "basis": "et3_exact",
+   "big5": "B4DC"
+  },
+  {
+   "index": 1418,
+   "char": "謊",
+   "basis": "et3_exact",
+   "big5": "C1C0"
+  },
+  {
+   "index": 1419,
+   "char": "言",
+   "basis": "et3_exact",
+   "big5": "A8A5"
+  },
+  {
+   "index": 1420,
+   "char": "摧",
+   "basis": "et3_exact",
+   "big5": "BA52"
+  },
+  {
+   "index": 1421,
+   "char": "毀",
+   "basis": "et3_exact",
+   "big5": "B7B4"
+  },
+  {
+   "index": 1422,
+   "char": "射",
+   "basis": "et3_exact",
+   "big5": "AE67"
+  },
+  {
+   "index": 1423,
+   "char": "圓",
+   "basis": "et3_exact",
+   "big5": "B6EA"
+  },
+  {
+   "index": 1424,
+   "char": "怖",
+   "basis": "et3_exact",
+   "big5": "A9C6"
+  },
+  {
+   "index": 1425,
+   "char": "佔",
+   "basis": "et3_exact",
+   "big5": "A6FB"
+  },
+  {
+   "index": 1426,
+   "char": "訓",
+   "basis": "et3_exact",
+   "big5": "B056"
+  },
+  {
+   "index": 1427,
+   "char": "海",
+   "basis": "et3_exact",
+   "big5": "AEFC"
+  },
+  {
+   "index": 1428,
+   "char": "奮",
+   "basis": "et3_exact",
+   "big5": "BEC4"
+  },
+  {
+   "index": 1429,
+   "char": "奶",
+   "basis": "et3_exact",
+   "big5": "A5A4"
+  },
+  {
+   "index": 1430,
+   "char": "湖",
+   "basis": "et3_exact",
+   "big5": "B4F2"
+  },
+  {
+   "index": 1431,
+   "char": "欺",
+   "basis": "et3_exact",
+   "big5": "B4DB"
+  },
+  {
+   "index": 1432,
+   "char": "台",
+   "basis": "et3_exact",
+   "big5": "A578"
+  },
+  {
+   "index": 1433,
+   "char": "妞",
+   "basis": "et3_exact",
+   "big5": "A7AC"
+  },
+  {
+   "index": 1434,
+   "char": "畫",
+   "basis": "et3_exact",
+   "big5": "B565"
+  },
+  {
+   "index": 1435,
+   "char": "係",
+   "basis": "et3_exact",
+   "big5": "AB59"
+  },
+  {
+   "index": 1436,
+   "char": "惜",
+   "basis": "et3_exact",
+   "big5": "B1A4"
+  },
+  {
+   "index": 1437,
+   "char": "期",
+   "basis": "et3_exact",
+   "big5": "B4C1"
+  },
+  {
+   "index": 1438,
+   "char": "程",
+   "basis": "et3_exact",
+   "big5": "B57B"
+  },
+  {
+   "index": 1439,
+   "char": "欣",
+   "basis": "et3_exact",
+   "big5": "AA59"
+  },
+  {
+   "index": 1440,
+   "char": "船",
+   "basis": "et3_exact",
+   "big5": "B2EE"
+  },
+  {
+   "index": 1441,
+   "char": "渡",
+   "basis": "et3_exact",
+   "big5": "B4E7"
+  },
+  {
+   "index": 1442,
+   "char": "匠",
+   "basis": "et3_exact",
+   "big5": "A64B"
+  },
+  {
+   "index": 1443,
+   "char": "乘",
+   "basis": "et3_exact",
+   "big5": "ADBC"
+  },
+  {
+   "index": 1444,
+   "char": "莉",
+   "basis": "et3_exact",
+   "big5": "B2FA"
+  },
+  {
+   "index": 1445,
+   "char": "擅",
+   "basis": "et3_exact",
+   "big5": "BED5"
+  },
+  {
+   "index": 1446,
+   "char": "匪",
+   "basis": "et3_exact",
+   "big5": "ADEA"
+  },
+  {
+   "index": 1447,
+   "char": "戒",
+   "basis": "et3_exact",
+   "big5": "A7D9"
+  },
+  {
+   "index": 1448,
+   "char": "煉",
+   "basis": "et3_exact",
+   "big5": "B7D2"
+  },
+  {
+   "index": 1449,
+   "char": "製",
+   "basis": "et3_exact",
+   "big5": "BB73"
+  },
+  {
+   "index": 1450,
+   "char": "鍛",
+   "basis": "et3_exact",
+   "big5": "C1EB"
+  },
+  {
+   "index": 1451,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1452,
+   "char": null,
+   "basis": "pending"
+  },
+  {
+   "index": 1453,
+   "char": "傑",
+   "basis": "et3_exact",
+   "big5": "B3C7"
+  },
+  {
+   "index": 1454,
+   "char": "瓦",
+   "basis": "et3_exact",
+   "big5": "A5CB"
+  },
+  {
+   "index": 1455,
+   "char": "汀",
+   "basis": "et3_exact",
+   "big5": "A5C5"
+  },
+  {
+   "index": 1456,
+   "char": "質",
+   "basis": "et3_exact",
+   "big5": "BDE8"
+  },
+  {
+   "index": 1457,
+   "char": "蛋",
+   "basis": "et3_exact",
+   "big5": "B34A"
+  },
+  {
+   "index": 1458,
+   "char": "咆",
+   "basis": "et3_exact",
+   "big5": "A948"
+  },
+  {
+   "index": 1459,
+   "char": "哮",
+   "basis": "et3_exact",
+   "big5": "ADFD"
+  },
+  {
+   "index": 1460,
+   "char": "獅",
+   "basis": "et3_exact",
+   "big5": "B7E0"
+  },
+  {
+   "index": 1461,
+   "char": "奈",
+   "basis": "et3_exact",
+   "big5": "A960"
+  },
+  {
+   "index": 1462,
+   "char": "積",
+   "basis": "et3_exact",
+   "big5": "BF6E"
+  },
+  {
+   "index": 1463,
+   "char": "塊",
+   "basis": "et3_exact",
+   "big5": "B6F4"
+  },
+  {
+   "index": 1464,
+   "char": "絆",
+   "basis": "et3_exact",
+   "big5": "B2CC"
+  },
+  {
+   "index": 1465,
+   "char": "腳",
+   "basis": "et3_exact",
+   "big5": "B87D"
+  },
+  {
+   "index": 1466,
+   "char": "影",
+   "basis": "et3_exact",
+   "big5": "BC76"
+  },
+  {
+   "index": 1467,
+   "char": "響",
+   "basis": "et3_exact",
+   "big5": "C554"
+  },
+  {
+   "index": 1468,
+   "char": "釘",
+   "basis": "et3_exact",
+   "big5": "B076"
+  },
+  {
+   "index": 1469,
+   "char": "喘",
+   "basis": "et3_exact",
+   "big5": "B3DD"
+  },
+  {
+   "index": 1470,
+   "char": "攔",
+   "basis": "et3_exact",
+   "big5": "C464"
+  },
+  {
+   "index": 1471,
+   "char": "立",
+   "basis": "et3_exact",
+   "big5": "A5DF"
+  },
+  {
+   "index": 1472,
+   "char": "鍋",
+   "basis": "et3_exact",
+   "big5": "C1E7"
+  },
+  {
+   "index": 1473,
+   "char": "堆",
+   "basis": "et3_exact",
+   "big5": "B0EF"
+  },
+  {
+   "index": 1474,
+   "char": "抽",
+   "basis": "et3_exact",
+   "big5": "A9E2"
+  },
+  {
+   "index": 1475,
+   "char": "句",
+   "basis": "et3_exact",
+   "big5": "A579"
+  },
+  {
+   "index": 1476,
+   "char": "河",
+   "basis": "et3_exact",
+   "big5": "AA65"
+  },
+  {
+   "index": 1477,
+   "char": "奧",
+   "basis": "et3_exact",
+   "big5": "B6F8"
+  },
+  {
+   "index": 1478,
+   "char": "鍵",
+   "basis": "et3_exact",
+   "big5": "C1E4"
+  },
+  {
+   "index": 1479,
+   "char": "握",
+   "basis": "et3_exact",
+   "big5": "B4A4"
+  },
+  {
+   "index": 1480,
+   "char": "努",
+   "basis": "et3_exact",
+   "big5": "A756"
+  },
+  {
+   "index": 1481,
+   "char": "寵",
+   "basis": "et3_exact",
+   "big5": "C364"
+  },
+  {
+   "index": 1482,
+   "char": "乒",
+   "basis": "et3_exact",
+   "big5": "A5E2"
+  },
+  {
+   "index": 1483,
+   "char": "乓",
+   "basis": "et3_exact",
+   "big5": "A5E3"
+  },
+  {
+   "index": 1484,
+   "char": "歹",
+   "basis": "et3_exact",
+   "big5": "A4EF"
+  },
+  {
+   "index": 1485,
+   "char": "袖",
+   "basis": "et3_exact",
+   "big5": "B353"
+  },
+  {
+   "index": 1486,
+   "char": "丫",
+   "basis": "et3_exact",
+   "big5": "A458"
+  },
+  {
+   "index": 1487,
+   "char": "廝",
+   "basis": "et3_exact",
+   "big5": "BC72"
+  },
+  {
+   "index": 1488,
+   "char": "談",
+   "basis": "et3_exact",
+   "big5": "BDCD"
+  },
+  {
+   "index": 1489,
+   "char": "啟",
+   "basis": "et3_exact",
+   "big5": "B1D2"
+  },
+  {
+   "index": 1490,
+   "char": "陪",
+   "basis": "et3_exact",
+   "big5": "B3AD"
+  },
+  {
+   "index": 1491,
+   "char": "勵",
+   "basis": "et3_exact",
+   "big5": "C079"
+  },
+  {
+   "index": 1492,
+   "char": "隧",
+   "basis": "et3_exact",
+   "big5": "C047"
+  },
+  {
+   "index": 1493,
+   "char": "捷",
+   "basis": "et3_exact",
+   "big5": "B1B6"
+  },
+  {
+   "index": 1494,
+   "char": "徑",
+   "basis": "et3_exact",
+   "big5": "AE7C"
+  },
+  {
+   "index": 1495,
+   "char": "土",
+   "basis": "et3_exact",
+   "big5": "A467"
+  },
+  {
+   "index": 1496,
+   "char": "餓",
+   "basis": "et3_exact",
+   "big5": "BE6A"
+  },
+  {
+   "index": 1497,
+   "char": "首",
+   "basis": "et3_exact",
+   "big5": "ADBA"
+  },
+  {
+   "index": 1498,
+   "char": "嫉",
+   "basis": "et3_exact",
+   "big5": "B6FA"
+  },
+  {
+   "index": 1499,
+   "char": "仇",
+   "basis": "et3_exact",
+   "big5": "A4B3"
+  },
+  {
+   "index": 1500,
+   "char": "捺",
+   "basis": "et3_exact",
+   "big5": "B1CC"
+  },
+  {
+   "index": 1501,
+   "char": "縱",
+   "basis": "et3_exact",
+   "big5": "C161"
+  },
+  {
+   "index": 1502,
+   "char": "懷",
+   "basis": "et3_exact",
+   "big5": "C368"
+  },
+  {
+   "index": 1503,
+   "char": "惱",
+   "basis": "et3_exact",
+   "big5": "B46F"
+  },
+  {
+   "index": 1504,
+   "char": "糾",
+   "basis": "et3_exact",
+   "big5": "AAC8"
+  },
+  {
+   "index": 1505,
+   "char": "抉",
+   "basis": "et3_exact",
+   "big5": "A7E0"
+  },
+  {
+   "index": 1506,
+   "char": "母",
+   "basis": "et3_exact",
+   "big5": "A5C0"
+  },
+  {
+   "index": 1507,
+   "char": "漩",
+   "basis": "et3_exact",
+   "big5": "BA78"
+  },
+  {
+   "index": 1508,
+   "char": "渦",
+   "basis": "et3_exact",
+   "big5": "B4F5"
+  },
+  {
+   "index": 1509,
+   "char": "範",
+   "basis": "et3_exact",
+   "big5": "BD64"
+  },
+  {
+   "index": 1510,
+   "char": "襲",
+   "basis": "et3_exact",
+   "big5": "C5A7"
+  },
+  {
+   "index": 1511,
+   "char": "熱",
+   "basis": "et3_exact",
+   "big5": "BCF6"
+  },
+  {
+   "index": 1512,
+   "char": "扯",
+   "basis": "et3_exact",
+   "big5": "A7E8"
+  },
+  {
+   "index": 1513,
+   "char": "棲",
+   "basis": "et3_exact",
+   "big5": "B4CF"
+  },
+  {
+   "index": 1514,
+   "char": "逼",
+   "basis": "et3_exact",
+   "big5": "B947"
+  },
+  {
+   "index": 1515,
+   "char": "祀",
+   "basis": "et3_exact",
+   "big5": "AAC1"
+  },
+  {
+   "index": 1516,
+   "char": "熄",
+   "basis": "et3_exact",
+   "big5": "BAB6"
+  },
+  {
+   "index": 1517,
+   "char": "狗",
+   "basis": "et3_exact",
+   "big5": "AAAF"
+  },
+  {
+   "index": 1518,
+   "char": "策",
+   "basis": "et3_exact",
+   "big5": "B5A6"
+  },
+  {
+   "index": 1519,
+   "char": "魄",
+   "basis": "et3_exact",
+   "big5": "BE7A"
+  },
+  {
+   "index": 1520,
+   "char": "軀",
+   "basis": "et3_exact",
+   "big5": "C2DF"
+  },
+  {
+   "index": 1521,
+   "char": "奪",
+   "basis": "et3_exact",
+   "big5": "B9DC"
+  },
+  {
+   "index": 1522,
+   "char": "詭",
+   "basis": "et3_exact",
+   "big5": "B8DE"
+  },
+  {
+   "index": 1523,
+   "char": "規",
+   "basis": "et3_exact",
+   "big5": "B357"
+  },
+  {
+   "index": 1524,
+   "char": "矩",
+   "basis": "et3_exact",
+   "big5": "AF78"
+  },
+  {
+   "index": 1525,
+   "char": "伸",
+   "basis": "et3_exact",
+   "big5": "A6F9"
+  },
+  {
+   "index": 1526,
+   "char": "刮",
+   "basis": "et3_exact",
+   "big5": "A8ED"
+  },
+  {
+   "index": 1527,
+   "char": "棉",
+   "basis": "et3_exact",
+   "big5": "B4D6"
+  },
+  {
+   "index": 1528,
+   "char": "糖",
+   "basis": "et3_exact",
+   "big5": "BF7D"
+  },
+  {
+   "index": 1529,
+   "char": "軟",
+   "basis": "et3_exact",
+   "big5": "B36E"
+  },
+  {
+   "index": 1530,
+   "char": "檔",
+   "basis": "et3_exact",
+   "big5": "C0C9"
+  },
+  {
+   "index": 1531,
+   "char": "凶",
+   "basis": "et3_exact",
+   "big5": "A4BF"
+  },
+  {
+   "index": 1532,
+   "char": "深",
+   "basis": "et3_exact",
+   "big5": "B260"
+  },
+  {
+   "index": 1533,
+   "char": "冥",
+   "basis": "et3_exact",
+   "big5": "ADDF"
+  },
+  {
+   "index": 1534,
+   "char": "氛",
+   "basis": "et3_exact",
+   "big5": "AA5E"
+  },
+  {
+   "index": 1535,
+   "char": "鈞",
+   "basis": "et3_exact",
+   "big5": "B676"
+  },
+  {
+   "index": 1536,
+   "char": "髮",
+   "basis": "et3_exact",
+   "big5": "BE76"
+  },
+  {
+   "index": 1537,
+   "char": "暈",
+   "basis": "et3_exact",
+   "big5": "B777"
+  },
+  {
+   "index": 1538,
+   "char": "病",
+   "basis": "et3_exact",
+   "big5": "AF66"
+  },
+  {
+   "index": 1539,
+   "char": "玩",
+   "basis": "et3_exact",
+   "big5": "AAB1"
+  },
+  {
+   "index": 1540,
+   "char": "姊",
+   "basis": "et3_exact",
+   "big5": "A96E"
+  },
+  {
+   "index": 1541,
+   "char": "筵",
+   "basis": "et3_exact",
+   "big5": "BAE1"
+  },
+  {
+   "index": 1542,
+   "char": "罷",
+   "basis": "et3_exact",
+   "big5": "BD7D"
+  },
+  {
+   "index": 1543,
+   "char": "悔",
+   "basis": "et3_exact",
+   "big5": "AEAC"
+  },
+  {
+   "index": 1544,
+   "char": "書",
+   "basis": "et3_exact",
+   "big5": "AED1"
+  },
+  {
+   "index": 1545,
+   "char": "葬",
+   "basis": "et3_exact",
+   "big5": "B8AE"
+  },
+  {
+   "index": 1546,
+   "char": "聳",
+   "basis": "et3_exact",
+   "big5": "C171"
+  },
+  {
+   "index": 1547,
+   "char": "巧",
+   "basis": "et3_exact",
+   "big5": "A5A9"
+  },
+  {
+   "index": 1548,
+   "char": "髏",
+   "basis": "et3_exact",
+   "big5": "C55C"
+  },
+  {
+   "index": 1549,
+   "char": "批",
+   "basis": "et3_exact",
+   "big5": "A7E5"
+  },
+  {
+   "index": 1550,
+   "char": "剩",
+   "basis": "et3_exact",
+   "big5": "B3D1"
+  },
+  {
+   "index": 1551,
+   "char": "銳",
+   "basis": "et3_exact",
+   "big5": "BE55"
+  },
+  {
+   "index": 1552,
+   "char": "擒",
+   "basis": "et3_exact",
+   "big5": "BEE0"
+  },
+  {
+   "index": 1553,
+   "char": "瓜",
+   "basis": "et3_exact",
+   "big5": "A5CA"
+  },
+  {
+   "index": 1554,
+   "char": "拼",
+   "basis": "et3_exact",
+   "big5": "ABF7"
+  },
+  {
+   "index": 1555,
+   "char": "孤",
+   "basis": "et3_exact",
+   "big5": "A974"
+  },
+  {
+   "index": 1556,
+   "char": "擲",
+   "basis": "et3_exact",
+   "big5": "C259"
+  },
+  {
+   "index": 1557,
+   "char": "彆",
+   "basis": "et3_exact",
+   "big5": "B9FB"
+  },
+  {
+   "index": 1558,
+   "char": "扭",
+   "basis": "et3_exact",
+   "big5": "A7E1"
+  },
+  {
+   "index": 1559,
+   "char": "緣",
+   "basis": "et3_exact",
+   "big5": "BD74"
+  },
+  {
+   "index": 1560,
+   "char": "施",
+   "basis": "et3_exact",
+   "big5": "AC49"
+  },
+  {
+   "index": 1561,
+   "char": "寐",
+   "basis": "et3_exact",
+   "big5": "B44B"
+  },
+  {
+   "index": 1562,
+   "char": "頑",
+   "basis": "et3_exact",
+   "big5": "B978"
+  },
+  {
+   "index": 1563,
+   "char": "限",
+   "basis": "et3_exact",
+   "big5": "ADAD"
+  },
+  {
+   "index": 1564,
+   "char": "堡",
+   "basis": "et3_exact",
+   "big5": "B3F9"
+  },
+  {
+   "index": 1565,
+   "char": "爸",
+   "basis": "et3_exact",
+   "big5": "AAA8"
+  },
+  {
+   "index": 1566,
+   "char": "祂",
+   "basis": "et3_exact",
+   "big5": "CDA2"
+  },
+  {
+   "index": 1567,
+   "char": "允",
+   "basis": "et3_exact",
+   "big5": "A4B9"
+  },
+  {
+   "index": 1568,
+   "char": "憂",
+   "basis": "et3_exact",
+   "big5": "BC7E"
+  },
+  {
+   "index": 1569,
+   "char": "享",
+   "basis": "et3_exact",
+   "big5": "A8C9"
+  },
+  {
+   "index": 1570,
+   "char": "猖",
+   "basis": "et3_exact",
+   "big5": "B273"
+  },
+  {
+   "index": 1571,
+   "char": "儀",
+   "basis": "et3_exact",
+   "big5": "BBF6"
+  },
+  {
+   "index": 1572,
+   "char": "稱",
+   "basis": "et3_exact",
+   "big5": "BAD9"
+  },
+  {
+   "index": 1573,
+   "char": "菁",
+   "basis": "et3_exact",
+   "big5": "B5D7"
+  },
+  {
+   "index": 1574,
+   "char": "厚",
+   "basis": "et3_exact",
+   "big5": "AB70"
+  },
+  {
+   "index": 1575,
+   "char": "囂",
+   "basis": "et3_exact",
+   "big5": "C4DB"
+  },
+  {
+   "index": 1576,
+   "char": "窮",
+   "basis": "et3_exact",
+   "big5": "BD61"
+  },
+  {
+   "index": 1577,
+   "char": "寇",
+   "basis": "et3_exact",
+   "big5": "B146"
+  },
+  {
+   "index": 1578,
+   "char": "察",
+   "basis": "et3_exact",
+   "big5": "B9EE"
+  },
+  {
+   "index": 1579,
+   "char": "瞭",
+   "basis": "et3_exact",
+   "big5": "C141"
+  },
+  {
+   "index": 1580,
+   "char": "哭",
+   "basis": "et3_exact",
+   "big5": "ADFA"
+  },
+  {
+   "index": 1581,
+   "char": "泣",
+   "basis": "et3_exact",
+   "big5": "AA5F"
+  },
+  {
+   "index": 1582,
+   "char": "足",
+   "basis": "et3_exact",
+   "big5": "A8AC"
+  },
+  {
+   "index": 1583,
+   "char": "慧",
+   "basis": "et3_exact",
+   "big5": "BC7A"
+  },
+  {
+   "index": 1584,
+   "char": "孔",
+   "basis": "et3_exact",
+   "big5": "A4D5"
+  },
+  {
+   "index": 1585,
+   "char": "覓",
+   "basis": "et3_exact",
+   "big5": "B356"
+  },
+  {
+   "index": 1586,
+   "char": "駐",
+   "basis": "et3_exact",
+   "big5": "BE6E"
+  },
+  {
+   "index": 1587,
+   "char": "遙",
+   "basis": "et3_exact",
+   "big5": "BBBB"
+  },
+  {
+   "index": 1588,
+   "char": "耀",
+   "basis": "et3_exact",
+   "big5": "C4A3"
+  },
+  {
+   "index": 1589,
+   "char": "井",
+   "basis": "et3_exact",
+   "big5": "A4AB"
+  },
+  {
+   "index": 1590,
+   "char": "鳥",
+   "basis": "et3_exact",
+   "big5": "B3BE"
+  },
+  {
+   "index": 1591,
+   "char": "撤",
+   "basis": "et3_exact",
+   "big5": "BA4D"
+  },
+  {
+   "index": 1592,
+   "char": "夕",
+   "basis": "et3_exact",
+   "big5": "A469"
+  },
+  {
+   "index": 1593,
+   "char": "悶",
+   "basis": "et3_exact",
+   "big5": "B465"
+  },
+  {
+   "index": 1594,
+   "char": "免",
+   "basis": "et3_exact",
+   "big5": "A74B"
+  },
+  {
+   "index": 1595,
+   "char": "源",
+   "basis": "et3_exact",
+   "big5": "B7BD"
+  },
+  {
+   "index": 1596,
+   "char": "壇",
+   "basis": "et3_exact",
+   "big5": "BEC2"
+  },
+  {
+   "index": 1597,
+   "char": "豬",
+   "basis": "et3_exact",
+   "big5": "BDDE"
+  },
+  {
+   "index": 1598,
+   "char": "牠",
+   "basis": "et3_exact",
+   "big5": "A865"
+  },
+  {
+   "index": 1599,
+   "char": "堅",
+   "basis": "et3_exact",
+   "big5": "B0ED"
+  },
+  {
+   "index": 1600,
+   "char": "鼓",
+   "basis": "et3_exact",
+   "big5": "B9AA"
+  },
+  {
+   "index": 1601,
+   "char": "色",
+   "basis": "et3_exact",
+   "big5": "A6E2"
+  },
+  {
+   "index": 1602,
+   "char": "聊",
+   "basis": "et3_exact",
+   "big5": "B2E1"
+  },
+  {
+   "index": 1603,
+   "char": "敘",
+   "basis": "et3_exact",
+   "big5": "B1D4"
+  },
+  {
+   "index": 1604,
+   "char": "舊",
+   "basis": "et3_exact",
+   "big5": "C2C2"
+  },
+  {
+   "index": 1605,
+   "char": "勝",
+   "basis": "et3_exact",
+   "big5": "B3D3"
+  },
+  {
+   "index": 1606,
+   "char": "祖",
+   "basis": "et3_exact",
+   "big5": "AFAA"
+  },
+  {
+   "index": 1607,
+   "char": "異",
+   "basis": "et3_exact",
+   "big5": "B2A7"
+  },
+  {
+   "index": 1608,
+   "char": "珍",
+   "basis": "et3_exact",
+   "big5": "ACC3"
+  },
+  {
+   "index": 1609,
+   "char": "鑰",
+   "basis": "et3_exact",
+   "big5": "C65F"
+  },
+  {
+   "index": 1610,
+   "char": "匙",
+   "basis": "et3_exact",
+   "big5": "B0CD"
+  },
+  {
+   "index": 1611,
+   "char": "恆",
+   "basis": "et3_exact",
+   "big5": "ABED"
+  },
+  {
+   "index": 1612,
+   "char": "春",
+   "basis": "et3_exact",
+   "big5": "AC4B"
+  },
+  {
+   "index": 1613,
+   "char": "誤",
+   "basis": "et3_exact",
+   "big5": "BB7E"
+  },
+  {
+   "index": 1614,
+   "char": "坍",
+   "basis": "et3_exact",
+   "big5": "A77E"
+  },
+  {
+   "index": 1615,
+   "char": "塌",
+   "basis": "et3_exact",
+   "big5": "B6F2"
+  },
+  {
+   "index": 1616,
+   "char": "股",
+   "basis": "et3_exact",
+   "big5": "AAD1"
+  },
+  {
+   "index": 1617,
+   "char": "僥",
+   "basis": "et3_exact",
+   "big5": "B9AE"
+  },
+  {
+   "index": 1618,
+   "char": "倖",
+   "basis": "et3_exact",
+   "big5": "ADC6"
+  },
+  {
+   "index": 1619,
+   "char": "抹",
+   "basis": "et3_exact",
+   "big5": "A9D9"
+  },
+  {
+   "index": 1620,
+   "char": "痕",
+   "basis": "et3_exact",
+   "big5": "B2AA"
+  },
+  {
+   "index": 1621,
+   "char": "邀",
+   "basis": "et3_exact",
+   "big5": "C1DC"
+  },
+  {
+   "index": 1622,
+   "char": "囊",
+   "basis": "et3_exact",
+   "big5": "C56E"
+  },
+  {
+   "index": 1623,
+   "char": "涯",
+   "basis": "et3_exact",
+   "big5": "B250"
+  },
+  {
+   "index": 1624,
+   "char": "寂",
+   "basis": "et3_exact",
+   "big5": "B149"
+  },
+  {
+   "index": 1625,
+   "char": "寞",
+   "basis": "et3_exact",
+   "big5": "B9E6"
+  },
+  {
+   "index": 1626,
+   "char": "鼻",
+   "basis": "et3_exact",
+   "big5": "BBF3"
+  },
+  {
+   "index": 1627,
+   "char": "酸",
+   "basis": "et3_exact",
+   "big5": "BBC4"
+  },
+  {
+   "index": 1628,
+   "char": "廷",
+   "basis": "et3_exact",
+   "big5": "A7CA"
+  },
+  {
+   "index": 1629,
+   "char": "微",
+   "basis": "et3_exact",
+   "big5": "B74C"
+  },
+  {
+   "index": 1630,
+   "char": "左",
+   "basis": "et3_exact",
+   "big5": "A5AA"
+  },
+  {
+   "index": 1631,
+   "char": "盯",
+   "basis": "et3_exact",
+   "big5": "A86E"
+  },
+  {
+   "index": 1632,
+   "char": "阿",
+   "basis": "et3_exact",
+   "big5": "AAFC"
+  },
+  {
+   "index": 1633,
+   "char": "湛",
+   "basis": "et3_exact",
+   "big5": "B4EF"
+  },
+  {
+   "index": 1634,
+   "char": "某",
+   "basis": "et3_exact",
+   "big5": "AC59"
+  },
+  {
+   "index": 1635,
+   "char": "睞",
+   "basis": "et3_exact",
+   "big5": "B7FD"
+  },
+  {
+   "index": 1636,
+   "char": "聘",
+   "basis": "et3_exact",
+   "big5": "B875"
+  },
+  {
+   "index": 1637,
+   "char": "噶",
+   "basis": "et3_exact",
+   "big5": "BEBF"
+  },
+  {
+   "index": 1638,
+   "char": "址",
+   "basis": "et3_exact",
+   "big5": "A77D"
+  },
+  {
+   "index": 1639,
+   "char": "建",
+   "basis": "et3_exact",
+   "big5": "ABD8"
+  },
+  {
+   "index": 1640,
+   "char": "院",
+   "basis": "et3_exact",
+   "big5": "B07C"
+  },
+  {
+   "index": 1641,
+   "char": "潛",
+   "basis": "et3_exact",
+   "big5": "BCE7"
+  },
+  {
+   "index": 1642,
+   "char": "研",
+   "basis": "et3_exact",
+   "big5": "ACE3"
+  },
+  {
+   "index": 1643,
+   "char": "籍",
+   "basis": "et3_exact",
+   "big5": "C479"
+  },
+  {
+   "index": 1644,
+   "char": "操",
+   "basis": "et3_exact",
+   "big5": "BEDE"
+  },
+  {
+   "index": 1645,
+   "char": "悟",
+   "basis": "et3_exact",
+   "big5": "AEA9"
+  },
+  {
+   "index": 1646,
+   "char": "鬚",
+   "basis": "et3_exact",
+   "big5": "C5BD"
+  },
+  {
+   "index": 1647,
+   "char": "探",
+   "basis": "et3_exact",
+   "big5": "B1B4"
+  },
+  {
+   "index": 1648,
+   "char": "仔",
+   "basis": "et3_exact",
+   "big5": "A54A"
+  },
+  {
+   "index": 1649,
+   "char": "文",
+   "basis": "et3_exact",
+   "big5": "A4E5"
+  },
+  {
+   "index": 1650,
+   "char": "科",
+   "basis": "et3_exact",
+   "big5": "ACEC"
+  },
+  {
+   "index": 1651,
+   "char": "騷",
+   "basis": "et3_exact",
+   "big5": "C4CC"
+  },
+  {
+   "index": 1652,
+   "char": "養",
+   "basis": "et3_exact",
+   "big5": "BE69"
+  },
+  {
+   "index": 1653,
+   "char": "逐",
+   "basis": "et3_exact",
+   "big5": "B376"
+  },
+  {
+   "index": 1654,
+   "char": "朽",
+   "basis": "et3_exact",
+   "big5": "A6B4"
+  },
+  {
+   "index": 1655,
+   "char": "零",
+   "basis": "et3_exact",
+   "big5": "B973"
+  },
+  {
+   "index": 1656,
+   "char": "象",
+   "basis": "et3_exact",
+   "big5": "B648"
+  },
+  {
+   "index": 1657,
+   "char": "噴",
+   "basis": "et3_exact",
+   "big5": "BC51"
+  },
+  {
+   "index": 1658,
+   "char": "倉",
+   "basis": "et3_exact",
+   "big5": "ADDC"
+  },
+  {
+   "index": 1659,
+   "char": "庫",
+   "basis": "et3_exact",
+   "big5": "AE77"
+  },
+  {
+   "index": 1660,
+   "char": "逝",
+   "basis": "et3_exact",
+   "big5": "B375"
+  },
+  {
+   "index": 1661,
+   "char": "慕",
+   "basis": "et3_exact",
+   "big5": "BC7D"
+  },
+  {
+   "index": 1662,
+   "char": "宛",
+   "basis": "et3_exact",
+   "big5": "A97B"
+  },
+  {
+   "index": 1663,
+   "char": "碌",
+   "basis": "et3_exact",
+   "big5": "B84C"
+  },
+  {
+   "index": 1664,
+   "char": "愉",
+   "basis": "et3_exact",
+   "big5": "B472"
+  },
+  {
+   "index": 1665,
+   "char": "憧",
+   "basis": "et3_exact",
+   "big5": "BCA5"
+  },
+  {
+   "index": 1666,
+   "char": "憬",
+   "basis": "et3_exact",
+   "big5": "BCA9"
+  },
+  {
+   "index": 1667,
+   "char": "婚",
+   "basis": "et3_exact",
+   "big5": "B142"
+  },
+  {
+   "index": 1668,
+   "char": "猿",
+   "basis": "et3_exact",
+   "big5": "B7E1"
+  },
+  {
+   "index": 1669,
+   "char": "悄",
+   "basis": "et3_exact",
+   "big5": "AEA8"
+  },
+  {
+   "index": 1670,
+   "char": "搭",
+   "basis": "et3_exact",
+   "big5": "B766"
+  },
+  {
+   "index": 1671,
+   "char": "借",
+   "basis": "et3_exact",
+   "big5": "ADC9"
+  },
+  {
+   "index": 1672,
+   "char": "粗",
+   "basis": "et3_exact",
+   "big5": "B2CA"
+  },
+  {
+   "index": 1673,
+   "char": "枝",
+   "basis": "et3_exact",
+   "big5": "AA4B"
+  },
+  {
+   "index": 1674,
+   "char": "葉",
+   "basis": "et3_exact",
+   "big5": "B8AD"
+  },
+  {
+   "index": 1675,
+   "char": "妃",
+   "basis": "et3_exact",
+   "big5": "A66D"
+  },
+  {
+   "index": 1676,
+   "char": "潔",
+   "basis": "et3_exact",
+   "big5": "BCE4"
+  },
+  {
+   "index": 1677,
+   "char": "兼",
+   "basis": "et3_exact",
+   "big5": "ADDD"
+  },
+  {
+   "index": 1678,
+   "char": "馳",
+   "basis": "et3_exact",
+   "big5": "B9A3"
+  },
+  {
+   "index": 1679,
+   "char": "騁",
+   "basis": "et3_exact",
+   "big5": "C1FE"
+  },
+  {
+   "index": 1680,
+   "char": "秩",
+   "basis": "et3_exact",
+   "big5": "AFB4"
+  },
+  {
+   "index": 1681,
+   "char": "艱",
+   "basis": "et3_exact",
+   "big5": "C17D"
+  },
+  {
+   "index": 1682,
+   "char": "曾",
+   "basis": "et3_exact",
+   "big5": "B4BF"
+  },
+  {
+   "index": 1683,
+   "char": "層",
+   "basis": "et3_exact",
+   "big5": "BC68"
+  },
+  {
+   "index": 1684,
+   "char": "隻",
+   "basis": "et3_exact",
+   "big5": "B0A6"
+  },
+  {
+   "index": 1685,
+   "char": "卅",
+   "basis": "et3_exact",
+   "big5": "A4CA"
+  },
+  {
+   "index": 1686,
+   "char": "愚",
+   "basis": "et3_exact",
+   "big5": "B74D"
+  },
+  {
+   "index": 1687,
+   "char": "蠢",
+   "basis": "et3_exact",
+   "big5": "C4F8"
+  },
+  {
+   "index": 1688,
+   "char": "賜",
+   "basis": "et3_exact",
+   "big5": "BDE7"
+  },
+  {
+   "index": 1689,
+   "char": "悲",
+   "basis": "et3_exact",
+   "big5": "B464"
+  },
+  {
+   "index": 1690,
+   "char": "慎",
+   "basis": "et3_exact",
+   "big5": "B756"
+  },
+  {
+   "index": 1691,
+   "char": "副",
+   "basis": "et3_exact",
+   "big5": "B0C6"
+  },
+  {
+   "index": 1692,
+   "char": "枷",
+   "basis": "et3_exact",
+   "big5": "CF45"
+  },
+  {
+   "index": 1693,
+   "char": "淋",
+   "basis": "et3_exact",
+   "big5": "B24F"
+  },
+  {
+   "index": 1694,
+   "char": "斷",
+   "basis": "et3_exact",
+   "big5": "C25F"
+  },
+  {
+   "index": 1695,
+   "char": "砌",
+   "basis": "et3_exact",
+   "big5": "ACE4"
+  },
+  {
+   "index": 1696,
+   "char": "維",
+   "basis": "et3_exact",
+   "big5": "BAFB"
+  },
+  {
+   "index": 1697,
+   "char": "脆",
+   "basis": "et3_exact",
+   "big5": "AFDC"
+  },
+  {
+   "index": 1698,
+   "char": "鐘",
+   "basis": "et3_exact",
+   "big5": "C4C1"
+  },
+  {
+   "index": 1699,
+   "char": "秒",
+   "basis": "et3_exact",
+   "big5": "ACED"
+  },
+  {
+   "index": 1700,
+   "char": "蟲",
+   "basis": "et3_exact",
+   "big5": "C2CE"
+  },
+  {
+   "index": 1701,
+   "char": "虫",
+   "basis": "et3_exact",
+   "big5": "A6E4"
+  },
+  {
+   "index": 1702,
+   "char": "宿",
+   "basis": "et3_exact",
+   "big5": "B14A"
+  },
+  {
+   "index": 1703,
+   "char": "媽",
+   "basis": "et3_exact",
+   "big5": "B6FD"
+  },
+  {
+   "index": 1704,
+   "char": "拆",
+   "basis": "et3_exact",
+   "big5": "A9EE"
+  },
+  {
+   "index": 1705,
+   "char": "饒",
+   "basis": "et3_exact",
+   "big5": "C4C7"
+  },
+  {
+   "index": 1706,
+   "char": "謫",
+   "basis": "et3_exact",
+   "big5": "C2D6"
+  },
+  {
+   "index": 1707,
+   "char": "掙",
+   "basis": "et3_exact",
+   "big5": "B1C3"
+  },
+  {
+   "index": 1708,
+   "char": "扎",
+   "basis": "et3_exact",
+   "big5": "A4E3"
+  },
+  {
+   "index": 1709,
+   "char": "距",
+   "basis": "et3_exact",
+   "big5": "B65A"
+  },
+  {
+   "index": 1710,
+   "char": "螻",
+   "basis": "et3_exact",
+   "big5": "C1B2"
+  },
+  {
+   "index": 1711,
+   "char": "蟻",
+   "basis": "et3_exact",
+   "big5": "C3C6"
+  },
+  {
+   "index": 1712,
+   "char": "踏",
+   "basis": "et3_exact",
+   "big5": "BDF1"
+  },
+  {
+   "index": 1713,
+   "char": "樓",
+   "basis": "et3_exact",
+   "big5": "BCD3"
+  },
+  {
+   "index": 1714,
+   "char": "偶",
+   "basis": "et3_exact",
+   "big5": "B0B8"
+  },
+  {
+   "index": 1715,
+   "char": "凝",
+   "basis": "et3_exact",
+   "big5": "BEAE"
+  },
+  {
+   "index": 1716,
+   "char": "嬌",
+   "basis": "et3_exact",
+   "big5": "BC62"
+  },
+  {
+   "index": 1717,
+   "char": "貝",
+   "basis": "et3_exact",
+   "big5": "A8A9"
+  },
+  {
+   "index": 1718,
+   "char": "鷹",
+   "basis": "et3_exact",
+   "big5": "C64E"
+  },
+  {
+   "index": 1719,
+   "char": "迴",
+   "basis": "et3_exact",
+   "big5": "B06A"
+  },
+  {
+   "index": 1720,
+   "char": "趨",
+   "basis": "et3_exact",
+   "big5": "C1CD"
+  },
+  {
+   "index": 1721,
+   "char": "垂",
+   "basis": "et3_exact",
+   "big5": "ABAB"
+  },
+  {
+   "index": 1722,
+   "char": "憫",
+   "basis": "et3_exact",
+   "big5": "BCA7"
+  },
+  {
+   "index": 1723,
+   "char": "謹",
+   "basis": "et3_exact",
+   "big5": "C2D4"
+  },
+  {
+   "index": 1724,
+   "char": "汝",
+   "basis": "et3_exact",
+   "big5": "A6BC"
+  },
+  {
+   "index": 1725,
+   "char": "裏",
+   "basis": "et3_exact",
+   "big5": "F9D8"
+  },
+  {
+   "index": 1726,
+   "char": "燒",
+   "basis": "et3_exact",
+   "big5": "BF4E"
+  },
+  {
+   "index": 1727,
+   "char": "爬",
+   "basis": "et3_exact",
+   "big5": "AAA6"
+  },
+  {
+   "index": 1728,
+   "char": "莊",
+   "basis": "et3_exact",
+   "big5": "B2F8"
+  },
+  {
+   "index": 1729,
+   "char": "懇",
+   "basis": "et3_exact",
+   "big5": "C0B5"
+  },
+  {
+   "index": 1730,
+   "char": "示",
+   "basis": "et3_exact",
+   "big5": "A5DC"
+  },
+  {
+   "index": 1731,
+   "char": "崇",
+   "basis": "et3_exact",
+   "big5": "B152"
+  },
+  {
+   "index": 1732,
+   "char": "妻",
+   "basis": "et3_exact",
+   "big5": "A964"
+  },
+  {
+   "index": 1733,
+   "char": "孽",
+   "basis": "et3_exact",
+   "big5": "C45E"
+  },
+  {
+   "index": 1734,
+   "char": "捆",
+   "basis": "et3_exact",
+   "big5": "AEB9"
+  },
+  {
+   "index": 1735,
+   "char": "綁",
+   "basis": "et3_exact",
+   "big5": "B86A"
+  },
+  {
+   "index": 1736,
+   "char": "柴",
+   "basis": "et3_exact",
+   "big5": "AEE3"
+  },
+  {
+   "index": 1737,
+   "char": "漆",
+   "basis": "et3_exact",
+   "big5": "BAA3"
+  },
+  {
+   "index": 1738,
+   "char": "吸",
+   "basis": "et3_exact",
+   "big5": "A76C"
+  },
+  {
+   "index": 1739,
+   "char": "塗",
+   "basis": "et3_exact",
+   "big5": "B6EE"
+  },
+  {
+   "index": 1740,
+   "char": "辨",
+   "basis": "et3_exact",
+   "big5": "BFEB"
+  },
+  {
+   "index": 1741,
+   "char": "讒",
+   "basis": "et3_exact",
+   "big5": "C5FE"
+  },
+  {
+   "index": 1742,
+   "char": "欲",
+   "basis": "et3_exact",
+   "big5": "B1FD"
+  },
+  {
+   "index": 1743,
+   "char": "災",
+   "basis": "et3_exact",
+   "big5": "A861"
+  },
+  {
+   "index": 1744,
+   "char": "蛛",
+   "basis": "et3_exact",
+   "big5": "B5EF"
+  },
+  {
+   "index": 1745,
+   "char": "煎",
+   "basis": "et3_exact",
+   "big5": "B7CE"
+  },
+  {
+   "index": 1746,
+   "char": "秋",
+   "basis": "et3_exact",
+   "big5": "ACEE"
+  },
+  {
+   "index": 1747,
+   "char": "逞",
+   "basis": "et3_exact",
+   "big5": "B378"
+  },
+  {
+   "index": 1748,
+   "char": "譽",
+   "basis": "et3_exact",
+   "big5": "C541"
+  },
+  {
+   "index": 1749,
+   "char": "餐",
+   "basis": "et3_exact",
+   "big5": "C05C"
+  },
+  {
+   "index": 1750,
+   "char": "錦",
+   "basis": "et3_exact",
+   "big5": "C041"
+  },
+  {
+   "index": 1751,
+   "char": "玉",
+   "basis": "et3_exact",
+   "big5": "A5C9"
+  },
+  {
+   "index": 1752,
+   "char": "食",
+   "basis": "et3_exact",
+   "big5": "ADB9"
+  },
+  {
+   "index": 1753,
+   "char": "屋",
+   "basis": "et3_exact",
+   "big5": "ABCE"
+  },
+  {
+   "index": 1754,
+   "char": "佳",
+   "basis": "et3_exact",
+   "big5": "A8CE"
+  },
+  {
+   "index": 1755,
+   "char": "樵",
+   "basis": "et3_exact",
+   "big5": "BEF6"
+  },
+  {
+   "index": 1756,
+   "char": "賦",
+   "basis": "et3_exact",
+   "big5": "BDE1"
+  },
+  {
+   "index": 1757,
+   "char": "授",
+   "basis": "et3_exact",
+   "big5": "B1C2"
+  },
+  {
+   "index": 1758,
+   "char": "錚",
+   "basis": "et3_exact",
+   "big5": "BFFE"
+  },
+  {
+   "index": 1759,
+   "char": "線",
+   "basis": "et3_exact",
+   "big5": "BD75"
+  },
+  {
+   "index": 1760,
+   "char": "藉",
+   "basis": "et3_exact",
+   "big5": "C2C7"
+  },
+  {
+   "index": 1761,
+   "char": "透",
+   "basis": "et3_exact",
+   "big5": "B37A"
+  },
+  {
+   "index": 1762,
+   "char": "房",
+   "basis": "et3_exact",
+   "big5": "A9D0"
+  },
+  {
+   "index": 1763,
+   "char": "右",
+   "basis": "et3_exact",
+   "big5": "A56B"
+  },
+  {
+   "index": 1764,
+   "char": "液",
+   "basis": "et3_exact",
+   "big5": "B247"
+  },
+  {
+   "index": 1765,
+   "char": "傾",
+   "basis": "et3_exact",
+   "big5": "B6C9"
+  },
+  {
+   "index": 1766,
+   "char": "展",
+   "basis": "et3_exact",
+   "big5": "AE69"
+  },
+  {
+   "index": 1767,
+   "char": "漂",
+   "basis": "et3_exact",
+   "big5": "BA7D"
+  },
+  {
+   "index": 1768,
+   "char": "貼",
+   "basis": "et3_exact",
+   "big5": "B64B"
+  },
+  {
+   "index": 1769,
+   "char": "共",
+   "basis": "et3_exact",
+   "big5": "A640"
+  },
+  {
+   "index": 1770,
+   "char": "苛",
+   "basis": "et3_exact",
+   "big5": "AD56"
+  },
+  {
+   "index": 1771,
+   "char": "償",
+   "basis": "et3_exact",
+   "big5": "C076"
+  },
+  {
+   "index": 1772,
+   "char": "催",
+   "basis": "et3_exact",
+   "big5": "B6CA"
+  },
+  {
+   "index": 1773,
+   "char": "促",
+   "basis": "et3_exact",
+   "big5": "AB50"
+  },
+  {
+   "index": 1774,
+   "char": "翅",
+   "basis": "et3_exact",
+   "big5": "AFCD"
+  },
+  {
+   "index": 1775,
+   "char": "膀",
+   "basis": "et3_exact",
+   "big5": "BB48"
+  },
+  {
+   "index": 1776,
+   "char": "朝",
+   "basis": "et3_exact",
+   "big5": "B4C2"
+  },
+  {
+   "index": 1777,
+   "char": "翔",
+   "basis": "et3_exact",
+   "big5": "B5BE"
+  },
+  {
+   "index": 1778,
+   "char": "荊",
+   "basis": "et3_exact",
+   "big5": "AFF0"
+  },
+  {
+   "index": 1779,
+   "char": "棘",
+   "basis": "et3_exact",
+   "big5": "B4C6"
+  },
+  {
+   "index": 1780,
+   "char": "標",
+   "basis": "et3_exact",
+   "big5": "BCD0"
+  },
+  {
+   "index": 1781,
+   "char": "齊",
+   "basis": "et3_exact",
+   "big5": "BBF4"
+  },
+  {
+   "index": 1782,
+   "char": "兆",
+   "basis": "et3_exact",
+   "big5": "A5FC"
+  },
+  {
+   "index": 1783,
+   "char": "歇",
+   "basis": "et3_exact",
+   "big5": "B7B2"
+  },
+  {
+   "index": 1784,
+   "char": "倆",
+   "basis": "et3_exact",
+   "big5": "ADC7"
+  },
+  {
+   "index": 1785,
+   "char": "賺",
+   "basis": "et3_exact",
+   "big5": "C1C8"
+  },
+  {
+   "index": 1786,
+   "char": "銷",
+   "basis": "et3_exact",
+   "big5": "BE50"
+  },
+  {
+   "index": 1787,
+   "char": "宴",
+   "basis": "et3_exact",
+   "big5": "AE62"
+  },
+  {
+   "index": 1788,
+   "char": "酷",
+   "basis": "et3_exact",
+   "big5": "BBC5"
+  },
+  {
+   "index": 1789,
+   "char": "妒",
+   "basis": "et3_exact",
+   "big5": "A7AA"
+  },
+  {
+   "index": 1790,
+   "char": "揮",
+   "basis": "et3_exact",
+   "big5": "B4A7"
+  },
+  {
+   "index": 1791,
+   "char": "霾",
+   "basis": "et3_exact",
+   "big5": "C5B5"
+  }
+ ]
+}

@@ -20,3 +20,6 @@ docs/guide/**/*.gif binary
 # failure names neither the file nor the line ending, so it costs a while to
 # find.
 tools/**/*.js text eol=lf
+
+# The ETen font files are raw bitmaps; any line-ending conversion corrupts them.
+tools/glyph/ET3_fonts/*.15 binary

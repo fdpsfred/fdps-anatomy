@@ -9,8 +9,9 @@
 | `code_emit/build_emit.py` | `src/` 的原始碼掃描與反編譯器預設名稱檢查 | `game_build`、`build_gate` |
 | `data_emit/check_data.py` | LE 映像解析、wlink map 解析、Ghidra 快照的名稱表 | `game_build` |
 | 各工作的建置函式 | 各建置目標怎麼建 | `build_gate` |
+| `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
 
-儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`。
+儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表寫到 `assets/text/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`。
 
 | 子資料夾 | 用途 |
 | --- | --- |
@@ -32,6 +33,7 @@
 | [`global_data/`](global_data/_index.md) | 全域資料符號的語意命名與型別判定，以及主要 struct 的佈局定義與套用（票 17 專屬的 workflow） |
 | [`ghidra_config/`](ghidra_config/_index.md) | Ghidra MCP 專案設定的正本：把命名檢查調成本專案的慣例 |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | 把 Ghidra 的分析狀態匯出成文字快照 |
+| [`glyph/`](glyph/_index.md) | `FDETXT.FON` 字模對倚天字型逐像素比對、不吻合的字做成校對網頁讓開發者填字、合併成字模對照表（票 25.1） |
 | [`guide_offsets/`](guide_offsets/_index.md) | 把攻略站給的資料表偏移對回 `MISC.VFS` 成員，解表並與攻略站數值逐筆比對 |
 | [`guide_scrape/`](guide_scrape/_index.md) | 把攻略站的內容頁抓成原文鏡像並提供搜尋入口 |
 | [`kbd_probe/`](kbd_probe/_index.md) | 量 DOS/4GW 之下手塞 BIOS 鍵盤環形緩衝區後，鍵盤查詢何時看得到那些鍵（測試端要先等一個 timer tick 的依據） |
@@ -41,4 +43,5 @@
 | [`rle_asm/`](rle_asm/_index.md) | RLE 繪製的 15 支改回原版組語：逐道指令與原版比對、片段接成 `src/*.asm`、C 譯本與組語之間的切換（票 22.3） |
 | [`saf_decode/`](saf_decode/_index.md) | 解出 `.SAF` 的四層結構、驗證自洽性，並算圖成 PNG 與 WAV |
 | [`save_format/`](save_format/_index.md) | `FDE.SAV` 的讀寫：解密、驗檢查碼、把欄位解成 JSON，以及把改過的明文映像封裝回存檔 |
+| [`text_decode/`](text_decode/_index.md) | 把 `FDETXTnn.TXT` 文字區塊解成逐筆可讀文字並標出控制碼（票 25.1） |
 | [`vfs_dump/`](vfs_dump/_index.md) | 解開 `.VFS` 容器並驗證其自洽性 |
