@@ -1,0 +1,95 @@
+{
+ "ticket": "25.13",
+ "total": 11,
+ "complete": 11,
+ "unfinished": [],
+ "unfinished_detail": [],
+ "by_verdict": {
+  "holds": [
+   "T13-03",
+   "T13-05",
+   "T13-07",
+   "T13-08",
+   "T13-09"
+  ],
+  "refuted": [
+   "T13-06"
+  ],
+  "needs_correction": [
+   "T13-01",
+   "T13-02",
+   "T13-04",
+   "T13-10",
+   "T13-11"
+  ]
+ },
+ "by_disposition": {
+  "absorbed": [
+   "T13-02",
+   "T13-03",
+   "T13-04",
+   "T13-05",
+   "T13-07",
+   "T13-08",
+   "T13-09",
+   "T13-10"
+  ],
+  "addendum": [
+   "T13-11"
+  ],
+  "new_entry": [],
+  "exclude": [],
+  "route": [
+   "T13-01"
+  ],
+  "drop": [
+   "T13-06"
+  ]
+ },
+ "by_route": {
+  "known_bugs": [],
+  "pitfalls": [],
+  "kb_fix": [
+   "T13-01"
+  ],
+  "25.11": [],
+  "25.12": [],
+  "25.13": [],
+  "25.14": []
+ },
+ "reread": [
+  {
+   "id": "T13-01",
+   "changed": true
+  },
+  {
+   "id": "T13-02",
+   "changed": false
+  },
+  {
+   "id": "T13-04",
+   "changed": false
+  },
+  {
+   "id": "T13-06",
+   "changed": true
+  },
+  {
+   "id": "T13-10",
+   "changed": false
+  },
+  {
+   "id": "T13-11",
+   "changed": false
+  }
+ ],
+ "still_open": [
+  {
+   "id": "T13-10",
+   "confidence": "high",
+   "open_question": "旁支（不屬本痕跡）：resource_info/saf.md 說 mode 9 查的是「啟動時」從 FMER1.TMP／FMER2.TMP 載進來的混色表，但啟動時載入的是 MER1／MER2，FMER 是各戰鬥畫面進場時才讀入；是否需另開 kb_fix 未在此處理。"
+  }
+ ],
+ "pitfall_candidates": [],
+ "stopped": ""
+}

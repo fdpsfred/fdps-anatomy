@@ -1,0 +1,675 @@
+[
+ {
+  "id": "T13-01",
+  "trace_sha1": "983182abfc479594c8b98a94972b53952649b5df",
+  "from": "B1",
+  "verdict": "needs_correction",
+  "disposition": "route",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "kb_fix",
+  "title": "",
+  "kb_text": "",
+  "route_note": "`cut_content/battle_assets.md` 的 B1 把從 0 起算的名單索引寫成序數：「不算的部分」的「只在片尾名單出現（第 8、10、12 張卡片）」要改成「只在片尾名單索引 8、10、12 的卡片出現（索引從 0 起算：第 30 章結局是第 9、11、13 張，第 27 章結局跳過索引 3，才是第 8、10、12 張）」，「選檔邏輯」的「第 27 章的結局跳過名單第 3 格」要改成「跳過名單索引 3（第 4 人）」。",
+  "confidence": "high",
+  "conclusion": "`FIELD2.VFS` 全部 69 個 `ATTR*.DAT` 的每一列 `+3` byte 減 1 後都指不到 `BACK24`、`BACK30`、`BACK36`；這三張只由片尾名單 `fdps_play_ending_credit_roll`（`0x1ba40`）以「名單索引 × 3」載入，對應名單索引 8、10、12（從 0 起算，12 是名單 12 人之後多跑的那一趟）。事實本身 B1 的「不算的部分」已寫，但 trace 與 B1 都把索引寫成「第 8、10、12 張卡片」：第 30 章結局沒有跳格，實際是第 9、11、13 張；第 27 章結局跳過索引 3，才正好是第 8、10、12 張。B1「選檔邏輯」的「名單第 3 格」同樣是索引 3，即第 4 人。事實無需再落地，要修的是 B1 的序數寫法，所以轉給知識庫修正。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/ending.c:351",
+    "observation": "片尾迴圈 roster_index 從 0 跑到 data_fdps_roster_member_count（含）；第 27 章（CREDIT_CHAPTER_27_ID 0x1a）在索引 3 時改成 4，所以卡片是索引 0、1、2、4…12 共 12 張，索引 8 是第 8 張；其他結局（第 30 章，CREDIT_LAST_CHAPTER_ID 0x1d）是 0…12 共 13 張，索引 8 是第 9 張"
+   },
+   {
+    "source": "src",
+    "location": "src/ending.c:382",
+    "observation": "背景檔名為 sprintf(\"Back%02d.saf\", roster_index * 3)，從 BackGrnd.vfs 載入"
+   },
+   {
+    "source": "src",
+    "location": "src/chend2b.c:270",
+    "observation": "fdps_play_ending_credit_roll 的呼叫點只在 chend2b.c 兩處（270、411）"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001bc35",
+    "observation": "LEA EAX,[EAX+EAX*0x2] 後 PUSH，接著 PUSH 0x616d0（Back%02d.saf 格式字串），確認背景編號是索引 × 3"
+   },
+   {
+    "source": "src",
+    "location": "src/roster.c:363",
+    "observation": "fdps_roster_add_character 無條件把名單人數加 1；非示範的呼叫點只有第 1、2、3、4、7、8、9（兩次）、11、15、19、24 章 init 共 12 次，片尾名單固定 12 人，背景集合為 BACK00、03…36"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:72",
+    "observation": "戰鬥背景編號取自第 0 層 ATTR 的 +0x11 + 4*tile_id 列的 combat_backdrop_id（+3 byte）"
+   },
+   {
+    "source": "data",
+    "location": "FIELD2.VFS/ATTR*.DAT@0x11+4n+3",
+    "observation": "逐檔依 +7 的列數重掃 69 個 ATTR 檔：減 1 後未被任何列指到的背景是 16、24、30、31、36、41、42、51、57；24、30、36 落在片尾集合 0、3…36 內，剩 16、31、41、42、51、57"
+   },
+   {
+    "source": "data",
+    "location": "BACKGRND.VFS/BACK28.SAF@0",
+    "observation": "BACK28 與 BACK30 SHA-1 相同；BACK28 由 ATTR110、ATTR140 指到"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/battle_assets.md B1",
+    "observation": "B1 的「不算的部分」已寫：BACK24、BACK30、BACK36 沒有地形列指到，只在片尾名單出現（第 8、10、12 張卡片）；「選檔邏輯」寫「第 27 章的結局跳過名單第 3 格」"
+   }
+  ],
+  "corrected_trace": "BACK24、BACK30、BACK36 沒有任何 ATTR 列指到，只在片尾名單索引 8、10、12 的卡片載入（索引從 0 起算：第 30 章結局是第 9、11、13 張，第 27 章結局跳過索引 3，是第 8、10、12 張）。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一位讀者判定事實成立、已被 B1 吸收，並把「第 8、10、12 張卡片」其實是從 0 起算的名單索引一事留作待決問題。重讀 src/ending.c 的迴圈後這不是待決問題而是已可確定的寫法錯誤：第 30 章結局這三張是第 9、11、13 張，只有第 27 章結局因跳過索引 3 才是第 8、10、12 張，B1 的「名單第 3 格」也是同樣的索引誤作序數，因此 verdict 改為 needs_correction，去向改為轉給知識庫修正 B1 的序數寫法（與 T13-02 對同一件事的更正一致）。",
+  "trace": "BACK24、BACK30、BACK36 沒有任何 ATTR 列指到，只會在結尾名單出現（名單第 8、10、12 張卡片）。"
+ },
+ {
+  "id": "T13-02",
+  "trace_sha1": "d89980a592f55aa13e34a98e6c040a1462dfae36",
+  "from": "B1",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "B1",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`BACKGRND.VFS` 的 `BACK28` 與 `BACK30` 逐 byte 相同（都是 24,535 byte，SHA-1 相同），是 63 張裡唯一的一組重複；沒有任何 `ATTR*.DAT` 列指到 `BACK30`，它只由 `fdps_play_ending_credit_roll`（`0x1ba40`）在名單索引 10 時載入（`Back%02d` 取索引 × 3），而 `BACK28` 由 `ATTR110`、`ATTR140` 的地形列指到。這件事 B1 的「不算的部分」已經寫明，所謂「第 10 張」是從 0 起算的名單索引：好結局實際是第 11 張卡片，第 27 章結局跳過索引 3 後才是第 10 張。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/ending.c:351",
+    "observation": "片尾迴圈 roster_index 從 0 跑到 data_fdps_roster_member_count（含）；第 27 章（0x1a）在索引 3 時跳到 4（ending.c:96-97 的 CREDIT_SKIPPED_ROSTER_SLOT 3 / CREDIT_SKIP_TO_ROSTER_SLOT 4）"
+   },
+   {
+    "source": "src",
+    "location": "src/ending.c:382",
+    "observation": "背景檔名 sprintf(\"Back%02d.saf\", roster_index * 3)（CREDIT_BACKDROP_ID_STEP 3），所以索引 10 載入 BACK30"
+   },
+   {
+    "source": "src",
+    "location": "src/maptile.c:78",
+    "observation": "combat_backdrop_id 唯一的來源是第 0 層 ATTR 列的 +3 byte；combat.c:875-889 與 cmbspell.c:419-423 大於 0 時減 1 後組 Back%02d"
+   },
+   {
+    "source": "ghidra",
+    "location": "000616d0",
+    "observation": "\"Back%02d.saf\" 只被 fdps_combat_play_attack_exchange（00018ff2 等）、fdps_combat_play_spell_on_targets（0001a8a0）、fdps_play_ending_credit_roll（0001bc39）引用"
+   },
+   {
+    "source": "data",
+    "location": "BACKGRND.VFS/BACK28.SAF@0x0",
+    "observation": "與 BACK30.SAF 同為 24,535 byte、SHA-1 相同；63 個 BACK*.SAF 中唯一的重複組"
+   },
+   {
+    "source": "data",
+    "location": "FIELD2.VFS/ATTR*.DAT@0x11+4n+3",
+    "observation": "69 個 ATTR 檔每一列換算後，BACK28 由 ATTR110、ATTR140 指到，BACK30 沒有任何列指到"
+   }
+  ],
+  "corrected_trace": "`BACK30` 與 `BACK28` 逐 byte 相同；`BACK30` 沒有地形列指到，唯一的用途是片尾名單索引 10 的卡片（從 0 起算：好結局的第 11 張，第 27 章結局跳過索引 3 後的第 10 張）。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二讀確認：BACKGRND 解包目錄重算 SHA-1，BACK28/BACK30 同為 24535 byte 且是 63 張中唯一重複組；ending.c 片尾迴圈 roster_index 0..人數（含）、Back%02d 取索引×3、第 27 章（0x1a）跳過索引 3，故索引 10 是好結局第 11 張、第 27 章第 10 張；B1「不算的部分」已寫明此事，absorbed 成立，B1 的卡片序數寫法問題已由 T13-01 的 open_question 帶出。",
+  "trace": "BACK30 與 BACK28 內容相同，BACK30 唯一的用途是結尾名單第 10 張卡片。"
+ },
+ {
+  "id": "T13-03",
+  "trace_sha1": "64b82600ae020078fee0aace24f5ee92ecdcdc9e",
+  "from": "B2",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "U09",
+  "topic": "",
+  "category": "excluded",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`MAP04.DAT` 第 32 筆（陣營 0、肖像 `0x5B`=91）的法術遮罩是 `0x00`、`0x08`、`0x0F`，`MAP21.DAT` 第 8 筆（肖像 `0x53`=83）含 `0x00`、`0x01`、`0x08`、`0x09`（另有地圖演出的 `0x0E`、`0x12`），`MAP17.DAT` 第 33 筆（肖像 `0x75`=117）含 `0x00`、`0x01`、`0x02`（另有 `0x0A`、`0x0B`、`0x0E`–`0x10`）；這些不在地圖演出組裡的法術若以戰鬥動畫施放，`fdps_combat_play_spell_on_targets` 會以肖像編號載入 `FIGHT.VFS` 的 `STAND`／`MAGIC`，而 `FIGHT.VFS` 確實沒有 `MAGIC083`、`MAGIC091`、`MAGIC117` 與 `STAND117`（`STAND083`、`STAND091` 存在）。這件事已由排除清單 U09 完整記載（三筆都是不上戰鬥畫面的過場演員或 AI 不施法的單位，屬原版潛在當機路徑而非刪減），不需另立條目。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:338",
+    "observation": "法術 0x0E–0x16、0x0A、0x0B、0x18、0x21 交給 fdps_cast_spell_on_targets 後 return，不載入 Stand/Magic；0x00、0x01、0x02、0x08、0x09 不在此組"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:405",
+    "observation": "sprintf(clip_name, \"Stand%03d.saf\", caster->portrait_id) 從 FIGHT_ARCHIVE 載入施法者站姿"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:410",
+    "observation": "sprintf(clip_name, \"Magic%03d.saf\", caster->portrait_id) 從 FIGHT_ARCHIVE 載入施法動畫"
+   },
+   {
+    "source": "src",
+    "location": "src/unit.h:155",
+    "observation": "法術位元是 spell_id / 8 那個 byte 的第 spell_id % 8 位（LSB 起算），據此解讀部署記錄遮罩"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP04.DAT@0x3c3",
+    "observation": "第 32 筆：陣營 0、肖像 0x5B、Lv8、波次 2，遮罩 +0x0D..+0x10,+0x19 = 01 81 00 00 00 → 0x00、0x08、0x0F"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP21.DAT@0x153",
+    "observation": "第 8 筆：陣營 0、肖像 0x53、Lv19、波次 1，遮罩 03 43 04 00 00 → 0x00、0x01、0x08、0x09、0x0E、0x12；同圖其他 18 筆肖像 0x53 的遮罩全空"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP17.DAT@0x3dd",
+    "observation": "第 33 筆：陣營 0、肖像 0x75、Lv5、波次 0，遮罩 07 CC 01 00 00 → 0x00、0x01、0x02、0x0A、0x0B、0x0E、0x0F、0x10"
+   },
+   {
+    "source": "data",
+    "location": "FIGHT.VFS@0x49b",
+    "observation": "原版 FIGHT.VFS 目錄有 MAGIC113（0x49b）、STAND083（0xa99）、STAND091（0xb69）、STAND116（0xdf3）、STAND118（0xe0d），全檔找不到 MAGIC083、MAGIC091、MAGIC117、STAND117"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/_index.md U09",
+    "observation": "排除清單 U09 已列出 FIGHT.VFS 缺 STAND117 與 MAGIC083、091、117，並逐一說明 0x75（MAP17 第 33 筆，ICON17）、0x5B（MAP04 第 32 筆，ICON04）是退場的過場演員、0x53（MAP21 第 8 筆）MP 係數 0 AI 略過每個法術"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "部署記錄中肖像 91（MAP04.DAT 第 32 筆：0x00、0x08、0x0F）、肖像 83（MAP21.DAT 第 8 筆：0x00、0x01、0x08、0x09）與肖像 117（MAP17.DAT 第 33 筆：0x00、0x01、0x02）帶有會進戰鬥畫面的法術，但 Fight.vfs 沒有 MAGIC083、MAGIC091、MAGIC117（也沒有 STAND117）。"
+ },
+ {
+  "id": "T13-04",
+  "trace_sha1": "d201ec1f955d5a85ba70c9033d67c9dd38c8108d",
+  "from": "B2",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "U07",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`FRIAPRDA.DAT` 索引 `15`（21）與 `1F`（31）的法術遮罩確實帶 `06` 奔雷彈，而這張表只經 `fdps_get_character_base_record`（`0x18ab0`）在部署與入隊時以角色編號讀取；入隊只傳 `00`–`0C`，63 個 `MAP%02d.DAT` 的每一個 26 byte 槽（含筆數以外的尾巴）也沒有 `15`、`16`、`1F`，所以這兩筆遮罩永遠不會進入任何單位，這正是 units.md U07 已寫的內容。trace 裡「肖像 22 的習得索引為 `0xFF`」這一半說錯了檔與讀取路徑：習得索引在 `FRILEVUP.DAT`（`+0xFC` 為 `FF`）而不是 `FRIAPRDA.DAT`，而且型態 `16`（22）是 `RANKUP.DAT` 的轉職目標，升級時會以目前肖像讀到這一列，是使用中的「不學法術」型態（U08 已列入），不是只有入隊或部署才讀的死資料。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MISC.VFS/FRIAPRDA.DAT@0x1f8",
+    "observation": "索引 0x15 記錄：00 08 0f 80 02 c8 00 09 40 00 00 00 2d 69 ...，+8 起的法術遮罩 40 00 00 00，即位元 6 = 法術 0x06"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/FRIAPRDA.DAT@0x2e8",
+    "observation": "索引 0x1F 記錄與 0x15 逐 byte 相同，遮罩同樣是 40 00 00 00"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/FRIAPRDA.DAT@0x210",
+    "observation": "索引 0x16 是通用填充列（職業 03、遮罩 00000000），沒有習得索引欄位"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/FRILEVUP.DAT@0xf2",
+    "observation": "型態 0x16 成長列 0b 0e 09 0e 03 03 0e 14 03 04 ff，最後一 byte（@0xFC）習得索引 0xFF；型態 0x15 的習得索引是 0x15、0x1F 是 0xFF"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/RANKUP.DAT@0x57",
+    "observation": "路線槽 16 14 01：型態 0x16 是轉職可進入的型態；0x15（@0x48）、0x1F（@0x54）同樣是轉職目標"
+   },
+   {
+    "source": "src",
+    "location": "src/table.c:36",
+    "observation": "fdps_get_character_base_record 以 char_id*0x18 取 FRIAPRDA 記錄，無其他讀法"
+   },
+   {
+    "source": "ghidra",
+    "location": "00018ab0",
+    "observation": "只有兩個呼叫點：0002353b（fdps_deploy_unit）與 00023bf3（fdps_roster_add_character）"
+   },
+   {
+    "source": "src",
+    "location": "src/roster.c:344",
+    "observation": "入隊時把 FRIAPRDA 記錄的 spell_mask 四 byte 抄進隊員的已學法術"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:420",
+    "observation": "標題示範與 chinit1.c:22–824、chinit1b.c:27/428、chinit2.c:390/1033 的入隊常數全落在 0–12"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.c:970",
+    "observation": "升級以單位目前的 portrait_id 取 FRILEVUP 成長列，unitstat.c:1038 讀其習得索引；所以轉職到 0x16 後會讀到 0xFF 那一列"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP00.DAT@0x83",
+    "observation": "掃 63 個 MAP%02d.DAT 從 0x83 起每一個 26 byte 槽（含筆數以外的尾巴），小於 0x3C 的角色編號只有 00–0E、23–27、3B，沒有 15、16、1F"
+   }
+  ],
+  "corrected_trace": "`FRIAPRDA.DAT` 索引 `15`（21）與 `1F`（31）的初始法術遮罩帶 `06` 奔雷彈，但這張表只在以該角色編號部署或入隊時讀取；入隊常數只有 `00`–`0C`，所有 `MAP%02d.DAT` 部署記錄也沒有 `15`、`1F`，而轉職只重讀 `FRILEVUP.DAT`，所以這兩筆遮罩永遠用不到。型態 `16`（22）的習得索引 `FF` 在 `FRILEVUP.DAT`，那一列會在轉職進 `16` 後的升級時被讀到，是正常使用中的不學法術型態。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "已確認：重讀 FRIAPRDA／FRILEVUP／RANKUP 原始 byte（索引 15、1F 遮罩 40000000，型態 16 習得索引 FF 在 FRILEVUP@0xFC，RANKUP@0x57 轉入 16）、src/roster.c 與 src/deploy.c（部署的法術遮罩取自部署記錄、不讀 FRIAPRDA 遮罩）、src/unitstat.c 以目前肖像讀習得索引、src/church.c 只讀 FRILEVUP，Ghidra 0x18ab0 僅兩個呼叫端；遮罩部分已由 U07 完整記載、型態 16 屬 U08 所列使用中的不學法術型態，absorbed U07 與 needs_correction 成立。",
+  "trace": "FRIAPRDA.DAT 肖像 21、31 的初始遮罩帶 0x06、肖像 22 的習得索引為 0xFF，但這幾筆只在以該 char_id 入隊或部署時才會被讀，而入隊常數只有 0–12。"
+ },
+ {
+  "id": "T13-05",
+  "trace_sha1": "36f5d6aa2d78c20c29119d26cd2cc5bb5001a1e7",
+  "from": "B2",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "C15",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`magic0gg.saf`（`0x31098`）與 `magic0bb.saf`（`0x310ac`）是 `fdps_church_promote_unit`（`src/church.c`）的自動陣列 `effect_names` 的 40 byte 初值範本，教會轉職動畫依新職業碼查 25 格表取其一，從 `MISC.VFS` 載入轉職效果；兩個成員都存在且都有轉職路線會選到，不是刪減或未用內容。此事實已由 code.md 的 C15 記載（並見 program_info/village.md 的轉職動畫段）。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/church.c:189",
+    "observation": "char effect_names[2][20] = {\"magic0gg.saf\", \"magic0bb.saf\"}; effect_by_class 25 格中 8 格為 1（選 magic0bb）"
+   },
+   {
+    "source": "src",
+    "location": "src/church.c:256",
+    "observation": "effect_clip = fdps_vfs_load_entry(EFFECT_ARCHIVE, effect_names[effect_by_class[new_class_id]]) 載入轉職效果"
+   },
+   {
+    "source": "ghidra",
+    "location": "00031098",
+    "observation": "xref 來自 00034c41（DATA）與 00034c46（READ），都在 fdps_church_promote_unit；內容為 \"magic0gg.saf\" 補零到 20 byte，接著 0x310ac 的 \"magic0bb.saf\" 補零到 20 byte"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/MAGIC0GG.SAF@0x0",
+    "observation": "成員存在，258,636 byte；MAGIC0BB.SAF 亦存在，223,430 byte"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/code.md C15",
+    "observation": "C15 已寫明 magic0bb.saf 是 effect_names 範本第二格、範本由 0x34c41 載入並以新職業碼選格，MISC.VFS 有 MAGIC0BB.SAF"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "FDPS.LE 另有字串 magic0gg.saf（00031098）與 magic0bb.saf（000310ac），與 Magic%03d 無關，本次未追查其用途。"
+ },
+ {
+  "id": "T13-06",
+  "trace_sha1": "111d28998c183ba696846ec2ad0f5757789e619f",
+  "from": "B3",
+  "verdict": "refuted",
+  "disposition": "drop",
+  "entry": "",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "AI 物理攻擊後確實把經驗發給被攻擊的目標，但待發經驗只在出手者陣營為 2（玩家方）時才會被設成非零（unitatk.c 與 combat.c 兩條計算路徑都以 side == 2 把關），NPC（陣營 1）的出手與敵方（陣營 0）的反擊都不會產生經驗；fdps_unit_award_exp_and_level_up 的第一道關卡在待發經驗為 0 時直接返回，所以敵方單位不會因 NPC 攻擊而升級或讀取 FRILEVUP／GETMGTAB。此痕跡描述的情境不存在，且與刪減內容無關。待發經驗也不會由交手後的死亡腳本殘留下來：唯一會設定它的過場 opcode 0x61 只出現在 WinGA26.dat，由第 27 章的 end 處理函式在 main 的外層迴圈（戰鬥迴圈返回之後）播放，不可能在 fdps_map_actor_move_and_attack 的死亡腳本與發經驗之間執行。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/aiact.c:161",
+    "observation": "fdps_map_actor_move_and_attack 在交手前把 data_fdps_battle_pending_xp_credit 清為 0。"
+   },
+   {
+    "source": "src",
+    "location": "src/aiact.c:207",
+    "observation": "交手後以 data_fdps_battle_ai_best_physical_target_idx（被攻擊者）呼叫 fdps_unit_award_exp_and_level_up，經驗確實發給目標。"
+   },
+   {
+    "source": "src",
+    "location": "src/unitatk.c:566",
+    "observation": "fdps_unit_attack_target（無動畫路徑）只在 attacker->side == PLAYER_SIDE（=2）且目標肖像 >= 0x3c 時設定待發經驗。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001ca07",
+    "observation": "CMP EAX,0x2 / JNZ 0x0001ca1c：出手者陣營 byte（+0x6）不為 2 就跳過整段經驗計算，與 src 一致。"
+   },
+   {
+    "source": "src",
+    "location": "src/combat.c:299",
+    "observation": "動畫路徑的經驗計算條件為 attacker->side == 2 && defender->side == 0；陣營 1 出手不付經驗。"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.c:951",
+    "observation": "fdps_unit_award_exp_and_level_up 在 data_fdps_battle_pending_xp_credit == 0 時立即返回，不碰 exp_carry、不升級、不讀成長表。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001dd61",
+    "observation": "CMP dword ptr [0x00069cec],0x0 / JZ：待發經驗為 0 即跳走，與 src 一致。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:325",
+    "observation": "fdps_battle_npc_turn_phase 只把陣營 1 的單位交給 fdps_map_actor_behavior_step，NPC 回合的出手者全是陣營 1。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1103",
+    "observation": "過場 opcode 0x61 是 src 中除戰鬥交手外唯一設定待發經驗的腳本路徑；icon.c:784 的註解與 resource_info/cutscene_script.md 的計數都指出只有 WinGA26.dat 使用它。"
+   },
+   {
+    "source": "src",
+    "location": "src/main.c:672",
+    "observation": "end 處理函式表（含播放 WinGA26.dat 的 chend2b.c）只在 fdps_battle_player_phase_loop 返回、結束碼為章節過關後才被呼叫，不在戰鬥中的死亡腳本路徑上。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_supersedes": "第一次判讀已正確駁回此痕跡（NPC 與敵方都不是陣營 2，交手不產生待發經驗，發經驗函式在 0 時直接返回），但留下一個開放問題：死亡腳本若經 opcode 0x61 殘留待發經驗，可能流到 aiact.c 的目標。複讀確認 0x61 只存在於 WinGA26.dat，而它由第 27 章的 end 處理函式在 main 外層迴圈於戰鬥結束後播放，不在死亡腳本與發經驗之間，因此此路徑不存在；駁回結論與處置不變，只關閉開放問題並補上證據。",
+  "trace": "AI 物理攻擊後經驗值發給被攻擊的目標（aiact.c:207），若 NPC（陣營 1）攻擊存活的敵方單位，fdps_unit_award_exp_and_level_up 不檢查陣營，敵方單位可能以 exp_carry 0xff 起算而升級並讀取肖像編號對應的 FRILEVUP／GETMGTAB。"
+ },
+ {
+  "id": "T13-07",
+  "trace_sha1": "c22428e18942eb8c6fed642f10056beb6cc2f9c2",
+  "from": "B3",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "B5",
+  "topic": "",
+  "category": "stub",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "`MISC.VFS` `ME05` 是落雷術（`0x05`）非敵方陣營（我方與 NPC 共用 `M` 前綴）演出的第三段收尾，66 byte，與 `EE05` 逐 byte 相同（也與 `ME04` 等其餘 15 個 12 tick 空殼相同）。此事實已由 B5 陳述：B5 列出 `ME03`–`ME07` 為空殼，並說 16 個逐 byte 相同、只有 `ME34` 不同。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MISC.VFS/ME05.SAF@0x0",
+    "observation": "長度 66 byte，SHA1 03485DC7491966758E7E0E93A0187742DC40A39D"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/EE05.SAF@0x0",
+    "observation": "長度 66 byte，SHA1 與 ME05 相同（03485DC7...），也與 ME04 相同；ME34 的 SHA1 不同（457B1AE5...）"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:376",
+    "observation": "caster->side == ENEMY_SIDE 用前綴 'E'，其餘陣營（我方與 NPC）用 'M'；src/cmbspell.c:389 以 \"%sE%02d.saf\" 組出第三段檔名並從 MISC 載入"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/battle_assets.md B5",
+    "observation": "B5 已列 ME03–ME07 為 66 byte 空殼、16 個逐 byte 相同、ME34 停留 15 tick 不同"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "玩家版落雷術收尾片段 ME05.SAF 同樣是 66 byte 空殼，與 EE05 逐 byte 相同。"
+ },
+ {
+  "id": "T13-08",
+  "trace_sha1": "e4367ce32726178354125282f017296250495979",
+  "from": "B5",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "B3",
+  "topic": "",
+  "category": "residual",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "落雷術（0x05）敵方版的前兩段 MISC.VFS EB05（28,179 byte）與 EL05（35,162 byte）是完整動畫，fdps_combat_play_spell_on_targets 只在施法者為陣營 0 時以 E 前綴組名載入；63 個 MAP*.DAT 的全部部署記錄（含超出筆數的尾巴）中陣營 0 的法術聯集沒有 05，帶 05 的兩筆都是陣營 2，所以這兩個檔永遠不會被載入。這正是 battle_assets.md B3 的內容，該條已完整陳述選檔邏輯、法術聯集與其他取得途徑的排除。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:376",
+    "observation": "caster->side == ENEMY_SIDE（0）時前綴為 'E'，否則 'M'（cmbspell.c:93-94、376-382）。"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:385",
+    "observation": "以 %sB%02d、%sL%02d、%sE%02d 從 MISC.VFS 無條件載入三段；0x05 不在 cmbspell.c:338 的地圖演出法術組裡。"
+   },
+   {
+    "source": "ghidra",
+    "location": "0001a675",
+    "observation": "CMP byte ptr [EAX+0x6],0x0 / JNZ：施法者陣營欄與 0 比較，決定擊退方向與前綴。"
+   },
+   {
+    "source": "src",
+    "location": "src/deploy.c:334",
+    "observation": "敵方單位已學法術照抄部署記錄 spell_mask（+0x0d 四 byte）與 spell_mask_high（+0x19）。"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP03.DAT@0x83",
+    "observation": "逐檔掃描 63 個 MAP*.DAT 自 +0x83 起每筆 0x1a byte 的全部記錄（含超出 header 筆數者）：陣營 0 法術聯集 00 01 02 06 07 08 09 0A 0B 0D 0E 0F 10 11 12 14 17 20 21 25，無 05；帶 05 的只有 MAP03 第 21 筆（陣營 2、角色 1、Lv8）與 MAP23 第 10 筆（陣營 2、角色 10、Lv15）。"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/EB05.SAF@0x0",
+    "observation": "EB05.SAF 28,179 byte、EL05.SAF 35,162 byte，為完整動畫；EE05.SAF 為 66 byte 空殼（B5）。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/battle_assets.md B3",
+    "observation": "B3「敵方版落雷術」已記載 EB05、EL05 的內容、選檔邏輯、陣營 0 法術聯集無 05、GETMGTAB 與其他 fdps_set_flag_bit 呼叫點都給不到 05、沒有把單位改成陣營 0 的路徑。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "敵方落雷術的完整演出 EB05、EL05 同樣因為沒有陣營 0 單位帶法術 0x05 而永遠不會被載入。"
+ },
+ {
+  "id": "T13-09",
+  "trace_sha1": "8fb4ba6bfee17b03c5bf826d37b66ca61061796d",
+  "from": "B5",
+  "verdict": "holds",
+  "disposition": "absorbed",
+  "entry": "B5",
+  "topic": "",
+  "category": "stub",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MISC.VFS 的 17 個 66 byte 空殼 SAF 中，16 個逐 byte 相同、唯一畫格停留 12 tick（0x000c）；ME34 只有停留欄不同，為 15 tick（0x000f）。B5 已寫明「16 個逐 byte 相同，唯一的畫格停留 12 tick；ME34 停留 15 tick」，本條無需落地。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "MISC.VFS/ME34.SAF@0x3a",
+    "observation": "畫格記錄 @0x38 為 ff ff 0f 00 00 00：停留 0x000f = 15 tick，layer 數 0；sha1 457b1ae587…，與其他 16 個不同。"
+   },
+   {
+    "source": "data",
+    "location": "MISC.VFS/EE05.SAF@0x3a",
+    "observation": "EE05、EE06、EE07、EE23、ME03–ME07、ME26–ME28、ME30、ME31、ME35、ME39 共 16 個 66 byte 檔 sha1 皆為 03485dc749…，@0x38 為 ff ff 0c 00 00 00：停留 12 tick。"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:389",
+    "observation": "sprintf(clip_name, FINISH_CLIP_FORMAT, clip_prefix, spell_id)，FINISH_CLIP_FORMAT 為 \"%sE%02d.saf\"（cmbspell.c:77），這些空殼是法術演出第三段。"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/battle_assets.md B5",
+    "observation": "B5 的「是什麼」已寫 16 個逐 byte 相同停留 12 tick、ME34 停留 15 tick；「為什麼沒有內容」也寫特效層空白 12（或 15）tick。"
+   }
+  ],
+  "corrected_trace": "",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "trace": "ME34.SAF 與其他 16 個空殼不完全相同，唯一的 frame 停留 15 tick 而非 12 tick。"
+ },
+ {
+  "id": "T13-10",
+  "trace_sha1": "4d4aee97862b7f02d407f9403fa526e566fcdafb",
+  "from": "B6",
+  "verdict": "needs_correction",
+  "disposition": "absorbed",
+  "entry": "B6",
+  "topic": "",
+  "category": "none",
+  "route": "none",
+  "title": "",
+  "kb_text": "",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "Fight.pal 算出的 FMer1.tmp／FMer2.tmp 確實會被讀回：攻擊演出、法術演出、教會轉職與片尾名單各以自己那份同名字面值（0x61690、0x61f64）開檔讀回，fdps_load_global_resources 那份（0x61dc0）只在寫出與 access() 判斷處。main.c 註解「寫了沒人讀」的錯誤結論已由 commit 5aa2252（票 25.15）改正，現行註解與 battle_assets.md B6 都已寫明四處讀回，沒有剩下要落地的東西。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/main.c:333",
+    "observation": "現行註解寫 Fight.pal 那組不在這裡讀，而是由 combat.c、cmbspell.c、church.c、ending.c 各用自己那份字串讀回；git show 5aa2252 顯示舊版寫的是 'written and then read by nothing at all'"
+   },
+   {
+    "source": "src",
+    "location": "src/combat.c:821",
+    "observation": "fopen(FIGHT_SHADE_RAMP_FILE=\"FMer1.tmp\")，825 行讀 FMer2.tmp"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:351",
+    "observation": "fopen FMer1.tmp，355 行 FMer2.tmp"
+   },
+   {
+    "source": "src",
+    "location": "src/church.c:227",
+    "observation": "fopen FMer1.tmp，231 行 FMer2.tmp"
+   },
+   {
+    "source": "src",
+    "location": "src/ending.c:332",
+    "observation": "fopen FMer1.tmp，338 行 FMer2.tmp"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061690",
+    "observation": "\"FMer1.tmp\" 另一份，xref 來自 fdps_combat_play_spell_on_targets 0001a578、fdps_combat_play_attack_exchange 00018d8a、fdps_play_ending_credit_roll 0001ba90"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061f64",
+    "observation": "第三份 \"FMer1.tmp\"，xref 來自 fdps_church_promote_unit 00034c4e"
+   },
+   {
+    "source": "ghidra",
+    "location": "00061dc0",
+    "observation": "main 用的那份只被 fdps_load_global_resources（00029f96、00029fc0）引用"
+   },
+   {
+    "source": "investigation",
+    "location": "cut_content/battle_assets.md B6",
+    "observation": "B6 最後一條已寫 FMER1／FMER2 由攻擊演出、法術演出、教會轉職與片尾名單各以自己那份同名字面值開檔讀回"
+   }
+  ],
+  "corrected_trace": "src/main.c 的 fdps_load_global_resources 註解原本說 Fight.pal 算出的 FMer1.tmp／FMer2.tmp 寫出後沒有程式讀回，這是錯的：combat.c、cmbspell.c、church.c、ending.c 都用另外兩份同名字串（0x61690、0x61f64）fopen 讀回。這個註解已在票 25.15 改正，現行版本正確。",
+  "pitfall_candidate": "",
+  "open_question": "旁支（不屬本痕跡）：resource_info/saf.md 說 mode 9 查的是「啟動時」從 FMER1.TMP／FMER2.TMP 載進來的混色表，但啟動時載入的是 MER1／MER2，FMER 是各戰鬥畫面進場時才讀入；是否需另開 kb_fix 未在此處理。",
+  "_reread": "已複核：現行 src/main.c fdps_load_global_resources 註解已寫明四處讀回；combat.c、cmbspell.c、church.c、ending.c 各以 fopen 讀 FMer1.tmp；Ghidra 0x61690 的 xref 落在攻擊、法術、片尾三支，0x61f64 落在 fdps_church_promote_unit，0x61dc0 只在 fdps_load_global_resources；battle_assets.md B6 與 pitfalls 已涵蓋，absorbed 至 B6 成立。",
+  "trace": "src/main.c:325-336 的註解說 Fight.pal 算出的 FMER1/FMER2 寫出後沒有程式讀回，但 combat.c:821、cmbspell.c:351、church.c:227、ending.c:332 都用另外幾份同名字串 fopen 讀回，註解的結論是錯的。"
+ },
+ {
+  "id": "T13-11",
+  "trace_sha1": "19fe642187eb31893512a785466d6ee5d22ceb14",
+  "from": "B6",
+  "verdict": "needs_correction",
+  "disposition": "addendum",
+  "entry": "B3",
+  "topic": "",
+  "category": "negative",
+  "route": "none",
+  "title": "",
+  "kb_text": "落雷術的我方版 `MB05`、`ML05`、`ME05` 有路徑：帶 `05` 的那兩筆陣營 2 記錄由玩家操作，法術指令 `fdps_battle_spell_command`（`0x27c20`）一律走戰鬥演出，陣營不是 0 就用 `M` 前綴。地圖演出版 `EMG05` 不經過法術：`fdps_cast_spell_on_targets`（`0x288f0`）只在 AI 關閉戰鬥動畫時才替 `0x05` 組名，而陣營 0、1 沒有人帶 `05`；`EMG05` 實際由雷系道具與武器的使用效果（`src/item.c` `fdps_apply_item_effect_to_targets`（`0x262a0`），雷之珠等四種雷系道具）播放。",
+  "route_note": "",
+  "confidence": "high",
+  "conclusion": "MAP03.DAT 第 21 筆（法蓮娜 LV8）與 MAP23.DAT 第 10 筆（珊 LV15）是陣營 2、由玩家操作的記錄，法術遮罩帶 05，所以法蓮娜與珊施放落雷術時一定載入 MB05、ML05、ME05。EMG05 則與這兩筆記錄無關：玩家的法術指令從不走地圖演出，Emg%02d 的法術路徑只在陣營 0／1 的 AI 關閉動畫時才會替 05 組名，而這兩個陣營沒有人帶 05；EMG05 是由雷系道具與武器（use effect 02／08）播放的。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP03.DAT@0x2a5",
+    "observation": "第 21 筆部署記錄：陣營 2、角色 01 法蓮娜、LV8、波次 3；+0x0D 的遮罩 byte 為 0x20（@0x2b2），ascending bit order 下只有法術 05"
+   },
+   {
+    "source": "data",
+    "location": "FIELD.VFS/MAP23.DAT@0x187",
+    "observation": "第 10 筆部署記錄：陣營 2、角色 0A 珊、LV15、波次 6；遮罩 e0 10 00 00 + (+0x19) 01，法術 05、06、07、0C、20。全部 MAP*.DAT 帶 05 的只有這兩筆"
+   },
+   {
+    "source": "src",
+    "location": "src/unit.c:485",
+    "observation": "fdps_set_flag_bit 的位元表 01 02 04 08 …，法術 n 是第 n/8 byte 的 bit n%8，遮罩解讀方向因此成立"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:615",
+    "observation": "PLAYER_PHASE_SIDE 定義為 2：陣營 2 是玩家自己的單位（NPC 是 1、敵方是 0）"
+   },
+   {
+    "source": "src",
+    "location": "src/spellmnu.c:913",
+    "observation": "玩家法術指令確認後無條件呼叫 fdps_combat_play_spell_on_targets，不看戰鬥動畫開關"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:338",
+    "observation": "只有地圖演出的那組法術（0x0A、0x0B、0x0E–0x16、0x18、0x21）轉交 fdps_cast_spell_on_targets，05 不在其中"
+   },
+   {
+    "source": "src",
+    "location": "src/cmbspell.c:376",
+    "observation": "施法者陣營為 0 用 E 前綴，其餘用 M；接著以 %sB/%sL/%sE%02d.saf 從 MISC.VFS 載入三段，陣營 2 的落雷術因此載入 MB05、ML05、ME05"
+   },
+   {
+    "source": "src",
+    "location": "src/aiact.c:292",
+    "observation": "AI 施法在戰鬥動畫開啟時走 fdps_combat_play_spell_on_targets，關閉時才走 fdps_cast_spell_on_targets；後者 spell.c:683 以 Emg%02d.saf 組名，是法術路徑上唯一會組出 EMG05 的地方"
+   },
+   {
+    "source": "src",
+    "location": "src/item.c:210",
+    "observation": "THUNDER_EFFECT_CLIP 為 \"EMg05.saf\"，item.c:423 在 use effect 02（雷系消耗品）或 08（雷系武器）時以 fdps_play_vfs_animation_over_units 播放"
+   },
+   {
+    "source": "investigation",
+    "location": "assets/items.md",
+    "observation": "use effect 02 的道具是 C4 雷之珠、C9 雷之寶石、CE 雷之水晶、D3 雷之魔石；MAP03 (17,11) 的寶箱就有雷之珠（map_decode show 3）"
+   },
+   {
+    "source": "investigation",
+    "location": "chapters/ch04.md, chapters/ch24.md",
+    "observation": "法蓮娜由 ICON03.DAT 部署為波次 3、戰鬥中由玩家操作並在勝利時寫回名冊；珊在第 24 章第 7 回合以波次 6 到場、玩家操作"
+   }
+  ],
+  "corrected_trace": "玩家方陣營 2 的部署記錄（MAP03.DAT 第 21 筆法蓮娜、MAP23.DAT 第 10 筆珊）帶法術 05，所以落雷術的我方版 MB05／ML05／ME05 有路徑；EMG05 的路徑則不是這兩筆記錄給的——玩家施法一律走戰鬥演出，EMG05 由雷系道具與武器的使用效果播放。",
+  "pitfall_candidate": "",
+  "open_question": "",
+  "_reread": "第二次閱讀確認原判定：以 map_decode 重掃全部地圖，帶法術 05 的只有 MAP03 第 21 筆與 MAP23 第 10 筆且都是陣營 2；deploy.c 與 btlturn.c 的 PLAYER_SIDE 為 2；spellmnu.c 的 fdps_battle_spell_command（0x27c20）無條件走 fdps_combat_play_spell_on_targets，05 不在 cmbspell.c 轉交地圖演出的那組，陣營非 0 用 M 前綴；Emg%02d 只在 aiact.c 動畫關閉時經 fdps_cast_spell_on_targets（0x288f0）組名，EMg05 由 item.c 使用效果 02／08（四種雷系消耗品與雷神之劍、雷之槍）播放；addendum 掛 B3、kb_text 無流程字與行號。",
+  "trace": "玩家方陣營 2 的部署記錄（地圖 3 第 21 筆、地圖 23 第 10 筆）帶法術 05，所以 MB05/ML05/ME05 與 EMG05 仍有路徑。"
+ }
+]
