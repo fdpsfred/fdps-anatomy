@@ -156,22 +156,27 @@ const CATEGORIES = `The classes, from CONTEXT.md "刪減與未用" and the rules
 ${CUT}\\_index.md (read both once).  A trace belongs to exactly one:
 
   residual              殘留內容  finished content (assets, numbers, script or code
-                                  complete enough to work) that no game path reaches.
-                                  Also: an unused member of one of the GAME'S OWN
-                                  modules, and FD2 code or data that FDPS rewrote
-                                  but never enabled
+                                  complete enough to work) that no game path reaches
   stub                  空殼      the mechanism, field or slot exists but nothing was
                                   put in it.  Residual lacks a path; a stub lacks content
   sealed                被封住的內容  content AND the path to it both exist, but an original
                                   bug keeps the player from getting or seeing it
-  predecessor_leftover  前作遺留  code or data inherited from FD2 UNCHANGED that does
-                                  nothing in FDPS; needs an FD2-side comparison to claim
-                                  (rewritten by FDPS -> residual instead)
+  predecessor_leftover  前作遺留  code or data inherited UNCHANGED from FD2 that does
+                                  nothing in FDPS; needs an FD2-side comparison.  If
+                                  FDPS rewrote it and still never enabled it, it is
+                                  residual, not predecessor_leftover.  "Different from
+                                  FD2" is NOT "rewritten by FDPS": the change may have
+                                  been made in some work between the two games.  Only
+                                  evidence that the change happened in FDPS (it uses
+                                  something only FDPS has) makes it residual; without
+                                  that it stays predecessor_leftover
   negative              否定性結論  a verified statement that something does NOT exist
   excluded              排除      real, but belongs to no class: compiler output, unused
                                   API of a THIRD-PARTY library (Watcom CRT, Miles AIL),
-                                  unreachable defensive branches, a data-entry error,
-                                  a feature in use
+                                  unreachable defensive branches, a data-entry error, a
+                                  feature in use.  Finished but uncalled members of the
+                                  game's own modules (transitions, audio wrapper, MSCDEX
+                                  layer, VFS reader, blitter...) are residual, not excluded
   none                  not a cut-content matter at all (a bug's mechanism, a
                         documentation error, a plain fact about how the game works)`
 
