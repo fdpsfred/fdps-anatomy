@@ -7,7 +7,7 @@
 | `fdps_build/build_min.py` | 把 DOSBox-X 跑起來的機制：前置檢查、conf 產生、三訊號結束偵測、故障掃描 | 所有在 DOSBox-X 裡建置或執行的工作 |
 | `ail_link/link_ail.py` | AIL 的七條 alias 與 SB16 參數 | `code_emit`、`game_build` |
 | `code_emit/build_emit.py` | `src/` 的原始碼掃描與反編譯器預設名稱檢查 | `game_build`、`build_gate` |
-| `data_emit/check_data.py` | LE 映像解析、wlink map 解析、Ghidra 快照的名稱表 | `game_build` |
+| `data_emit/check_data.py` | LE 映像解析、wlink map 解析、Ghidra 快照的名稱表 | `game_build`、`game_mechanics` |
 | 各工作的建置函式 | 各建置目標怎麼建 | `build_gate` |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
 
@@ -29,6 +29,7 @@
 | [`data_skill/`](data_skill/_index.md) | 產生 `fdps-data` 查詢 skill 的資料集，並對知識庫的表逐列驗證 |
 | [`fdps_build/`](fdps_build/_index.md) | 在 DOSBox-X 內全自動編譯、連結並執行的建置流程，以及驗證這套工具鏈可用的最小程式 |
 | [`game_build/`](game_build/_index.md) | 遊戲本體的建置（只編 `src/`，連結成 `FDE.EXE`）、原版與重建版並排遊玩的啟動器、當機位址到 function 的定位（票 24） |
+| [`game_mechanics/`](game_mechanics/_index.md) | `program_info/` 遊戲機制頁的全自動 workflow：一頁一個 agent 起草、回掃、原版 bug 目錄、閘門通過才逐 byte 落地、踩雷點候選逐條判定後由腳本寫入共用頁（票 25.5 專屬的 workflow） |
 | [`ghidra_baseline/`](ghidra_baseline/_index.md) | 複查 Ghidra 基準狀態：區塊屬性、孤立程式碼、未反組譯區域、error bookmark |
 | [`global_data/`](global_data/_index.md) | 全域資料符號的語意命名與型別判定，以及主要 struct 的佈局定義與套用（票 17 專屬的 workflow） |
 | [`ghidra_config/`](ghidra_config/_index.md) | Ghidra MCP 專案設定的正本：把命名檢查調成本專案的慣例 |
