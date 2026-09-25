@@ -23,6 +23,7 @@
 | [`cel_decode/`](cel_decode/_index.md) | 解出 `.CEL` 的每個 sprite 並算圖成 PNG |
 | [`code_emit/`](code_emit/_index.md) | 把 function emit 成 C 的整條流程：emit／review／gate／記帳的 workflow、單元測試映像的建置與執行、檔案落點的路由表、工作清單與進度（票 21、21.5），以及全部落地後的疑慮總掃（票 22） |
 | [`crt_version/`](crt_version/_index.md) | 判定工具鏈的發行版：每個 `crt` function 對每個 Watcom 版本的程式庫逐 byte 比對，交集成單一版本，另以差分編譯量測編譯器（票 16 專屬的 workflow） |
+| [`cut_verify/`](cut_verify/_index.md) | 刪減與未用調查的 53 條發現逐條獨立驗證：一條一個 agent、一手證據的 gate、第二位 agent 回掃更正與分類有疑義者，收尾報告與判定彙整進 `devlog/runs/`（票 25.9 專屬的 workflow） |
 | [`data_emit/`](data_emit/_index.md) | 全域資料的定義落地：連結器的未定義清單當工作清單、每個全域一個判定、腳本轉錄進 `src/`、與原版映像逐 byte 比對的閘門（票 23） |
 | [`data_skill/`](data_skill/_index.md) | 產生 `fdps-data` 查詢 skill 的資料集，並對知識庫的表逐列驗證 |
 | [`fdps_build/`](fdps_build/_index.md) | 在 DOSBox-X 內全自動編譯、連結並執行的建置流程，以及驗證這套工具鏈可用的最小程式 |
