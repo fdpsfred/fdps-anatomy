@@ -751,8 +751,9 @@ int fdps_map_actor_take_best_action(int unit_index, int side_select)
 /* 00013e10.  The map dimensions come from the MOVEMENT GRID's header -- MOVSX
    word ptr [EAX] and MOVSX word ptr [EAX+2] on data_fdps_battle_move_grid_ptr
    at 00013e21 and 00013e2c -- and not from the terrain layer's header at +7,
-   which is the width fdps_map_load_tile_info goes on to index all three layers
-   with.  The two agree in practice because the layers cover the same map; the
+   which is the width fdps_map_load_tile_info indexes the terrain layer and the
+   grid with (the event-code layer it indexes with its own, wider, width).  The
+   grid is allocated from the terrain layer's dimensions, so the two agree; the
    scan simply trusts that, and there is no bounds check and no null test
    anywhere in the function, on the grid pointer or on anything else.
 

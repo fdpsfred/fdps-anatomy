@@ -156,8 +156,8 @@ void fdps_map_set_pending_tile_event(int tile_x, int tile_y, int trigger_kind)
    The two widths are two variables.  The tile id is bumped at the terrain
    layer's width, from [EBP-0x10] (IMUL at 0002e9be), and the event-code byte is
    cleared at the event layer's own width, from [EBP-8] (IMUL at 0002e9de).  The
-   two layers agree on a real map, so a rebuild that used one width for both
-   would pass a playthrough and still be a different program.
+   two widths differ on every shipped map (resource_info/terrain.md), so a
+   rebuild that used one width for both would clear the wrong event cells.
 
    The bump is a 16-bit increment, INC word ptr [EAX] at 0002e9d8: a cell
    holding 0xffff wraps to 0 and the neighbouring cell's id is untouched.

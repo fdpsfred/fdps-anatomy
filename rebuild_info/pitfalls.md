@@ -126,6 +126,8 @@
 | **`.object1` 裡夾在函式之間的常數表，多半是 wcc386 替 auto 陣列產生的初值影像，不是原始碼裡的全域**：`int cmd_icons[4] = {0x16, 0x0b, 0x0c, 0x13};` 這樣的區域宣告，初值會被擺在宣告它的函式旁邊的唯讀資料裡 | 看到有名字的常數表就當成全域 emit 出來。原版沒有那個全域，重建版多一個符號、而且該函式每次進入時的複製動作不見了。判定過的 1,040 個 anchor 裡有 395 個屬於這一類 | [`program_info/data_structures.md`](../program_info/data_structures.md) |
 | 同一個陷阱還有另外三種產生者：**`switch` 的跳躍表、浮點常數池、字串字面值**，Ghidra 一樣會給它們名字 | 把 `binary_artifact_*_switch_table_*`、`binary_artifact_fp_const_*`、`binary_artifact_string_literal_*` 當全域 emit。編譯器本來就會從 `switch`、從算式裡的浮點字面值、從敘述裡的字串重新產生一份，我們再定義一次就是原版沒有的第二份。這三類加上區域陣列初值共 159 個符號，已經在 routing 表裡標成不 emit | [`code_layout.md`](code_layout.md) |
 | 三十支章節 init 處理函式看起來一模一樣，但**不能用迴圈或樣板生成**：`Icon%02d.dat` 的編號差 1、`fdps_roster_add_character` 必須排在 `fdps_chapter_state_reset` 之前（reset 會依名冊人數重建地圖單位，順序反過來新加入的角色會被歸零成退場）、而且第 17／22／23 章傳的游標目標不是 0 | 用一支樣板產生三十支。前兩項會讓某些章節少一個角色或播錯動畫，第三項只影響三章 | plate comment 的 `Rebuild note` |
+| 事件碼層 `M%02d.DTL` 與地形層 `M%02d0.MPL` 的寬度**在每一張地圖上都不同**：`fdps_map_load_tile_info` 以事件碼層自己的寬索引事件碼，重繪也各用各的寬 | 以為「疊在同一張地圖上的圖層尺寸相同」，用地形層的寬（或移動網格的寬）一起索引事件碼層。第 1 章 (9,15) 的寶箱會讀到別格的事件碼，整張圖的寶物、格子事件與重繪全部錯位 | [`resource_info/terrain.md`](../resource_info/terrain.md) |
+| 可搜尋格（寶箱、埋藏）的事件碼 **0 是有效的記錄索引**；同碼的多格共用同一筆記錄與同一個旗標 | 把事件碼 0 一律當成「這格沒有事件」而跳過——對一般格的格子事件這是對的，對寶箱與埋藏格則會讓第 1、2、3 章等處碼 0 的寶物搜不到；或把同碼的格當成各自獨立的寶物，變成每格都拿得到 | [`resource_info/map.md`](../resource_info/map.md) |
 
 ## 不能照編譯器慣例設定的旗標
 

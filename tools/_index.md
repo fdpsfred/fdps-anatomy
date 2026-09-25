@@ -11,6 +11,7 @@
 | 各工作的建置函式 | 各建置目標怎麼建 | `build_gate` |
 | `vfs_dump/vfs_dump.py` | `.VFS` 容器解析（`parse_container`） | `cutscene_script` |
 | `cutscene_script/cutscene_script.py` | 過場腳本的解碼，以及每一步當下的地圖、文字區塊、單位身分 | 需要過場內容的工作（票 25.6、25.8、25.14 等） |
+| `map_decode/map_decode.py` | 地圖的全部檔：`MAPnn.DAT`／`.COD`（`parse_map_dat`、`parse_map_cod`）、圖層（`parse_dtl`、`parse_mpl`、`parse_attr`、`parse_dsc`）、整張地圖的載入與一格的判讀（`load_map`、`tile_info`、`classify_cell`、`searchable_cells`）、全圖算圖（`render_map`） | 需要地圖、部署記錄或寶物的工作（票 25.2 的 `cutscene_script` 待改、25.8、25.14 等） |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
 
 儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表寫到 `assets/text/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`。
@@ -42,6 +43,7 @@
 | [`guide_scrape/`](guide_scrape/_index.md) | 把攻略站的內容頁抓成原文鏡像並提供搜尋入口 |
 | [`kbd_probe/`](kbd_probe/_index.md) | 量 DOS/4GW 之下手塞 BIOS 鍵盤環形緩衝區後，鍵盤查詢何時看得到那些鍵（測試端要先等一個 timer tick 的依據） |
 | [`logic_naming/`](logic_naming/_index.md) | 遊戲邏輯 function 的語意命名、參數命名、calling convention 判定與行為註解（票 15 專屬的 workflow） |
+| [`map_decode/`](map_decode/_index.md) | 地圖圖層（`DTL`／`MPL`／`ATTR`／`DSC`）與 `MAPnn.DAT`／`.COD` 的解碼、每一格的判讀、不變量檢查、每張地圖的統計表，以及整張地圖的 PNG 算圖（票 25.3；25.8、25.14 用它產生地圖全圖） |
 | [`pool_rereview/`](pool_rereview/_index.md) | 每個 function 的 pool、名稱、邊界與 signature、plate comment 由第二雙眼睛重讀一次（票 14.2 專屬的 workflow） |
 | [`pool_triage/`](pool_triage/_index.md) | 未辨識區塊逐一判定並建成 function，再逐一判定每個 function 的 pool 歸屬（票 14 專屬的 workflow，含 Watcom 執行期與 Miles AIL 的函式庫比對） |
 | [`rle_asm/`](rle_asm/_index.md) | RLE 繪製的 15 支改回原版組語：逐道指令與原版比對、片段接成 `src/*.asm`、C 譯本與組語之間的切換（票 22.3） |
