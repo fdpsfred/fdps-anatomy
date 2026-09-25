@@ -26,6 +26,8 @@ sys.path.insert(0, str(HERE))
 
 import chapter_facts as facts  # noqa: E402
 import check_chapter as gate  # noqa: E402
+import map_decode  # noqa: E402  (on the path chapter_facts set up)
+from check_mechanics import citations, load_idents, load_names  # noqa: E402
 
 INDEX = gate.LANDED / "_index.md"
 CHAINS_DRAFT = facts.DRAFTS / "_index_chains.md"
@@ -33,7 +35,7 @@ CHAINS_HEADING = "## 跨章機制鏈"
 
 INTRO = """# chapters — 關卡視角
 
-回答「每一章的關卡內容與事件流程是什麼」。遊戲的關卡單位是章，共 30 章，沒有序章或終章。一章一檔 `chNN.md`（章號補零兩位），每章檔寫該章專屬的內容：劇情、加入角色、敵人與波次、寶物、勝敗條件、處理流程、回合與格子事件、過場腳本與全部對白。
+回答「每一章的關卡內容與事件流程是什麼」。遊戲的關卡單位是章，共 30 章，沒有序章或終章（依據：攻略站「遊戲攻略」頁，鏡像見 [`docs/guide/`](../docs/guide/_index.md)）。一章一檔 `chNN.md`（章號補零兩位），每章檔寫該章專屬的內容：劇情、加入角色、敵人與波次、寶物、勝敗條件、處理流程、回合與格子事件、過場腳本與全部對白。
 
 章號 1 起算，`FDPS.LE` 內部的章節索引 0 起算，兩者差 1（見 [`CONTEXT.md`](../CONTEXT.md) 的詞條）。下列各表併列兩種編號，從程式側的常數表取值再寫進章節檔時，以此換算。
 
@@ -55,17 +57,17 @@ def table_chapters():
     rows = ["| 章號 | 章節索引 | 章名 | 勝利條件 | 敗北條件 | 文件 |",
             "| ---: | ---: | --- | --- | --- | --- |"]
     for n in facts.CHAPTERS:
-        rows.append(f"| {n} | {n - 1} | {facts._cell(facts.chapter_title(n))} | "
-                    f"{facts._cell(facts.one_line(facts.entry_line(n, 2)))} | "
-                    f"{facts._cell(facts.one_line(facts.entry_line(n, 3)))} | {_page_link(n)} |")
+        rows.append(f"| {n} | {n - 1} | {facts.cell(facts.chapter_title(n))} | "
+                    f"{facts.cell(facts.one_line(facts.entry_line(n, 2)))} | "
+                    f"{facts.cell(facts.one_line(facts.entry_line(n, 3)))} | {_page_link(n)} |")
     return "\n".join(rows)
 
 
 def table_handlers():
     t = facts.handler_tables()
     distinct = all(len(set(t[k])) == len(t[k]) for k in ("init", "post", "end"))
-    rows = [f"進入處理 `0x{facts.TABLE_ADDRESS['init']:x}`、行動後檢查 `0x{facts.TABLE_ADDRESS['post']:x}`、"
-            f"勝利處理 `0x{facts.TABLE_ADDRESS['end']:x}` 都是 30 格、以章節索引索引"
+    rows = [f"進入處理 `0x{facts.table_address('init'):x}`、行動後檢查 `0x{facts.table_address('post'):x}`、"
+            f"勝利處理 `0x{facts.table_address('end'):x}` 都是 30 格、以章節索引索引"
             + ("，每章各有自己的一支，沒有兩章共用同一支。" if distinct else "。"), "",
             "| 章號 | 進入處理 | 行動後檢查 | 勝利處理 |", "| ---: | --- | --- | --- |"]
     for n in facts.CHAPTERS:
@@ -81,7 +83,7 @@ def table_event_slots():
     for n in facts.CHAPTERS:
         for slot, where in facts.event_slots_used(facts.battle_map(n - 1)).items():
             users.setdefault(slot, []).append((n, where))
-    rows = [f"章節事件處理表 `0x{facts.TABLE_ADDRESS['event']:x}` 有 50 格，以地圖資料裡的 slot 編號"
+    rows = [f"章節事件處理表 `0x{facts.table_address('event'):x}` 有 50 格，以地圖資料裡的 slot 編號"
             "索引（回合事件、格子事件、種類 2 以上的可搜尋格記錄、死亡腳本 opcode 2）。下表是每個 slot "
             "的處理函式與出貨資料裡呼叫它的章。", "",
             "| slot | 處理函式 | 呼叫它的章（來源） |", "| ---: | --- | --- |"]
@@ -118,7 +120,7 @@ def table_resources():
         rows.append(f"| {n} | `MAP{n - 1:02d}` | `FDETXT{n:02d}` | {names(_scripts_of(n, 'init'))} | "
                     f"{names(_scripts_of(n, 'end'))} | {names(_scripts_of(n, 'event'))} | "
                     f"{f'`SHOP{v[0]:02d}`' if v else '—'} | "
-                    f"{1 if n - 1 < facts.CD_DISC_2_FROM_INDEX else 2} |")
+                    f"{facts.disc_of(n - 1)} |")
     rows += ["", "地形層（`M%02d.DTL`／`.MPL`／`ATTR`／`DSC`）與戰場地圖同號，見 "
              "[`resource_info/terrain.md`](../resource_info/terrain.md)。每章的 CD 音軌由程式內嵌的"
              "常數表以章節索引查，見 [`program_info/cd_audio.md`](../program_info/cd_audio.md)。"]
@@ -127,16 +129,16 @@ def table_resources():
 
 def table_scenes():
     switched = {}
-    kinds = {"init": "開場", "end": "勝利", "event": "戰鬥中事件"}
     for member, r in sorted(facts.scripts().items()):
         for target in r.trace.switches:
             if target >= facts.FIRST_SCENE_MAP:
-                who = "、".join(sorted({f"第 {c.chapter} 章{kinds[c.kind]}" for c in r.callers}))
+                who = "、".join(sorted({f"第 {c.chapter} 章{facts.KIND_LABEL[c.kind]}"
+                                       for c in r.callers}))
                 label = f"`{member}`（{who}）"
                 switched.setdefault(target, [])
                 if label not in switched[target]:
                     switched[target].append(label)
-    maps = [n for n in map_decode_numbers() if n >= facts.FIRST_SCENE_MAP]
+    maps = [n for n in map_decode.map_numbers(facts.DUMP) if n >= facts.FIRST_SCENE_MAP]
     rows = ["地圖編號 31 以後是不對應章節的額外場景，只由過場腳本的 `SWITCH_MAP` 切過去；切換時一併換掉"
             "文字區塊（`FDETXT` 地圖 + 1）與單位。這些區塊的文字由 "
             "[`assets/text/scene_text.md`](../assets/text/scene_text.md) 擁有。", "",
@@ -145,10 +147,6 @@ def table_scenes():
         who = "、".join(switched.get(n, [])) or f"沒有腳本切過去，見 [刪減與未用]({facts.CUT})"
         rows.append(f"| {n} | `FDETXT{n + 1:02d}` | {who} |")
     return "\n".join(rows)
-
-
-def map_decode_numbers():
-    return facts.map_decode.map_numbers(facts.DUMP)
 
 
 def table_villages():
@@ -182,6 +180,10 @@ TABLES = (
 )
 
 
+class ChainsDraftError(Exception):
+    """The chains draft is not usable."""
+
+
 def chains_section(current):
     """The chains prose: the draft if there is one, else what the page has."""
     if CHAINS_DRAFT.exists():
@@ -192,7 +194,7 @@ def chains_section(current):
     if not text:
         return None
     if not text.startswith(CHAINS_HEADING + "\n"):
-        raise SystemExit(f"{CHAINS_DRAFT}: must start with '{CHAINS_HEADING}'")
+        raise ChainsDraftError(f"{CHAINS_DRAFT.name}: must start with '{CHAINS_HEADING}'")
     return text
 
 
@@ -207,12 +209,23 @@ def build_text(current):
 
 
 def check(text):
-    names, idents = gate.mech.load_names(), gate.mech.load_idents()
+    """The knowledge-base rules on the whole page, and a source for every
+    chain: each ### subsection of the chains section cites a function."""
     lines = text.splitlines()
-    out = gate.check_symbols(lines, names, idents)
-    out += gate.mech.check_links(lines, gate.LANDED, gate.ROOT)
+    out = gate.check_kb_rules(lines, load_names(), load_idents(), draft=False)
     if CHAINS_HEADING not in lines:
         out.append(("error", "structure", 1, "no %s section" % CHAINS_HEADING))
+        return out
+    start = lines.index(CHAINS_HEADING)
+    sub, sub_line, cited = None, 0, False
+    for no, line in enumerate(lines[start + 1:] + ["### end"], start + 2):
+        if line.startswith("### "):
+            if sub is not None and not cited:
+                out.append(("error", "uncited-chain", sub_line,
+                            "chain '%s' cites no function as `name`（`0xaddr`）" % sub))
+            sub, sub_line, cited = line[4:].strip(), no, False
+        elif any(True for _ in citations(line)):
+            cited = True
     return out
 
 
@@ -223,14 +236,18 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     current = INDEX.read_text(encoding="utf-8") if INDEX.exists() else None
-    fresh = build_text(current)
-    findings = check(fresh)
-    if a.cmd == "verify" and current != fresh:
+    try:
+        fresh = build_text(current)
+        findings = check(fresh)
+    except ChainsDraftError as e:
+        fresh, findings = None, [("error", "chains-draft", 1, str(e))]
+    if a.cmd == "verify" and fresh is not None and current != fresh:
         findings.append(("error", "stale", 1, "chapters/_index.md differs from a fresh build"))
     errors = [f for f in findings if f[0] == "error"]
-    if a.cmd == "build" and not errors and fresh != current:
+    written = a.cmd == "build" and not errors and fresh != current
+    if written:
         INDEX.write_bytes(fresh.encode("utf-8"))
-    report = {"errors": len(errors), "written": a.cmd == "build" and not errors,
+    report = {"errors": len(errors), "written": written,
               "findings": [{"level": f[0], "code": f[1], "line": f[2], "message": f[3]}
                            for f in findings]}
     if a.json:

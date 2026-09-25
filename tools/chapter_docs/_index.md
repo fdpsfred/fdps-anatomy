@@ -19,12 +19,12 @@
 | 檔案 | 用途 |
 | --- | --- |
 | `chapter_facts.py` | 產生器。`facts <n\|all>` 寫出每章的機械事實（`workspace/chapter_docs/facts/chNN.json`，給 agent 的線索清單）與區塊預覽；`block <n> <key> [--draft]` 印一個區塊；`render-maps` 把 30 張戰場標註圖畫到 `workspace/chapter_docs/maps/`。區塊的鍵：`header`、`deployments`、`treasure`、`village`、`events`、`scripts`、`dialogue` |
-| `check_chapter.py` | 頁面的骨架（`--template <n>`）、填區塊（`fill`）與閘門：`--draft` 檢查草稿、`--landed` 另外把落地頁裡的每個區塊與重新產生的內容逐字比對（資料、原始碼或判定一動就抓得到） |
+| `check_chapter.py` | 頁面的骨架（`--template <n>`）、填區塊（`fill`）與閘門：`--draft` 檢查草稿、`--landed` 另外把落地頁裡的每個區塊與重新產生的內容逐字比對（資料、原始碼或判定一動就抓得到）、`--landed-all` 對全部落地頁做同樣的檢查而且連到其他章的連結一定要存在（草稿與逐輪落地時，還沒寫的章只警告）。共通的知識庫規則 import 自 `game_mechanics/check_mechanics.py`；本工具另外要求處理流程引用本章的進入、行動後、勝利處理與地圖資料呼叫的每支事件處理，加入與離隊連到 `assets/characters.md` |
 | `land.py` | 落地：判定記錄說 complete、而且填好區塊的頁面過閘門，才寫出 `chapters/chNN.md` 與 `judgements/chNN.json`；不判斷、不改草稿 |
 | `index.py` | `chapters/_index.md` 整頁由它組：固定的前言、六張產生的表（章節總表、四張處理表、事件 slot 與共用處理函式、資源對照、額外場景地圖的歸屬、村莊與連戰），以及 agent 起草的「跨章機制鏈」一節。`build` 寫出、`verify` 重組後比對 |
 | `collect.py` | 把全部草稿的 meta 收成一份精簡索引，給 workflow 的後段用 |
 | `apply_pitfalls.py` | 把逐條判定的踩雷點列寫進 `rebuild_info/pitfalls.md`，插入規則 import 自 `game_mechanics/apply_kb.py` |
-| `chapters_ticket25_8.js` | 全自動 workflow：一章一個 agent 起草、每輪落地後跑閘門、回掃、跨章機制鏈、踩雷點逐條判定、run record 與 devlog |
+| `chapters_ticket25_8.js` | 全自動 workflow：一章一個 agent 起草、每輪落地後跑閘門、回掃、跨章機制鏈、踩雷點逐條判定、全部落地頁的嚴格閘門、run record 與 devlog |
 | `test_chapter_docs.py` | 單元測試 |
 
 ```

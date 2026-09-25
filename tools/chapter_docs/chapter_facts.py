@@ -137,7 +137,52 @@ def handler_tables():
     return out
 
 
-TABLE_ADDRESS = {"init": 0x60074, "event": 0x601c4, "post": 0x6028c, "end": 0x60304}
+TABLE_SYMBOL = {"init": "data_fdps_chapter_init_handler_table",
+                "event": "data_fdps_chapter_event_handler_table",
+                "post": "data_fdps_chapter_post_action_handler_table",
+                "end": "data_fdps_chapter_end_handler_table"}
+
+
+def table_address(kind):
+    """A dispatch table's address, out of the Ghidra snapshot."""
+    addr = snapshot_addresses().get(TABLE_SYMBOL[kind])
+    if addr is None:
+        raise FactsError(f"{TABLE_SYMBOL[kind]} is not in the Ghidra snapshot")
+    return addr
+
+
+def event_handler(slot):
+    """The handler name in event slot `slot`, or None past the table's end."""
+    table = handler_tables()["event"]
+    return table[slot] if 0 <= slot < len(table) else None
+
+
+def cite_slot(slot):
+    name = event_handler(slot)
+    return cite(name) if name else f"slot {slot} 超出 50 格的表"
+
+
+def wave_label(wave):
+    return "FF" if wave == 0xFF else str(wave)
+
+
+def disc_of(chapter_index):
+    return 1 if chapter_index < CD_DISC_2_FROM_INDEX else 2
+
+
+def parse_entry(value):
+    """A judgement's text entry: an int, or a string written 0xNN."""
+    if isinstance(value, bool):
+        raise ValueError(value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text.lower().startswith("0x"):
+        raise ValueError(f"{value!r}: write entries as 0xNN")
+    return int(text, 16)
+
+
+KIND_LABEL = cs.KIND_LABEL
 
 
 @lru_cache(maxsize=None)
@@ -236,7 +281,8 @@ def village_before(n):
 
 
 def event_slots_used(m):
-    """{slot: [(where, detail)]} for every event slot map m's data can call."""
+    """{slot: [where]} for every event slot map m's data can call; where is
+    回合事件, 格子事件, 搜尋 or 死亡腳本."""
     dat = m["dat"]
     used = {}
 
@@ -246,7 +292,7 @@ def event_slots_used(m):
             used[slot].append(where)
 
     for t in dat["turn_events"]:
-        if (t["turn"], t["handler"]) != (0xFF, 0xFF) and t["handler"] < 50:
+        if (t["turn"], t["handler"]) != (0xFF, 0xFF):
             add(t["handler"], "回合事件")
     for c in map_decode.all_cells(m):
         e = c.get("tile_event")
@@ -306,12 +352,11 @@ def draw_runs_in(draw, n):
 @lru_cache(maxsize=None)
 def slot_users():
     """{event handler name: {chapters whose map data calls it}}."""
-    table = handler_tables()["event"]
     out = {}
     for n in CHAPTERS:
         for slot in event_slots_used(battle_map(n - 1)):
-            if slot < len(table):
-                out.setdefault(table[slot], set()).add(n)
+            if event_handler(slot):
+                out.setdefault(event_handler(slot), set()).add(n)
     return out
 
 
@@ -366,7 +411,6 @@ def facts(n):
     map_no = n - 1
     m = battle_map(map_no)
     tables = handler_tables()
-    g = game()
     width, height = map_decode.grid_size(m)
     entries = text_block(n)
     readers = text_readers(n)
@@ -377,7 +421,7 @@ def facts(n):
         "handlers": {k: tables[k][map_no] for k in ("init", "end", "post")},
         "chapter_functions": [{"name": name, "address": f"0x{addr:x}"}
                               for addr, name in chapter_functions(n)],
-        "event_slots": {str(slot): {"handler": tables["event"][slot], "used_by": where}
+        "event_slots": {str(slot): {"handler": event_handler(slot), "used_by": where}
                         for slot, where in event_slots_used(m).items()},
         "map_size": f"{width}×{height}",
         "player_slots": m["dat"]["player_slots"],
@@ -430,12 +474,17 @@ def validate_judgement(n, meta):
     need = [w for w in wave_list(m) if w != OPENING_WAVE]
     got = {}
     for w in meta.get("waves", []):
-        if not isinstance(w, dict) or "wave" not in w or "deployed" not in w:
-            problems.append(f"waves: malformed entry {w!r}")
+        if (not isinstance(w, dict) or not isinstance(w.get("wave"), int)
+                or isinstance(w.get("wave"), bool) or not isinstance(w.get("deployed"), bool)):
+            problems.append(f"waves: malformed entry {w!r} (wave must be an int, deployed a bool)")
             continue
+        if w["wave"] in got:
+            problems.append(f"waves: wave {w['wave']} is judged twice")
         got[w["wave"]] = w
         if w["deployed"] and not str(w.get("when", "")).strip():
             problems.append(f"waves: wave {w['wave']} is deployed but says nothing of when")
+        if not w["deployed"] and not str(w.get("why", "")).strip():
+            problems.append(f"waves: wave {w['wave']} is never deployed but gives no reason")
     for w in need:
         if w not in got:
             problems.append(f"waves: wave {w} has records but no judgement")
@@ -449,7 +498,7 @@ def validate_judgement(n, meta):
     for key in ("text_readers", "never_shown"):
         for item in meta.get(key, []):
             try:
-                entry = int(str(item["entry"]), 16)
+                entry = parse_entry(item["entry"])
             except (KeyError, TypeError, ValueError):
                 problems.append(f"{key}: malformed entry {item!r}")
                 continue
@@ -473,7 +522,7 @@ def validate_judgement(n, meta):
 # Generated blocks
 # ---------------------------------------------------------------------------
 
-def _cell(text):
+def cell(text):
     return str(text).replace("|", "｜").replace("\n", " ")
 
 
@@ -491,34 +540,40 @@ def block_header(n, judgement):
     m = battle_map(map_no)
     width, height = map_decode.grid_size(m)
     slots = event_slots_used(m)
+
+    def table_row(label, kind):
+        return f"| {label}（`0x{table_address(kind):x}`[{map_no}]） | {cite(tables[kind][map_no])} |"
+
     lines = ["| 項目 | 內容 |", "| --- | --- |",
              f"| 章號／章節索引 | {n}／{map_no} |",
-             f"| 章名（文字區塊 `0x01`） | {_cell(chapter_title(n))} |",
-             f"| 勝利條件（`0x02`） | {_cell(one_line(entry_line(n, 2)))} |",
-             f"| 敗北條件（`0x03`） | {_cell(one_line(entry_line(n, 3)))} |",
+             f"| 章名（文字區塊 `0x01`） | {cell(chapter_title(n))} |",
+             f"| 勝利條件（`0x02`） | {cell(one_line(entry_line(n, 2)))} |",
+             f"| 敗北條件（`0x03`） | {cell(one_line(entry_line(n, 3)))} |",
              f"| 戰場 | `MAP{map_no:02d}.DAT`／`MAP{map_no:02d}.COD`／`M{map_no:02d}.DTL`，"
              f"{width}×{height} 格，我方 slot {m['dat']['player_slots']} 個，"
              f"部署記錄 {m['dat']['spawn_count']} 筆 |",
              f"| 文字區塊 | `FDETXT{n:02d}.TXT`，{len(text_block(n))} 條 |",
-             f"| 進入處理（`0x{TABLE_ADDRESS['init']:x}`[{map_no}]） | {cite(tables['init'][map_no])} |",
-             f"| 行動後檢查（`0x{TABLE_ADDRESS['post']:x}`[{map_no}]） | {cite(tables['post'][map_no])} |",
-             f"| 勝利處理（`0x{TABLE_ADDRESS['end']:x}`[{map_no}]） | {cite(tables['end'][map_no])} |"]
+             table_row("進入處理", "init"), table_row("行動後檢查", "post"),
+             table_row("勝利處理", "end")]
     if slots:
-        rows = "、".join(f"slot {s}：{cite(tables['event'][s])}（{'、'.join(w)}）"
-                         for s, w in slots.items())
+        rows = "、".join(f"slot {s}：{cite_slot(s)}（{'、'.join(w)}）" for s, w in slots.items())
     else:
         rows = "無"
-    lines.append(f"| 地圖資料呼叫的事件處理（`0x{TABLE_ADDRESS['event']:x}`） | {rows} |")
-    kinds = {"init": "開場", "end": "勝利", "event": "戰鬥中事件"}
+    lines.append(f"| 地圖資料呼叫的事件處理（`0x{table_address('event'):x}`） | {rows} |")
     scripts_cell = "、".join(
-        f"`{member}`（{'／'.join(sorted({kinds[c.kind] for c in mine}))}）"
+        f"`{member}`（{'／'.join(sorted({KIND_LABEL[c.kind] for c in mine}))}）"
         for member, _, mine in chapter_scripts(n)) or "無"
     lines.append(f"| 過場腳本 | {scripts_cell} |")
     village = village_before(n)
     lines.append("| 本章之前的村莊 | " + (f"`SHOP{village[0]:02d}.DAT`" if village else "無") + " |")
-    disc = 1 if map_no < CD_DISC_2_FROM_INDEX else 2
-    lines.append(f"| 光碟 | 第 {disc} 片（[CD 音軌](../program_info/cd_audio.md)） |")
+    lines.append(f"| 光碟 | 第 {disc_of(map_no)} 片（音軌見 [CD 音軌](../program_info/cd_audio.md)） |")
     return "\n".join(lines)
+
+
+def wave_deploys(judgement, wave):
+    """False only when the judgement says the wave is never deployed."""
+    verdict = _wave_judgement(judgement, wave)
+    return verdict is None or verdict["deployed"]
 
 
 def _wave_judgement(judgement, wave):
@@ -526,12 +581,13 @@ def _wave_judgement(judgement, wave):
         return {"wave": 0, "deployed": True,
                 "when": f"進入戰場時由 {cite('fdps_build_map_unit_array')} 部署在錨點上"}
     for w in (judgement or {}).get("waves", []):
-        if w.get("wave") == wave:
+        # Malformed items are skipped here; validate_judgement reports them.
+        if isinstance(w, dict) and w.get("wave") == wave and isinstance(w.get("deployed"), bool):
             return w
     return None
 
 
-def _ai_cell(s, char_names):
+def _ai_text(s, char_names):
     ai = s["ai"] & 0x0F
     text = AI.get(ai, f"{ai} 不動")
     if s["ai"] & 0xF0:
@@ -555,8 +611,7 @@ def death_cell(n, s):
     if op == 1:
         return f"掉落 {arg} 金"
     if op == 2:
-        table = handler_tables()["event"]
-        return f"事件 slot {arg}：{cite(table[arg])}" if 0 <= arg < len(table) else f"事件 slot {arg}"
+        return f"事件 slot {arg}：{cite_slot(arg)}"
     words = "不畫文字" if arg in (0xFF, -1) else f"顯示 `0x{arg:02x}`"
     if op == 4:
         return words + "，之後過關"
@@ -573,7 +628,9 @@ def block_deployments(n, judgement):
     party = cod[dat["spawn_count"]:dat["spawn_count"] + dat["player_slots"]] if cod else []
     lines = ["欄位的意義見 [`resource_info/map.md`](../resource_info/map.md)：陣營、AI 行為"
              "（低 4 bit）、死亡腳本；錨點是 `MAPnn.COD` 的座標，開場波次放在錨點上，其餘波次依部署"
-             "方式放在錨點或最近的空格。單位名是全域文字的「角色編號 + 1」條。", ""]
+             "方式放在錨點或最近的空格。單位名是全域文字的「角色編號 + 1」條；角色編號 `3C` 以上的敵兵，"
+             "數值（`ENEMYDAT.DAT`）與種族、職業見 [`assets/enemies.md`](../assets/enemies.md)，"
+             "以下的見 [`assets/characters.md`](../assets/characters.md)。", ""]
     if party:
         lines.append("我方起始格：" + "、".join(f"slot {i} ({x}, {y})"
                                            for i, (_, x, y) in enumerate(party)) + "。")
@@ -590,12 +647,12 @@ def block_deployments(n, judgement):
                 key = (s["side"], s["char_id"], s["level"])
                 groups[key] = groups.get(key, 0) + 1
         for (side, char_id, level), count in groups.items():
-            lines.append(f"| {'FF' if w == 0xFF else w} | {SIDE.get(side, side)} | "
-                         f"{_hex(char_id)} {_cell(unit_name(char_id))} | {level} | {count} |")
+            lines.append(f"| {wave_label(w)} | {SIDE.get(side, side)} | "
+                         f"{_hex(char_id)} {cell(unit_name(char_id))} | {level} | {count} |")
     for w in wave_list(m):
         records = [s for s in dat["spawns"] if s["wave"] == w]
         verdict = _wave_judgement(judgement, w)
-        label = "FF" if w == 0xFF else str(w)
+        label = wave_label(w)
         lines += ["", f"### 波次 {label}", ""]
         if verdict is None:
             lines.append("（未判定）")
@@ -612,9 +669,9 @@ def block_deployments(n, judgement):
             anchor = anchors[s["index"]] if s["index"] < len(anchors) else None
             lines.append(
                 f"| {s['index']} | {SIDE.get(s['side'], s['side'])} | {_hex(s['char_id'])} "
-                f"{_cell(unit_name(s['char_id']))} | {s['level']} | "
-                f"{_cell(_ai_cell(s, unit_name))} | "
-                f"{f'({anchor[1]}, {anchor[2]})' if anchor else '—'} | {_cell(death_cell(n, s))} |")
+                f"{cell(unit_name(s['char_id']))} | {s['level']} | "
+                f"{cell(_ai_text(s, unit_name))} | "
+                f"{f'({anchor[1]}, {anchor[2]})' if anchor else '—'} | {cell(death_cell(n, s))} |")
     return "\n".join(lines)
 
 
@@ -624,10 +681,7 @@ def _record_text(rec):
         return f"{_hex(rec['payload'])} {g.item_name(rec['payload'])}"
     if rec["kind"] == 1:
         return "什麼都沒有（0 金）" if rec["payload"] == 0 else f"{rec['payload']} 金"
-    table = handler_tables()["event"]
-    slot = rec["payload"]
-    return (f"事件 slot {slot}：{cite(table[slot])}" if 0 <= slot < len(table)
-            else f"事件 slot {slot}")
+    return f"事件 slot {rec['payload']}：{cite_slot(rec['payload'])}"
 
 
 def block_treasure(n, judgement):
@@ -648,7 +702,7 @@ def block_treasure(n, judgement):
             content = _record_text(group[0]["record"])
             if len(group) > 1:
                 content += f"（{len(group)} 格共用，只拿得到一次）"
-            lines.append(f"| {code} | {where} | {_cell(content)} |")
+            lines.append(f"| {code} | {where} | {cell(content)} |")
     else:
         lines.append("本章地圖沒有寶箱或埋藏格。")
     referenced = set(by_code)
@@ -658,19 +712,22 @@ def block_treasure(n, judgement):
         lines += ["", "沒有任何格引用、拿不到的記錄：" + "、".join(
             f"記錄 {i}（種類 {r['kind']}、內容 `{r['payload'] & 0xFFFF:X}`）" for i, r in unref)
             + f"，見 [刪減與未用]({CUT})。"]
-    drops = [s for s in m["dat"]["spawns"] if s["death_op"] in (0, 1)]
+    drops = [s for s in m["dat"]["spawns"] if s["death_op"] in (0, 1)
+             and wave_deploys(judgement, s["wave"])]
     lines += [""]
     if drops:
         lines += ["擊倒後掉落（死亡腳本 opcode 0／1，擊殺者須是存活的我方單位）：", "",
                   "| # | 單位 | 波次 | 掉落 |", "| ---: | --- | ---: | --- |"]
         for s in drops:
-            verdict = _wave_judgement(judgement, s["wave"])
-            note = "" if verdict is None or verdict["deployed"] else "（所在波次不出場）"
-            lines.append(f"| {s['index']} | {_hex(s['char_id'])} {_cell(unit_name(s['char_id']))} | "
-                         f"{'FF' if s['wave'] == 0xFF else s['wave']} | "
-                         f"{_cell(death_cell(n, s))}{note} |")
+            lines.append(f"| {s['index']} | {_hex(s['char_id'])} {cell(unit_name(s['char_id']))} | "
+                         f"{wave_label(s['wave'])} | {cell(death_cell(n, s))} |")
     else:
         lines.append("本章沒有擊倒掉落。")
+    lost = [s for s in m["dat"]["spawns"] if s["death_op"] in (0, 1)
+            and not wave_deploys(judgement, s["wave"])]
+    if lost:
+        lines += ["", f"另有 {len(lost)} 筆掉落在永遠不會部署的波次裡（"
+                  + "、".join(f"#{s['index']}" for s in lost) + f"），拿不到，見 [刪減與未用]({CUT})。"]
     return "\n".join(lines)
 
 
@@ -692,7 +749,6 @@ def block_events(n, judgement):
     map_no = n - 1
     m = battle_map(map_no)
     dat = m["dat"]
-    table = handler_tables()["event"]
     lines = ["觸發時機與陣營階段的意義見 [`resource_info/map.md`](../resource_info/map.md)。", ""]
     turns = [t for t in dat["turn_events"] if (t["turn"], t["handler"]) != (0xFF, 0xFF)]
     if turns:
@@ -705,7 +761,7 @@ def block_events(n, judgement):
                 phase += f"（回合計數 {t['turn']}）"
                 if t["turn"] == 1:
                     phase += "，永遠不觸發"
-            handler = cite(table[t["handler"]]) if t["handler"] < len(table) else "—"
+            handler = cite_slot(t["handler"])
             lines.append(f"| {t['turn']} | {phase} | {t['handler']} | {handler} |")
     else:
         lines.append("本章沒有回合事件。")
@@ -720,18 +776,19 @@ def block_events(n, judgement):
         for code in sorted(cells):
             e = cells[code][0]["tile_event"]
             where = "、".join(f"({c['x']}, {c['y']})" for c in cells[code])
-            handler = cite(table[e["handler"]]) if e["handler"] < len(table) else "—"
+            handler = cite_slot(e["handler"])
             lines.append(f"| {code} | {where} | {TRIGGER.get(e['trigger'], e['trigger'])} | "
                          f"{e['handler']} | {handler} |")
     else:
         lines.append("本章沒有格子事件。")
-    deaths = [s for s in dat["spawns"] if 2 <= s["death_op"] < 0xFF]
+    deaths = [s for s in dat["spawns"] if 2 <= s["death_op"] < 0xFF
+              and wave_deploys(judgement, s["wave"])]
     if deaths:
         lines += ["", "死亡腳本裡的事件與文字：", "", "| # | 單位 | 波次 | 死亡腳本 |",
                   "| ---: | --- | ---: | --- |"]
         for s in deaths:
-            lines.append(f"| {s['index']} | {_hex(s['char_id'])} {_cell(unit_name(s['char_id']))} | "
-                         f"{'FF' if s['wave'] == 0xFF else s['wave']} | {_cell(death_cell(n, s))} |")
+            lines.append(f"| {s['index']} | {_hex(s['char_id'])} {cell(unit_name(s['char_id']))} | "
+                         f"{wave_label(s['wave'])} | {cell(death_cell(n, s))} |")
     return "\n".join(lines)
 
 
@@ -747,7 +804,6 @@ def block_scripts(n, judgement):
     found = chapter_scripts(n)
     if not found:
         return "本章的處理函式不播放過場腳本。"
-    kinds = {"init": "開場", "end": "勝利", "event": "戰鬥中事件"}
     lines = ["格式與每個指令的意義見 [`resource_info/cutscene_script.md`](../resource_info/"
              f"cutscene_script.md)。`FDETXT{n:02d}#0xNN` 是本章文字區塊的條目，全文在下方「對話」；"
              "切到額外場景之後顯示的文字直接列出（那些區塊的正典是 "
@@ -757,7 +813,7 @@ def block_scripts(n, judgement):
         lines += ["", f"### `{member}`", ""]
         callers = []
         for c in mine:
-            label = f"{kinds[c.kind]}：{cite(c.function)}"
+            label = f"{KIND_LABEL[c.kind]}：{cite(c.function)}"
             if label not in callers:
                 callers.append(label)
         lines.append("- " + "；".join(callers))
@@ -767,12 +823,12 @@ def block_scripts(n, judgement):
         lines.append(f"- {r.size} byte、{len(r.steps)} 步；起始地圖 {r.initial_map}，切換地圖 "
                      f"{switches}，結束於地圖 {r.trace.final_map}")
         for finding in r.trace.findings:
-            lines.append(f"- 越界：{_cell(finding)}")
+            lines.append(f"- 越界：{cell(finding)}")
         lines += ["", "| 偏移 | 指令 | 內容 |", "| ---: | --- | --- |"]
         render = _scene_text(n)
         for traced in r.trace.steps:
             lines.append(f"| `{traced.step.offset:04x}` | `{traced.step.mnemonic}` | "
-                         f"{_cell(cs.describe(traced, render))} |")
+                         f"{cell(cs.describe(traced, render))} |")
     return "\n".join(lines)
 
 
@@ -812,10 +868,18 @@ def transcript(n, index):
 
 def block_dialogue(n, judgement):
     readers = text_readers(n)
-    judged_readers = {int(str(x["entry"]), 16): x["reader"]
-                      for x in (judgement or {}).get("text_readers", [])}
-    never = {int(str(x["entry"]), 16): x.get("why", "")
-             for x in (judgement or {}).get("never_shown", [])}
+    def judged(key, field):
+        # Malformed items are skipped here; validate_judgement reports them.
+        out = {}
+        for x in (judgement or {}).get(key, []):
+            try:
+                out[parse_entry(x["entry"])] = str(x.get(field, ""))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
+    judged_readers = judged("text_readers", "reader")
+    never = judged("never_shown", "why")
     count = len(text_block(n))
     lines = [f"`FDETXT{n:02d}.TXT` 全部 {count} 條，依條目編號排列。每條先列讀取端（顯示它的腳本步驟、"
              "處理函式或死亡腳本），再列全文：【名稱】是換說話者（頭像取自括號裡的角色編號；"

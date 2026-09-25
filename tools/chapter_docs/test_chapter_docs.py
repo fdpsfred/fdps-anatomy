@@ -23,7 +23,11 @@ PROSE = {
     "勝敗條件與特殊機制": "第 22 回合由 `fdps_chapter_03_event_turn_limit_game_over`（`0x36f10`）判定敗北。",
     "敵人配置": "石巨神分批出現。",
     "處理流程": ("進入：`fdps_chapter_03_init`（`0x20f30`）。行動後：`fdps_chapter_03_post_action`"
-                 "（`0x3a4b0`）。勝利：`fdps_chapter_03_end`（`0x3a520`）。"),
+                 "（`0x3a4b0`）。勝利：`fdps_chapter_03_end`（`0x3a520`）。事件："
+                 "`fdps_chapter_03_event_deploy_wave_for_turn`（`0x36bb0`）、"
+                 "`fdps_chapter_03_event_deploy_wave_1`（`0x36c70`）、"
+                 "`fdps_chapter_03_event_deploy_wave_14`（`0x36ea0`）、"
+                 "`fdps_chapter_03_event_turn_limit_game_over`（`0x36f10`）。"),
 }
 
 
@@ -88,6 +92,15 @@ class Generator(unittest.TestCase):
         block = facts.block_deployments(3, j)
         self.assertIn(f"永遠不會部署：沒有呼叫端，見 [刪減與未用]({facts.CUT})", block)
 
+    def test_drops_of_a_never_deployed_wave_are_one_line(self):
+        j = full_judgement(3)
+        for w in j["waves"]:
+            if w["wave"] == 5:          # record #10 drops 800 gold
+                w.update(deployed=False, why="測試")
+        block = facts.block_treasure(3, j)
+        self.assertNotIn("| 10 |", block)
+        self.assertIn("#10", block.split("另有")[1])
+
     def test_a_never_shown_entry_has_no_text(self):
         block = facts.block_dialogue(3, full_judgement(3))
         section = block.split("### `0x00`")[1].split("###")[0]
@@ -120,6 +133,22 @@ class Judgement(unittest.TestCase):
         j = full_judgement(3)
         j["never_shown"] = []
         self.assertTrue(any("0x00" in p for p in facts.validate_judgement(3, j)))
+
+    def test_entries_are_ints_or_0x_strings(self):
+        self.assertEqual(facts.parse_entry(15), 15)
+        self.assertEqual(facts.parse_entry("0x15"), 0x15)
+        with self.assertRaises(ValueError):
+            facts.parse_entry("15")
+
+    def test_a_never_deployed_wave_needs_a_reason(self):
+        j = full_judgement(3)
+        j["waves"][0] = {"wave": j["waves"][0]["wave"], "deployed": False}
+        self.assertTrue(any("gives no reason" in p for p in facts.validate_judgement(3, j)))
+
+    def test_a_wave_judged_twice_is_refused(self):
+        j = full_judgement(3)
+        j["waves"].append(dict(j["waves"][0]))
+        self.assertTrue(any("judged twice" in p for p in facts.validate_judgement(3, j)))
 
     def test_an_entry_with_a_scanned_reader_cannot_be_judged(self):
         j = full_judgement(3)
@@ -175,14 +204,50 @@ class Gate(unittest.TestCase):
     def test_narrative_words_count_in_prose_but_not_in_game_text(self):
         lines = ["## 概要", "起初以為如此。", "<!-- chapter_docs:dialogue -->", "起初他說。",
                  "<!-- /chapter_docs:dialogue -->"]
-        found = [f[2] for f in gate.check_symbols(lines, {}, set()) if f[1] == "narrative"]
+        found = [f[2] for f in gate.check_kb_rules(lines, {}, set(), draft=False)
+                 if f[1] == "narrative"]
         self.assertEqual(found, [2])
+
+    def test_the_flow_section_must_cite_the_event_handlers_the_map_calls(self):
+        prose = dict(PROSE, 處理流程=PROSE["處理流程"].split("事件：")[0])
+        self.assertIn("missing-handler", self.codes(draft_text(3, prose), full_judgement(3)))
+
+    def test_joins_must_link_the_join_table(self):
+        prose = dict(PROSE, 加入與離隊="本章沒有人入隊。")
+        self.assertIn("missing-owner-link", self.codes(draft_text(3, prose), full_judgement(3)))
+
+    def test_a_link_to_a_chapter_not_yet_written_only_warns_while_drafting(self):
+        prose = dict(PROSE, 概要=PROSE["概要"] + "見 [第 29 章](ch29.md)。")
+        text = gate.fill(draft_text(3, prose), 3, full_judgement(3))
+        lenient = gate.check_page_text(text, 3, full_judgement(3), self.names, self.idents, draft=True)
+        strict = gate.check_page_text(text, 3, full_judgement(3), self.names, self.idents,
+                                      draft=False, pending_chapters=False)
+        if not (gate.LANDED / "ch29.md").exists():
+            self.assertIn("pending-chapter", {f[1] for f in lenient})
+            self.assertNotIn("broken-link", {f[1] for f in lenient if f[0] == "error"})
+            self.assertIn("broken-link", {f[1] for f in strict if f[0] == "error"})
 
     def test_regions_detect_a_hand_edited_block(self):
         filled = gate.fill(draft_text(3), 3, full_judgement(3))
         edited = filled.replace("| 3／2 |", "| 3／9 |")
         fresh = gate.regions(gate.fill(edited, 3, full_judgement(3)))
         self.assertNotEqual(gate.regions(edited)["header"], fresh["header"])
+
+
+@unittest.skipUnless(HAVE_DATA, "shipped data not present")
+class Index(unittest.TestCase):
+    def test_every_chain_must_cite_a_function(self):
+        import index
+        text = index.build_text("## 跨章機制鏈\n\n### 甲\n\n沒有引用。\n\n### 乙\n\n"
+                                "由 `fdps_chapter_03_init`（`0x20f30`）決定。\n")
+        found = [f for f in index.check(text) if f[1] == "uncited-chain"]
+        self.assertEqual(len(found), 1)
+        self.assertIn("甲", found[0][3])
+
+    def test_the_handler_tables_are_cited_from_the_snapshot(self):
+        import index
+        self.assertIn(f"`0x{facts.table_address('event'):x}`", index.table_event_slots())
+        self.assertEqual(facts.table_address("init"), 0x60074)
 
 
 if __name__ == "__main__":

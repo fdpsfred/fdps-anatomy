@@ -16,22 +16,25 @@ landed page can be re-checked against fresh data at any time.
 Errors (exit 1):
   structure            title line, ## sections, or a marker is wrong/missing
   empty-section        a prose section has no prose
-  missing-handler      處理流程 does not cite the chapter's init/post/end handler
+  missing-handler      處理流程 does not cite the chapter's init/post/end
+                       handler or an event handler its map data calls
+  missing-owner-link   加入與離隊 does not link assets/characters.md
   uncited-section      a section that states program behaviour cites no function
-  citation-mismatch    `name`（`0xaddr`） disagrees with the Ghidra snapshot
-  unknown-symbol       a backticked fdps_ symbol exists nowhere
-  broken-link          a relative link resolves to nothing
-  forbidden-reference  the page cites workspace/ or legacy/
-  narrative            the page narrates the analysis
+  citation-mismatch, unknown-symbol, broken-link, forbidden-reference,
+  narrative            check_mechanics.check_text's rules, imported (narrative
+                       only outside the generated regions: they hold dialogue)
   judgement            the judgement record does not fit the chapter's data
   undecided            a generated block still says 未判定
   stale                (landed only) a generated block differs from a fresh
                        regeneration -- data, source or judgement moved
 Warnings:
   pending-link         a link to cut_content/_index.md before the folder exists
+  pending-chapter      (draft and landing only) a link to a chapter page not
+                       landed yet; --landed / --landed-all make it an error
 
 Usage: python tools/chapter_docs/check_chapter.py --draft N [N ...] [--json]
        python tools/chapter_docs/check_chapter.py --landed N [N ...] [--json]
+       python tools/chapter_docs/check_chapter.py --landed-all [--json]
        python tools/chapter_docs/check_chapter.py --template N
 Exit : 0 when no page has an error.
 """
@@ -160,6 +163,9 @@ def section_bodies(lines):
     return out
 
 
+JOIN_OWNER = "../assets/characters.md"
+
+
 def check_prose(lines, n):
     out = []
     handlers = facts.handler_tables()
@@ -174,10 +180,17 @@ def check_prose(lines, n):
         if spec[3] and not any(True for l in body for _ in mech.citations(l)):
             out.append(("error", "uncited-section", start,
                         "## %s cites no function as `name`（`0xaddr`）" % heading))
+        if heading == "加入與離隊" and not any(JOIN_OWNER in l for l in body):
+            out.append(("error", "missing-owner-link", start,
+                        "## 加入與離隊 must link %s (the join table's owner) instead of "
+                        "repeating it" % JOIN_OWNER))
         if heading == "處理流程":
             cited = {name for l in body for name, _ in mech.citations(l)}
-            for kind in ("init", "post", "end"):
-                name = handlers[kind][n - 1]
+            wanted = [handlers[kind][n - 1] for kind in ("init", "post", "end")]
+            wanted += [facts.event_handler(slot)
+                       for slot in facts.event_slots_used(facts.battle_map(n - 1))
+                       if facts.event_handler(slot)]
+            for name in dict.fromkeys(wanted):
                 if name not in cited:
                     out.append(("error", "missing-handler", start,
                                 "## 處理流程 must cite %s" % name))
@@ -197,40 +210,48 @@ def generated_lines(lines):
     return out
 
 
-def check_symbols(lines, names, idents):
-    out = []
+# The knowledge-base checks game_mechanics owns (tools/_index.md) that apply
+# here unchanged.  Its page-shape rules (a 驗證對象 line, a citation in every
+# section) are program_info/'s and do not apply to a chapter page.
+OWNED_ELSEWHERE = {"no-verification-target", "uncited-section"}
+SIBLING_PAGE = re.compile(r"^ch(\d\d)\.md(?:#.*)?$")
+
+
+def check_kb_rules(lines, names, idents, draft, pending_chapters=None):
+    """check_mechanics.check_text on a chapter page, with two adjustments.
+
+    Narrative wording is only an error outside the generated regions: those
+    hold game dialogue, which no one can reword.  And while chapters are
+    still being written (pending_chapters, default: draft), a link to another
+    chapter page that does not exist yet is a pending-chapter warning, not an
+    error -- the final gate over every landed page is strict."""
+    if pending_chapters is None:
+        pending_chapters = draft
     generated = generated_lines(lines)
-    for no, line in enumerate(lines, 1):
-        for name, addr in mech.citations(line):
-            known = names.get(name)
-            if not known:
-                out.append(("error", "citation-mismatch", no,
-                            "`%s` is not a symbol in the Ghidra snapshot" % name))
-            elif addr not in known:
-                out.append(("error", "citation-mismatch", no,
-                            "`%s` is at %s in the Ghidra snapshot, not 0x%x"
-                            % (name, ", ".join("0x%x" % a for a in sorted(known)), addr)))
-        for m in mech.SYMBOL.finditer(line):
-            if m.group(1) not in names and m.group(1) not in idents:
-                out.append(("error", "unknown-symbol", no,
-                            "`%s` is neither in the Ghidra snapshot nor in src/" % m.group(1)))
-        if mech.FORBIDDEN.search(line):
-            out.append(("error", "forbidden-reference", no,
-                        "the knowledge base may not cite workspace/ or legacy/"))
-        m = None if no in generated else mech.NARRATIVE.search(line)
-        if m:
-            out.append(("error", "narrative", no,
-                        "'%s' describes how the analysis went; that belongs in devlog/" % m.group(0)))
+    out = []
+    for f in mech.check_text("\n".join(lines), names, idents, LANDED, ROOT,
+                             DRAFTS if draft else None):
+        if f[1] in OWNED_ELSEWHERE:
+            continue
+        if f[1] == "narrative" and f[2] in generated:
+            continue
+        if f[1] == "broken-link" and pending_chapters:
+            target = f[3].split(" ", 1)[0]
+            m = SIBLING_PAGE.match(target)
+            if m and 1 <= int(m.group(1)) <= 30:
+                out.append(("warning", "pending-chapter", f[2],
+                            "%s is not landed yet" % target))
+                continue
+        out.append(f)
     return out
 
 
-def check_page_text(text, n, judgement, names, idents, draft):
+def check_page_text(text, n, judgement, names, idents, draft, pending_chapters=None):
     """Findings for one filled page."""
     lines = text.splitlines()
     out = check_structure(lines, n)
     out += check_prose(lines, n)
-    out += check_symbols(lines, names, idents)
-    out += mech.check_links(lines, LANDED, ROOT, DRAFTS if draft else None)
+    out += check_kb_rules(lines, names, idents, draft, pending_chapters)
     if judgement is None:
         out.append(("error", "judgement", 1, "no judgement record"))
     else:
@@ -251,13 +272,16 @@ def check_draft(n, names, idents):
     return check_page_text(text, n, judgement, names, idents, draft=True)
 
 
-def check_landed(n, names, idents):
+def check_landed(n, names, idents, strict=False):
+    """A landed page.  Not strict: links to chapters not landed yet only warn
+    (the per-round gate); strict: every link must resolve (the final gate)."""
     path = LANDED / f"ch{n:02d}.md"
     if not path.exists():
         return [("error", "missing", 0, "%s does not exist" % path)]
     judgement = facts.load_judgement(n)
     text = path.read_text(encoding="utf-8")
-    out = check_page_text(text, n, judgement, names, idents, draft=False)
+    out = check_page_text(text, n, judgement, names, idents, draft=False,
+                          pending_chapters=not strict)
     fresh = regions(fill(text, n, judgement))
     for key, body in regions(text).items():
         if fresh.get(key) != body:
@@ -271,20 +295,24 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--draft", nargs="+", type=int, metavar="N")
     ap.add_argument("--landed", nargs="+", type=int, metavar="N")
+    ap.add_argument("--landed-all", action="store_true",
+                    help="every chapters/chNN.md that exists, strictly")
     ap.add_argument("--template", type=int, metavar="N")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     if a.template:
         print(template(a.template), end="")
         return 0
+    if a.landed_all:
+        a.landed = [n for n in facts.CHAPTERS if (LANDED / f"ch{n:02d}.md").exists()]
     if not (a.draft or a.landed):
-        ap.error("give --draft, --landed or --template")
+        ap.error("give --draft, --landed, --landed-all or --template")
     names, idents = mech.load_names(), mech.load_idents()
     report = {}
     for n in a.draft or []:
         report[f"ch{n:02d}"] = check_draft(n, names, idents)
     for n in a.landed or []:
-        report[f"ch{n:02d}"] = check_landed(n, names, idents)
+        report[f"ch{n:02d}"] = check_landed(n, names, idents, strict=a.landed_all)
     report = {k: [{"level": f[0], "code": f[1], "line": f[2], "message": f[3]} for f in fs]
               for k, fs in report.items()}
     errors = sum(1 for fs in report.values() for f in fs if f["level"] == "error")

@@ -24,16 +24,19 @@
 //   rebuilds chapters/_index.md; apply_pitfalls.py applies decided rows.
 //
 //   Gates after every landing: check_chapter.py --landed on the chapters of
-//   the round; index.py verify after the index is rebuilt; the link check on
-//   pitfalls.md after it is edited.  Back-sweep: chapters left with open
-//   questions or low confidence are re-read once with the other chapters'
-//   drafts and landed pages as evidence, then re-landed.
+//   the round (links to chapters not landed yet only warn); index.py verify
+//   after the index is rebuilt; the link check on pitfalls.md after it is
+//   edited; and a final strict check_chapter.py --landed-all over every page.
+//   Back-sweep: chapters left with open questions or low confidence are
+//   re-read once with the other chapters' drafts and landed pages as
+//   evidence, then re-landed.
 //
-//   Errors: one retry per chapter; a round in which every agent returns
-//   nothing stops the run (upstream failure); a drafter reporting that Ghidra
-//   or the repository tools stopped answering stops the run.  After a stop no
-//   index, pitfall or devlog stage runs, every skipped chapter is listed in
-//   unfinished, and the run record is still archived.
+//   Errors: one retry per chapter and per script stage; a round in which
+//   every agent returns nothing stops the run (upstream failure); a drafter
+//   reporting that the repository tools stopped answering stops the run.
+//   After a stop no index, pitfall or devlog stage runs, every skipped
+//   chapter is listed in unfinished, and the run record is still archived --
+//   a failed preparation included.
 //   Resume: every drafting agent first checks for its own draft and meta and
 //   returns them if complete and clean, so re-running the whole script redoes
 //   only what is missing; land.py, index.py and apply_pitfalls.py are
@@ -57,6 +60,7 @@ export const meta = {
     { title: 'Rescan', detail: 're-read chapters left open, with the others as evidence' },
     { title: 'Index', detail: 'cross-chapter chains drafted; index.py rebuilds _index.md' },
     { title: 'Pitfalls', detail: 'one judge per candidate, sequential, writes a verdict file' },
+    { title: 'Verify', detail: 'strict gate over every landed page and the index' },
     { title: 'Record', detail: 'devlog entry and run record' },
   ],
 }
@@ -216,6 +220,20 @@ const INDEX_REPORT = {
   },
 }
 
+const FINAL_GATE = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['pages', 'errors', 'failing', 'index_errors', 'ok'],
+  properties: {
+    pages: { type: 'integer', description: 'How many chapter pages step 1 checked' },
+    errors: { type: 'integer', description: 'The "errors" field of step 1' },
+    failing: { type: 'array', items: { type: 'integer' }, description: 'Chapters with an error in step 1' },
+    index_errors: { type: 'integer', description: 'The "errors" field of step 2' },
+    ok: { type: 'boolean' },
+    problems: { type: 'string' },
+  },
+}
+
 const PITFALL_VERDICT = {
   type: 'object',
   additionalProperties: false,
@@ -301,7 +319,8 @@ ones, the rest are the knowledge base's conventions:
                               what happens, how it ends.
       ## 加入與離隊           who joins, leaves or fights as a guest; the join
                               itself is owned by ../assets/characters.md#加入 --
-                              link it, do not repeat its table.
+                              link it (the gate requires the link), do not
+                              repeat its table.
       ## 勝敗條件與特殊機制   what the post-action handler and the events really
                               test to win or lose (turn limits, protected units,
                               escape cells, bosses), conditional rewards, hidden
@@ -321,8 +340,9 @@ ones, the rest are the knowledge base's conventions:
                               post-action check, the victory handler and every
                               chapter event handler this chapter's data calls:
                               what each does, step by step, in order, with its
-                              citation.  All three of init / post / end MUST be
-                              cited here.
+                              citation.  init / post / end and every event
+                              handler the header block lists MUST be cited here
+                              (the gate checks each one).
       ## 回合事件與格子事件 / ## 過場腳本 / ## 對話
                               generated; add a sentence only if a reader needs
                               it (e.g. which script branch is the good one).
@@ -337,7 +357,9 @@ ones, the rest are the knowledge base's conventions:
       table values and names    ../assets/  (characters.md, enemies.md, items.md, shops.md, ...)
       mechanisms                ../program_info/  (link a page only if it exists now)
       rebuild traps             ../rebuild_info/pitfalls.md
-      other chapters            chNN.md in the same folder
+      other chapters            chNN.md in the same folder (a chapter not
+                                written yet only warns now; the final gate
+                                requires it to exist, which it will)
       content nothing reaches   (an item no one can get, an enemy that never
                                 deploys, a line nothing shows): ONE line, linked
                                 ONLY as ../cut_content/_index.md -- that folder is
@@ -550,7 +572,9 @@ for what the evidence supports, at least:
                        goes)
 plus any other chain the notes reveal (flags carried between chapters, units
 carried from one map to the next).  Say plainly when a subsection has nothing:
-"FDPS 沒有…" is a conclusion too.
+"FDPS 沒有…" is a conclusion too -- but every ### subsection must still cite
+at least one function (the gate checks it): the handler that shows the
+absence, e.g. the init handlers that add every character unconditionally.
 
 Rules: Traditional Chinese; every rule tied to its function as
 \`fdps_name\`（\`0xaddr\`） (entry address from ${REPO}\\ghidra_snapshot\\functions.txt);
@@ -579,6 +603,19 @@ Run, in order:
 Report build_errors and verify_errors (the "errors" field of each), wrote_file =
 whether build wrote the page, and ok = both 0.  If either reports errors, copy
 them into problems; do NOT fix anything by hand.`
+}
+
+function finalGatePrompt() {
+  return `Run the final gate over the chapter pages.  You judge nothing and edit
+nothing.
+
+1.  python ${TOOLS}\\check_chapter.py --landed-all --json
+2.  python ${TOOLS}\\index.py verify --json
+
+Report pages = the number of chapters step 1 checked, errors = its "errors",
+failing = the chapter numbers with at least one error-level finding, index_errors
+= the "errors" of step 2, ok = both 0.  Copy the first few error messages into
+problems.  Do NOT fix anything.`
 }
 
 function pitfallPrompt(c) {
@@ -684,23 +721,32 @@ async function draftRound(chapters, label, promptOf, phaseName) {
       agent(promptOf(n), { label: `${label}-retry:ch${nn(n)}`, phase: phaseName, schema: DRAFT_SUMMARY }))))
       .filter(Boolean)
     retried.forEach((s) => noteDead(`${label}-retry:ch${nn(s.chapter)}`, s))
-    if (retried.length === 0 && lost.length > 1) {
-      halt(`${label}-retry: all ${lost.length} retried agent(s) returned nothing -- upstream failure`, lost)
+    if (retried.length === 0) {
+      halt(`${label}-retry: all ${lost.length} retried agent(s) returned nothing -- upstream failure`, [])
     }
     for (const s of retried.filter(usable)) {
       good.push(s)
     }
     lost = chapters.filter((n) => !good.some((s) => s.chapter === n))
-    if (!halted) {
-      for (const n of lost) {
-        const s = retried.find((r) => r.chapter === n)
-        unfinished.push(`ch${nn(n)}: no clean draft after a retry${s && s.note ? ' (' + s.note + ')' : ''}`)
-      }
+    for (const n of lost) {
+      const s = retried.find((r) => r.chapter === n)
+      unfinished.push(`ch${nn(n)}: no clean draft after a retry${s && s.note ? ' (' + s.note + ')' : ''}`)
     }
   } else if (lost.length > 0) {
     unfinished.push(`not drafted after the stop: chapters ${lost.join(' ')}`)
   }
   return good
+}
+
+// A script stage (landing, index, apply, a pitfall judge): one retry when the
+// agent returns nothing, as for the chapters.
+async function once(prompt, opts) {
+  const first = await agent(prompt, opts)
+  if (first) {
+    return first
+  }
+  log(`${opts.label}: no answer, retrying once`)
+  return await agent(prompt, Object.assign({}, opts, { label: opts.label + '-retry' }))
 }
 
 // Land a set of chapters and gate them.  The meta file, not the agent's word,
@@ -709,7 +755,7 @@ async function landRound(chapters, label) {
   if (chapters.length === 0) {
     return []
   }
-  const report = await agent(landPrompt(chapters), { label: label, phase: 'Land', schema: LAND_REPORT })
+  const report = await once(landPrompt(chapters), { label: label, phase: 'Land', schema: LAND_REPORT })
   if (!report) {
     unfinished.push(`${label}: the landing agent returned nothing; chapters ${chapters.join(' ')} not landed`)
     return []
@@ -727,14 +773,9 @@ async function landRound(chapters, label) {
 // ---------------------------------------------------------------- prepare
 
 phase('Prepare')
-const prep = await agent(preparePrompt(), { label: 'prepare', phase: 'Prepare', schema: PREPARE })
+const prep = await once(preparePrompt(), { label: 'prepare', phase: 'Prepare', schema: PREPARE })
 if (!prep || !prep.ok) {
-  return {
-    date: DATE,
-    halted: true,
-    haltReason: 'prepare failed: ' + (prep ? (prep.problems || 'not ok') : 'no response'),
-    unfinished: CHAPTERS.map((n) => `ch${nn(n)}: not drafted, the inputs could not be generated`),
-  }
+  halt('prepare failed: ' + (prep ? (prep.problems || 'not ok') : 'no response'), [])
 }
 
 // ------------------------------------------------------ draft and land
@@ -791,7 +832,11 @@ if (!halted) {
     }
     if (!halted && again.length > 0) {
       phase('Land')
-      await landRound(again.map((s) => s.chapter), 'land-rescan')
+      for (const n of await landRound(again.map((s) => s.chapter), 'land-rescan')) {
+        if (!landed.includes(n)) {
+          landed.push(n)
+        }
+      }
     }
   }
 } else {
@@ -802,7 +847,7 @@ if (!halted) {
 
 let collected = null
 if (!halted && landed.length > 0) {
-  collected = await agent(collectPrompt(), { label: 'collect', phase: 'Index', schema: COLLECTED })
+  collected = await once(collectPrompt(), { label: 'collect', phase: 'Index', schema: COLLECTED })
   if (!collected) {
     unfinished.push('collect: could not read the draft metadata; index chains and pitfalls skipped')
   } else if (collected.unreadable.length > 0) {
@@ -820,11 +865,11 @@ let chains = null
 let indexApply = null
 if (!halted && collected) {
   phase('Index')
-  chains = await agent(chainsPrompt(), { label: 'index-chains', phase: 'Index', schema: INDEX_REPORT })
+  chains = await once(chainsPrompt(), { label: 'index-chains', phase: 'Index', schema: INDEX_REPORT })
   if (!chains || !chains.wrote_file || !chains.ok) {
     unfinished.push(`index chains: ${chains ? (chains.problems || 'not ok') : 'the agent returned nothing'}`)
   } else {
-    indexApply = await agent(indexApplyPrompt(), { label: 'index-build', phase: 'Index', schema: INDEX_REPORT })
+    indexApply = await once(indexApplyPrompt(), { label: 'index-build', phase: 'Index', schema: INDEX_REPORT })
     if (!indexApply || !indexApply.ok) {
       unfinished.push(`index build: ${indexApply ? (indexApply.problems || 'not ok') : 'the agent returned nothing'}`)
     }
@@ -841,10 +886,24 @@ const verdicts = []
 let applyReport = null
 if (!halted && collected && landed.length > 0) {
   phase('Pitfalls')
+  // Two chapters may report the same id: judge it once, as reported by both.
   const candidates = []
   for (const c of SEED_PITFALLS.concat(collected.pitfall_candidates)) {
-    if (!candidates.some((x) => x.id === c.id)) {
-      candidates.push(c)
+    const known = candidates.find((x) => x.id === c.id)
+    if (!known) {
+      candidates.push(Object.assign({}, c, { chapter: c.chapter.slice() }))
+      continue
+    }
+    for (const n of c.chapter) {
+      if (!known.chapter.includes(n)) {
+        known.chapter.push(n)
+      }
+    }
+    if (c.what !== known.what) {
+      log(`pitfalls: ${c.id} reported again with a different description by chapter ${c.chapter.join(' ')}; `
+        + 'judged once with the first description')
+      unfinished.push(`pitfall:${c.id}: a second description from chapter ${c.chapter.join(' ')} was not `
+        + `judged separately: ${c.what}`)
     }
   }
   log(`pitfalls: ${candidates.length} candidate(s)`)
@@ -854,7 +913,7 @@ if (!halted && collected && landed.length > 0) {
       unfinished.push(`not judged after the stop: ${candidates.slice(i).map((c) => c.id).join(' ')}`)
       break
     }
-    const v = await agent(pitfallPrompt(candidates[i]),
+    const v = await once(pitfallPrompt(candidates[i]),
       { label: `pitfall:${candidates[i].id}`, phase: 'Pitfalls', schema: PITFALL_VERDICT })
     if (!v || !v.wrote_file) {
       unfinished.push(`pitfall:${candidates[i].id}: no verdict file`)
@@ -871,13 +930,34 @@ if (!halted && collected && landed.length > 0) {
     log(`  ${v.id}: ${v.outcome} -- ${v.reason}`)
   }
   if (!halted && verdicts.some((v) => v.outcome === 'added' || v.outcome === 'linked')) {
-    applyReport = await agent(applyPitfallsPrompt(), { label: 'apply-pitfalls', phase: 'Pitfalls', schema: APPLY_REPORT })
+    applyReport = await once(applyPitfallsPrompt(), { label: 'apply-pitfalls', phase: 'Pitfalls', schema: APPLY_REPORT })
     if (!applyReport || !applyReport.ok) {
       unfinished.push(`apply pitfalls: ${applyReport ? (applyReport.problems || 'not ok') : 'the agent returned nothing'}`)
     }
   }
 } else if (halted) {
   skipped('pitfalls')
+}
+
+// ------------------------------------------------------------ final gate
+//
+// Strict: every landed page, links to other chapters included, and the index.
+
+let finalGate = null
+if (!halted && landed.length > 0) {
+  phase('Verify')
+  finalGate = await once(finalGatePrompt(), { label: 'final-gate', phase: 'Verify', schema: FINAL_GATE })
+  if (!finalGate) {
+    unfinished.push('final gate: the agent returned nothing; the landed pages are not verified as a whole')
+  } else {
+    log(`final gate: ${finalGate.pages} page(s), ${finalGate.errors} error(s), index ${finalGate.index_errors}`)
+    if (!finalGate.ok) {
+      unfinished.push(`final gate: chapters ${finalGate.failing.join(' ') || '-'} failing, index errors `
+        + `${finalGate.index_errors}${finalGate.problems ? ' (' + finalGate.problems + ')' : ''}`)
+    }
+  }
+} else if (halted) {
+  skipped('final gate')
 }
 
 // ----------------------------------------------------------------- record
@@ -894,6 +974,7 @@ const stats = {
   index: { chains: chains, build: indexApply },
   pitfallVerdicts: verdicts,
   applyPitfalls: applyReport,
+  finalGate: finalGate,
   // For the cut_content/ work (tickets 25.11-25.14): what the chapter drafters
   // judged unreachable.  The judgements themselves are in
   // tools/chapter_docs/judgements/chNN.json (never_shown, waves deployed=false).

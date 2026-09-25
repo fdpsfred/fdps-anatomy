@@ -31,10 +31,20 @@ PITFALLS = facts.ROOT / "rebuild_info" / "pitfalls.md"
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    verdicts = [json.loads(p.read_text(encoding="utf-8"))
-                for p in sorted(VERDICTS.glob("*.json"))] if VERDICTS.exists() else []
+    verdicts, unreadable = [], []
+    for p in sorted(VERDICTS.glob("*.json")) if VERDICTS.exists() else []:
+        try:
+            v = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError as e:
+            unreadable.append((p.stem, "error", "verdict file does not parse: %s" % e))
+            continue
+        if not isinstance(v, dict):
+            unreadable.append((p.stem, "error", "verdict file is not a JSON object"))
+            continue
+        verdicts.append(v)
     old = PITFALLS.read_bytes().decode("utf-8")
     new, results = apply_pitfalls(old, verdicts)
+    results = unreadable + results
     if new != old:
         PITFALLS.write_bytes(new.encode("utf-8"))
     links = [f for f in mech.check_file_links(PITFALLS, facts.ROOT) if f[0] == "error"]
