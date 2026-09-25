@@ -1,0 +1,1071 @@
+{
+ "total": 53,
+ "complete": 53,
+ "unfinished": [],
+ "unfinished_detail": [],
+ "by_verdict": {
+  "holds": [
+   "C2",
+   "C6",
+   "C8",
+   "C9",
+   "C11",
+   "C14",
+   "C15",
+   "U01",
+   "U03",
+   "U04",
+   "U05",
+   "U06",
+   "U07",
+   "I02",
+   "I08",
+   "B2",
+   "B3",
+   "B5",
+   "S03",
+   "S07",
+   "S08",
+   "S10",
+   "S12",
+   "S13"
+  ],
+  "refuted": [
+   "S09"
+  ],
+  "needs_correction": [
+   "C1",
+   "C3",
+   "C4",
+   "C5",
+   "C7",
+   "C10",
+   "C12",
+   "C13",
+   "C16",
+   "U02",
+   "U08",
+   "U09",
+   "U10",
+   "I01",
+   "I03",
+   "I04",
+   "I05",
+   "I06",
+   "I07",
+   "B1",
+   "B4",
+   "B6",
+   "S01",
+   "S02",
+   "S04",
+   "S05",
+   "S06",
+   "S11"
+  ]
+ },
+ "by_category": {
+  "residual": [
+   "C2",
+   "C6",
+   "C7",
+   "C11",
+   "U01",
+   "U02",
+   "U03",
+   "U04",
+   "U05",
+   "U06",
+   "U07",
+   "I03",
+   "I04",
+   "I05",
+   "B1",
+   "B2",
+   "B3",
+   "B4",
+   "S01",
+   "S02",
+   "S04",
+   "S05",
+   "S06",
+   "S08",
+   "S11",
+   "S12"
+  ],
+  "stub": [
+   "U08",
+   "I01",
+   "I02",
+   "I08",
+   "B5",
+   "S03",
+   "S07"
+  ],
+  "sealed": [
+   "C1",
+   "I06",
+   "S10"
+  ],
+  "predecessor_leftover": [
+   "C3",
+   "C4",
+   "C5",
+   "C8",
+   "C9",
+   "C10"
+  ],
+  "excluded": [
+   "C12",
+   "C14",
+   "C16",
+   "U09",
+   "I07",
+   "S09"
+  ],
+  "negative": [
+   "C13",
+   "C15",
+   "U10",
+   "B6",
+   "S13"
+  ]
+ },
+ "by_ticket": {
+  "25.10": {
+   "holds": [
+    "C2",
+    "C6",
+    "C8",
+    "C9",
+    "C11",
+    "C14",
+    "C15"
+   ],
+   "refuted": [],
+   "needs_correction": [
+    "C1",
+    "C3",
+    "C4",
+    "C5",
+    "C7",
+    "C10",
+    "C12",
+    "C13",
+    "C16"
+   ]
+  },
+  "25.11": {
+   "holds": [
+    "U01",
+    "U03",
+    "U04",
+    "U05",
+    "U06",
+    "U07"
+   ],
+   "refuted": [],
+   "needs_correction": [
+    "U02",
+    "U08",
+    "U09",
+    "U10"
+   ]
+  },
+  "25.12": {
+   "holds": [
+    "I02",
+    "I08"
+   ],
+   "refuted": [],
+   "needs_correction": [
+    "I01",
+    "I03",
+    "I04",
+    "I05",
+    "I06",
+    "I07"
+   ]
+  },
+  "25.13": {
+   "holds": [
+    "B2",
+    "B3",
+    "B5"
+   ],
+   "refuted": [],
+   "needs_correction": [
+    "B1",
+    "B4",
+    "B6"
+   ]
+  },
+  "25.14": {
+   "holds": [
+    "S03",
+    "S07",
+    "S08",
+    "S10",
+    "S12",
+    "S13"
+   ],
+   "refuted": [
+    "S09"
+   ],
+   "needs_correction": [
+    "S01",
+    "S02",
+    "S04",
+    "S05",
+    "S06",
+    "S11"
+   ]
+  }
+ },
+ "category_changed": [
+  {
+   "id": "C3",
+   "suggested": "residual",
+   "judged": "predecessor_leftover"
+  },
+  {
+   "id": "C5",
+   "suggested": "residual",
+   "judged": "predecessor_leftover"
+  },
+  {
+   "id": "C8",
+   "suggested": "stub",
+   "judged": "predecessor_leftover"
+  },
+  {
+   "id": "U07",
+   "suggested": "excluded",
+   "judged": "residual"
+  },
+  {
+   "id": "S09",
+   "suggested": "residual",
+   "judged": "excluded"
+  }
+ ],
+ "reread": [
+  {
+   "id": "C1",
+   "changed": true
+  },
+  {
+   "id": "C2",
+   "changed": true
+  },
+  {
+   "id": "C3",
+   "changed": true
+  },
+  {
+   "id": "C4",
+   "changed": false
+  },
+  {
+   "id": "C5",
+   "changed": false
+  },
+  {
+   "id": "C6",
+   "changed": false
+  },
+  {
+   "id": "C7",
+   "changed": true
+  },
+  {
+   "id": "C8",
+   "changed": false
+  },
+  {
+   "id": "C10",
+   "changed": true
+  },
+  {
+   "id": "C11",
+   "changed": false
+  },
+  {
+   "id": "C12",
+   "changed": false
+  },
+  {
+   "id": "C13",
+   "changed": true
+  },
+  {
+   "id": "C16",
+   "changed": true
+  },
+  {
+   "id": "U02",
+   "changed": false
+  },
+  {
+   "id": "U05",
+   "changed": true
+  },
+  {
+   "id": "U07",
+   "changed": false
+  },
+  {
+   "id": "U08",
+   "changed": false
+  },
+  {
+   "id": "U09",
+   "changed": true
+  },
+  {
+   "id": "U10",
+   "changed": false
+  },
+  {
+   "id": "I01",
+   "changed": true
+  },
+  {
+   "id": "I02",
+   "changed": false
+  },
+  {
+   "id": "I03",
+   "changed": true
+  },
+  {
+   "id": "I04",
+   "changed": true
+  },
+  {
+   "id": "I05",
+   "changed": false
+  },
+  {
+   "id": "I06",
+   "changed": true
+  },
+  {
+   "id": "I07",
+   "changed": false
+  },
+  {
+   "id": "I08",
+   "changed": true
+  },
+  {
+   "id": "B1",
+   "changed": false
+  },
+  {
+   "id": "B4",
+   "changed": true
+  },
+  {
+   "id": "B6",
+   "changed": false
+  },
+  {
+   "id": "S01",
+   "changed": false
+  },
+  {
+   "id": "S02",
+   "changed": false
+  },
+  {
+   "id": "S04",
+   "changed": true
+  },
+  {
+   "id": "S05",
+   "changed": false
+  },
+  {
+   "id": "S06",
+   "changed": true
+  },
+  {
+   "id": "S08",
+   "changed": false
+  },
+  {
+   "id": "S09",
+   "changed": false
+  },
+  {
+   "id": "S11",
+   "changed": false
+  },
+  {
+   "id": "S13",
+   "changed": false
+  }
+ ],
+ "still_open": [
+  {
+   "id": "C1",
+   "confidence": "high",
+   "open_question": "沒有在 DOSBox 實測 fdps_village_signboard_menu 在執行期的 EBP 值，因此無法確定它的位元組是否剛好構成可按的三鍵組合；「進不去」是依常理推定而非實測。這不影響判定：無論位址為何，這組鍵都不是設計好的暗號，玩家無從得知。"
+  },
+  {
+   "id": "C2",
+   "confidence": "high",
+   "open_question": "類別介於殘留內容與前作遺留之間，仍未定案：模式 9 承自 FD2，且 FD2 出貨資料確實用過它（第 18 章兩筆 0x89），這點支持前作遺留；但 FDPS 對模式 9 走不動後的退路鏈做了 FD2 沒有的改寫（其他從 FD2 繼承的模式如 3 未改），顯示 FDPS 開發時曾針對此模式動手，因此暫判殘留內容。改寫是為了 FDPS 某個後來撤掉的關卡，還是單純順手調整，映像與資料都無法判定。"
+  },
+  {
+   "id": "C3",
+   "confidence": "high",
+   "open_question": "名冊區塊在 DOS/4GW 下 malloc 回來的初始內容實際是否為 0、示範戰釋放後被哪些配置覆寫，沒有實機量測；也未逐一確認 HP 回復物品的目標清單是否讓 AI 行動者實際把名冊來的我方單位列為目標。這只影響「恆為 0」的嚴格程度，不影響分類。"
+  },
+  {
+   "id": "C4",
+   "confidence": "high",
+   "open_question": "FD2 端是否真的沒有任何寫入 bit 2 的地方，只以 fd2-anatomy/src 的 grep 判斷（整個指派、|=、整筆複製），沒有在 FD2 的 Ghidra 映像上逐指令確認。"
+  },
+  {
+   "id": "C5",
+   "confidence": "high",
+   "open_question": "FD2 對應關係是由程式形狀（同一位置的讀取、相同的 0＝退回／非 0＝結束語意）推定，沒有逐指令比對 FD2 0x18890 與 FDPS 00015470 的組語；類別在前作遺留與殘留內容之間取前者，因為 FDPS 另有等價的區域變數實作，此全域在 FDPS 不承載任何規劃中的內容。"
+  },
+  {
+   "id": "C6",
+   "confidence": "high",
+   "open_question": "分類介於殘留內容與排除之間：transit.c 是遊戲自有的轉場程式庫，其中 random_blocks 與 zoom 有使用；box 與 slide 若視為「通用程式庫沒用到的 API」則屬排除，若視為做好卻沒接上的轉場效果則屬殘留內容。"
+  },
+  {
+   "id": "C8",
+   "confidence": "high",
+   "open_question": "分類介於空殼與前作遺留之間：這個欄位確實存在卻從沒放進內容，符合空殼；但檔案佈局與 FD2.SAV 逐項相同，而 FD2 的四格都選得到，所以更像是 FDPS 沿用前作格式後把 slot 數減成 3 所留下的痕跡。FDPS 究竟是刻意把格數砍成 3，還是從未打算使用第四格，無法從程式判斷。"
+  },
+  {
+   "id": "C10",
+   "confidence": "high",
+   "open_question": "FDPS 版相對 FD2 改過介面（指標槽回傳、刪掉長度全域與 OOM 檢查），表示這支函式在 FD2 之後曾被改寫過；改寫是在 FDPS 開發初期（還打算沿用 DAT 封裝檔、後來改成 .VFS 才棄用）還是在中間某個作品就已完成，僅憑映像無法判定。這是開發沿革問題，不影響分類。"
+  },
+  {
+   "id": "C11",
+   "confidence": "high",
+   "open_question": "分類介於殘留內容與排除之間：這組是遊戲自己的 audio 包裝層（非第三方庫），且完整可運作，故判殘留內容；但若 audio.c 被視為開發商跨作品共用的引擎模組，則屬「通用程式庫未用的 API」而應排除。FD2 未見同樣函式，無法用前作確定其來源。"
+  },
+  {
+   "id": "C16",
+   "confidence": "high",
+   "open_question": "調查報告列出的十項防禦性分支與五項寫了不讀的欄位沒有逐項重驗，只確認 src 有這類註解。fdps_move_grid_set_stop_flag（00010da0）究竟是被 -oe 展開還是原作本來就沒呼叫、在呼叫端手寫或用巨集，組語無法斷定（movegrid.c:89-104）。過場腳本 opcode 0x13 的五次出現沿用第一讀者的資料，未重新解碼。"
+  },
+  {
+   "id": "U05",
+   "confidence": "high",
+   "open_question": "MAP46／52／55 中角色 id 0x97–0x9C 的部署 record 確實會被部署：至少 MAP46 由第 6 章勝利過場 WIN05.DAT 的 SWITCH_MAP 0x2E 載入，角色 0x97 在場上（MAP52、MAP55 依知識庫分別由 ICON11、ICON08 過場進入，本次未逐一解碼）。這些過場演員的職業碼讀自 ENEMYDAT.DAT 緩衝區之後的堆積殘值，實際值只有執行期才知道，理論上可能碰巧等於 1C／1E／23；但那是越界讀取的偶然值，演員只在過場中轉向、行走、退場，不構成對這三個職業的設計上使用，不影響殘留內容的歸類。"
+  },
+  {
+   "id": "U07",
+   "confidence": "high",
+   "open_question": "`15`、`1F` 是不是「蘭斯洛特的另一版」、`32`–`3A` 的複本原本要做什麼，都只能從資料形狀推論，沒有程式或文字能確認；`32`–`3A` 也可能只是製表時的填充列，所以兩者歸殘留內容還是排除類（資料製作殘跡）的界線不明確。"
+  },
+  {
+   "id": "U08",
+   "confidence": "medium",
+   "open_question": "技師的習得索引指向空記錄，究竟是原本打算給內容，還是單純照「索引等於自身編號」的慣例填入而不打算學法術，資料本身無法區分；空殼或排除（資料填寫慣例）之間的界線不明。"
+  },
+  {
+   "id": "U09",
+   "confidence": "high",
+   "open_question": "問題縮小為 AI 的移動會不會把施法者或幽魂帶到那幾格：地圖 16 是暗魔導士在回合開始時站在 (18,17)，MP 至少 15；地圖 22 是幽魂走到 (21,3)／(21,4)，旁邊的 (24,3)／(24,4) 剛好有亡魂，或死神在 (20,6) 而 (24,6) 有亡魂。敵兵的行為值（0、2、3）與追擊對象都會影響它們停在哪一格，只看靜態資料推不出來，要實機或模擬才能確認原版會不會因此當機。這不影響本條歸為排除。"
+  },
+  {
+   "id": "I02",
+   "confidence": "high",
+   "open_question": "分類介於空殼與前作遺留之間：這個目的地游標分支的形狀直接繼承自 FD2 的傳送道具（FD2 效果碼 0x17，有完整效果），但 FDPS 改成 0x19／0x1C 兩碼並拿掉角色檢查，顯示有被改寫過，因此暫歸空殼。另外道具 id 0xFF（FF BUG 道具）的記錄落在表尾之外，其 +0x0D 是執行期堆積內容，理論上可能剛好是 0x19 或 0x1C，未能確認。"
+  },
+  {
+   "id": "I03",
+   "confidence": "medium",
+   "open_question": "55 件中有一部分是敵人專用或數值像佔位（價格 2 之類），整批歸為殘留內容不一定都對，逐件歸類要另外判斷。抽獎發獎讀的是未初始化的堆疊槽，本次沒有證明它在任何呼叫路徑下都不會剛好等於斬鐵劍那一級，C0/C1 拿不到是依程式結構加上攻略站「只拿到藥草」的說法。另外只靠掉落取得的 6D 地獄鎧甲（MAP21 第 5 波）沒有逐一確認那一波一定會出場，這只影響 171 那一側。"
+  },
+  {
+   "id": "I05",
+   "confidence": "high",
+   "open_question": "MAP51 是否原本規劃為戰場（被砍的戰場）無法由資料或程式碼確定：slot 數、尺寸與獨有寶物表支持這個推測，但沒有寶箱格、事件與 COD 座標反對它。"
+  },
+  {
+   "id": "I06",
+   "confidence": "high",
+   "open_question": "S-0x20 在 transition_zoom 的 POP EDI（0003190d）之後到抽獎 SUB ESP,0x94（00036466）之前約十條指令的期間落在 ESP 之下；若此時有硬體中斷在同一堆疊上推入，該格會被覆寫。CPU 自動推入的 EFLAGS（IF=1 時 ≥ 0x202）、CS、EIP 都不可能是 0/1/2，只有 handler 自己再推入的值理論上可能是；DOS/4GW 是否在應用程式堆疊上處理中斷未查證、未實測，實務上可視為固定走藥草分支。"
+  },
+  {
+   "id": "I08",
+   "confidence": "high",
+   "open_question": "分類：表尾 25 筆空 record 與 19 格空名稱屬「slot 存在但沒填內容」的空殼；類型碼 0A–0C、14 的空號與妖魔／守護獸的 2D 更像編號空號或資料輸入值，可能應歸排除。本條把數項合為一條，歸類邊界不明確。2D 所在的 PROEQU 第 0x20、0x21 列已確認不會被查詢（讀取端只服務隊伍成員，隊伍成員職業碼最大 0x19），所以 2D 是無人讀取的列裡指向不存在類型的值；它是替怪物專用物品類型預留而未填（空殼）還是單純輸入值（排除），資料本身無法分辨，仍未定。"
+  },
+  {
+   "id": "S05",
+   "confidence": "high",
+   "open_question": "FDETXT19 酒館的「奧妙的數字」是否就是第 20 章（1324）或第 19 章（12）的提示無法從資料判定，因此「正式版第 20 章無提示」只對第 20 章自己的村莊台詞成立。"
+  },
+  {
+   "id": "S08",
+   "confidence": "high",
+   "open_question": "光碟 2 第 16 軌是否真的是結局曲的另一版本，音量曲線只是旁證，需開發者實際試聽；光碟 1 第 12 軌的曲目身分未判定。"
+  },
+  {
+   "id": "S13",
+   "confidence": "high",
+   "open_question": "這一條同時包了否定性結論（表格無多餘格、沒有空殼、影片沒漏用）與排除項（被取代的舊稿、MAP02 第 255 回合），類別無法只歸一類，這裡照主張的第一個類別記為 negative。"
+  }
+ ],
+ "new_traces": [
+  {
+   "from": "C1",
+   "ticket": "25.10",
+   "trace": "data_fdps_secret_code_match_pos 在進入村莊或換章時沒有歸零，上一章輸入到一半的比對位置會帶進下一章的暗號比對。"
+  },
+  {
+   "from": "C1",
+   "ticket": "25.10",
+   "trace": "fdps_cd_music_repeat_poll（00030c50）每 0x4b tick 呼叫 0003c6e8 時會改寫同一個堆疊槽，使索引 25 那一列的前 4 byte 偶爾變成別的值。"
+  },
+  {
+   "from": "C2",
+   "ticket": "25.10",
+   "trace": "MAP31.DAT header byte 2 記 2 筆部署紀錄，但檔案實際容納 13 筆（0x83 + 13*0x1a = 469），多出的 11 筆不會被 fdps_deploy_wave 讀到。"
+  },
+  {
+   "from": "C2",
+   "ticket": "25.10",
+   "trace": "隊伍名冊區塊以 malloc 配置（src/main.c:363）且 fdps_roster_add_character 不寫 +0x34..+0x36，隊員紀錄的 AI 位元組內容取決於配置時記憶體原值。"
+  },
+  {
+   "from": "C3",
+   "ticket": "25.10",
+   "trace": "MAP31.DAT 檔頭筆數為 2，但檔案長度容得下 13 筆部署記錄，筆數之外還有 11 筆完整記錄。"
+  },
+  {
+   "from": "C3",
+   "ticket": "25.10",
+   "trace": "src/aiscore.c:664 的註解把 AND AL,0x80 標在 0001337d，Ghidra 中該指令實際在 00013380。"
+  },
+  {
+   "from": "C3",
+   "ticket": "25.10",
+   "trace": "fdps_roster_add_character 不初始化名冊記錄的 +0x34 行為 byte，名冊區塊 malloc 後無 memset。"
+  },
+  {
+   "from": "C4",
+   "ticket": "25.10",
+   "trace": "FD2 的 bit 2 在前作本身也沒有寫入端，CHARFLAG_CANNOT_ACT 常數定義了卻沒被使用，前作的 0x85 遮罩本身可能就已經是死遮罩。"
+  },
+  {
+   "from": "C5",
+   "ticket": "25.10",
+   "trace": "FDPS 的 fdps_battle_unit_turn 沒有在每回合開頭把 0x60004 清 0，而 FD2 對應處在 fd2_player_action_menu_loop 開頭清 0，FDPS 連重設都一併拿掉。"
+  },
+  {
+   "from": "C6",
+   "ticket": "25.10",
+   "trace": "fdps_transition_slide 的 style 6 以 height 而非 width 錨定（transit.c:316），但因函式無呼叫者，此原版 bug 在遊戲中不會顯現。"
+  },
+  {
+   "from": "C7",
+   "ticket": "25.10",
+   "trace": "FIELD.VFS 除了 MAP00–MAP29 之外還有 MAP31、MAP32、MAP34–MAP64 等 MAP*.DAT；章節流程只以章節 id 0–29 載入，其餘由過場腳本的 SWITCH_MAP 切換章節編號而載入，其中 MAP31 與 MAP49 沒有任何腳本會切過去（resource_info/map.md 已記載）。"
+  },
+  {
+   "from": "C7",
+   "ticket": "25.10",
+   "trace": "死亡腳本 opcode 4（判勝）在全部 MAP*.DAT 中只出現 1 筆。"
+  },
+  {
+   "from": "C8",
+   "ticket": "25.10",
+   "trace": "戰鬥中存檔（btlmenu.c:633，0001514b）在 FDE.SAV 不存在時仍把第四格的 chapter byte 初始化成 0xFF，這是整份映像裡唯一碰到第四格的程式。"
+  },
+  {
+   "from": "C8",
+   "ticket": "25.10",
+   "trace": "整檔 checksum 位於 +0x59C7，疊在第四格 struct 尾端的 gap_a0a 保留區裡，這一點與 FD2 相同。"
+  },
+  {
+   "from": "C9",
+   "ticket": "25.10",
+   "trace": "SETSOUND.EXE 是 Miles 通用設定程式，保有「Select and configure MIDI music driver」選單與 MDI.INI 寫出功能，AILDRVR.LST 也列有 17 個 .mdi 項目，但遊戲目錄未附任何 .MDI 驅動檔。"
+  },
+  {
+   "from": "C13",
+   "ticket": "25.10",
+   "trace": "Miles AIL 的 AIL_startup（0003d718）在設定 AIL_DEBUG 環境變數時會寫出 AIL V3.02 用量記錄檔，是執行檔內唯一能由使用者開啟的除錯輸出。"
+  },
+  {
+   "from": "C13",
+   "ticket": "25.10",
+   "trace": "AIL_internal_mdi_driver_setup_full 會以驅動程式描述裡的名稱呼叫 getenv 取得 IO 參數（驅動程式自訂的環境變數，例如音效卡設定）。"
+  },
+  {
+   "from": "C13",
+   "ticket": "25.10",
+   "trace": "主鍵盤 1、2 鍵的移動快轉只在 walk.c 的四支步進函式裡比對，遊戲內是否有提示未查。"
+  },
+  {
+   "from": "C14",
+   "ticket": "25.10",
+   "trace": "fdps_chapter_27_end 的隱藏路線本身不做名冊寫回，這條路線上唯一的寫回來自 WINGA26.DAT 的 opcode 0x61。"
+  },
+  {
+   "from": "C15",
+   "ticket": "25.10",
+   "trace": "遊戲側字串池 4 byte 對齊的填充空隙裡留有看似字串片段的殘渣（0x619ca 與 0x61a76 的 \"r\\0\"、0x61fad 的 \"el\\0\"、0x61f3d 的 \"+\" 等），沒有任何引用。"
+  },
+  {
+   "from": "C15",
+   "ticket": "25.10",
+   "trace": "Ghidra 在 0x61783、0x6179f、0x61827、0x61833、0x61aa3、0x61ac9、0x61ad9、0x61aeb、0x61d03、0x61d82 定義的字串起點比真正的字串早一個 byte，把前面的填充 byte 吃進去。"
+  },
+  {
+   "from": "C16",
+   "ticket": "25.10",
+   "trace": "格子事件旗標陣列的 0x13–0x1F 共 13 格，在程式與資料中都沒有任何讀寫。"
+  },
+  {
+   "from": "C16",
+   "ticket": "25.10",
+   "trace": "fdps_cd_read_q_channel（0003c5a6，cdaudio.c:316）唯一的呼叫者是未用的 fdps_cd_read_audio_position，同屬 MSCDEX 包裝庫走不到的部分。"
+  },
+  {
+   "from": "U01",
+   "ticket": "25.11",
+   "trace": "MAP31.DAT 標頭的部署計數是 2，但檔案實際存了 13 筆部署記錄，後 11 筆永遠不會被讀到。"
+  },
+  {
+   "from": "U01",
+   "ticket": "25.11",
+   "trace": "ICON.CEL 有 20 組全空白的棋子圖示群組：34、40..51、53..56、157..159。"
+  },
+  {
+   "from": "U02",
+   "ticket": "25.11",
+   "trace": "FDETXT00 entry 0x24（角色 0x23 的名字位置）是四個字模 0x0041，在其他全空的名字 entry 之間，像是填充字串。"
+  },
+  {
+   "from": "U02",
+   "ticket": "25.11",
+   "trace": "FRIAPRDA.DAT 索引 0x32–0x3A 依序是 0x00–0x08 的逐 byte 複本，對應的 FRILEVUP.DAT 列全是 0。"
+  },
+  {
+   "from": "U03",
+   "ticket": "25.11",
+   "trace": "ICON.CEL 群組 58 與群組 57 的 12 格輪廓遮罩逐格相同，是同一套動作改色並小幅修改的版本。"
+  },
+  {
+   "from": "U03",
+   "ticket": "25.11",
+   "trace": "角色 id 0x39、0x3A 小於敵方基準 0x3C，若被部署會讀友方基本值與成長表的第 0x39、0x3A 筆，這兩筆的內容未檢查。"
+  },
+  {
+   "from": "U04",
+   "ticket": "25.11",
+   "trace": "MAP31.DAT 在部署筆數（+2 為 2）之後還有 11 筆完整部署記錄，其中含 char 140（@0xd1）與 char 131（@0x1a1）。"
+  },
+  {
+   "from": "U04",
+   "ticket": "25.11",
+   "trace": "FACE.CEL 另有三組逐 byte 相同的記錄：3 與 116、122 與 146、125 與 139。"
+  },
+  {
+   "from": "U04",
+   "ticket": "25.11",
+   "trace": "頭像 159 本身也沒有任何顯示路徑：沒有 char 159 的部署記錄，也沒有 -0x11 159。"
+  },
+  {
+   "from": "U05",
+   "ticket": "25.11",
+   "trace": "職業 0x27 同樣不出現在 FRIAPRDA.DAT、ENEMYDAT.DAT、RANKUP.DAT 任何一筆的職業碼欄位，只存在於 PROMAP.DAT 最後一列。"
+  },
+  {
+   "from": "U05",
+   "ticket": "25.11",
+   "trace": "MAP46、MAP52、MAP55 的部署 record 使用角色 id 0x97–0x9C，超出 ENEMYDAT.DAT 91 筆（上限 0x96），若被部署則種族、職業等欄位會讀到表尾之外的記憶體。"
+  },
+  {
+   "from": "U05",
+   "ticket": "25.11",
+   "trace": "RANKUP.DAT 第 1–8 筆的勇者徽章路線整段是 00 00 00。"
+  },
+  {
+   "from": "U06",
+   "ticket": "25.11",
+   "trace": "RankUp.dat 的 36 個路線槽中，第 1–8 筆角色的第 4 條路線（英雄徽章路線）都是全零的空槽，只有第 0 筆（蘭迪斯）有第 4 條路線指向型態 0x21。"
+  },
+  {
+   "from": "U06",
+   "ticket": "25.11",
+   "trace": "FRILEVUP.DAT 第 0x23 筆（@0x181）各項成長上下界相等（AP 8、DP 7、DX 2、HP 20、MP 0），習得索引為 0x00 而非 0xFF，被 MAP14/MAP18/MAP23 的友方部署 char_id 0x23 使用。"
+  },
+  {
+   "from": "U06",
+   "ticket": "25.11",
+   "trace": "FRILEVUP.DAT 第 0x0c 筆全為 1/1、第 0x0d 與 0x0e 筆全為 0/0，而 char_id 0x0c、0x0d、0x0e 都出現在多張地圖的部署記錄中。"
+  },
+  {
+   "from": "U06",
+   "ticket": "25.11",
+   "trace": "MAP31.DAT 標頭的部署筆數 byte 為 2，但檔長容得下 13 筆部署記錄。"
+  },
+  {
+   "from": "U07",
+   "ticket": "25.11",
+   "trace": "MAP31.DAT 標頭 byte 2 的部署記錄數是 2，但檔案在 0x83 之後實際放了 13 筆 26 byte 記錄，後 11 筆超出計數不會被部署。"
+  },
+  {
+   "from": "U07",
+   "ticket": "25.11",
+   "trace": "FRIAPRDA 的 `15`、`1F` 兩個索引在 FRILEVUP／GETMGTAB 裡分別是尤利安／大僧侶與琴琴／武神的轉職型態，FRIAPRDA 在這兩格放的卻是聖騎士的數值列。"
+  },
+  {
+   "from": "U08",
+   "ticket": "25.11",
+   "trace": "FRILEVUP.DAT 型態 22（攻略站未列）的習得索引指向全 FF 的 GETMGTAB 第 22 筆，情況與技師相同。"
+  },
+  {
+   "from": "U08",
+   "ticket": "25.11",
+   "trace": "FRILEVUP.DAT 型態 23 的成長範圍非零，但習得索引是 00，會套用蘭迪斯／劍士的習得表（Lv16→01、Lv30→02）。"
+  },
+  {
+   "from": "U09",
+   "ticket": "25.11",
+   "trace": "MAP16 的人質 0x0E（(18,23)）只有暗魔導士站在 (18,17)、以 (18,21) 為中心放奔雷彈（距離 4＋範圍 2）時能被波及；其他武器與法術都搆不到。"
+  },
+  {
+   "from": "U09",
+   "ticket": "25.11",
+   "trace": "MAP22 的亡魂 0x24–0x27 能被三種方式碰到：幽魂（惡靈可走類別 5）站在 (21,3)／(21,4) 用射程 3 的靈擊，或死神站在 (20,6) 對 (24,6) 放咒殺術。三者在戰鬥動畫開啟時都會因缺 STAND036–039 而 exit(1)。"
+  },
+  {
+   "from": "U09",
+   "ticket": "25.11",
+   "trace": "目標範圍與施法距離的擴散用 PROMAP 第 0 列（八個地形全是 1），會穿牆；只有移動範圍受地形阻擋。"
+  },
+  {
+   "from": "U09",
+   "ticket": "25.11",
+   "trace": "MAP21 第 8 筆（0x53 狼人戰士，Lv19）的法術遮罩列了六個法術，但 ENEMYDAT 的 MP 係數是 0，這些法術永遠施放不了。"
+  },
+  {
+   "from": "U09",
+   "ticket": "25.11",
+   "trace": "過場地圖 31–59 上有大量沒有 STAND 的角色（0x78–0x9C 等），它們只在過場裡登場。"
+  },
+  {
+   "from": "U10",
+   "ticket": "25.11",
+   "trace": "RANKUP 第 1–8 筆的 route 3（勇者徽章路線）全是 00 00 00，church.c:1002 的肖像 0 檢查讓它走不到。"
+  },
+  {
+   "from": "U10",
+   "ticket": "25.11",
+   "trace": "ENEMYDAT 第 68 筆（肖像 0x80，職業 0x24）的 AP、DP、DX、MV 都是 0，只有 HP 係數 100 與經驗倍率 100。"
+  },
+  {
+   "from": "U10",
+   "ticket": "25.11",
+   "trace": "第 8 章的 4 名村民以樣板數值（HP 係數 18、AP 5、DP 2、DX 1、MV 4）在戰場上行動，實際 HP 是 216。"
+  },
+  {
+   "from": "I01",
+   "ticket": "25.12",
+   "trace": "使用距離為 0 的 43 封咒手套在玩家的道具選單中選得到，但瞄準游標永遠無法確認，只能取消。"
+  },
+  {
+   "from": "I01",
+   "ticket": "25.12",
+   "trace": "敵方 AI 的物品評分（src/aiscore.c:421）只對 0x0b 與 0x1e 兩個效果碼走目標評分，其他效果碼（含 05、06、0D、1B）不走任何評分。"
+  },
+  {
+   "from": "I02",
+   "ticket": "25.12",
+   "trace": "FD2 的道具傳送分支另檢查使用者 char_id 0x18 且 mp_max≥0x14，FDPS 的對應分支拿掉了這個檢查。"
+  },
+  {
+   "from": "I02",
+   "ticket": "25.12",
+   "trace": "fdps_battle_item_menu 在 00025602 呼叫 fdps_get_unit_record 並把結果存進 [EBP-0x1c] 後從未讀取，對應 FD2 同位置那次用來做角色檢查的記錄讀取。"
+  },
+  {
+   "from": "I03",
+   "ticket": "25.12",
+   "trace": "SWITCH_MAP 腳本 opcode（src/icon.c:1046）直接改寫 data_fdps_chapter_current_chapter_id，過場地圖靠結束 handler 之後的賦值才切回正確章節。"
+  },
+  {
+   "from": "I03",
+   "ticket": "25.12",
+   "trace": "物品 60 水晶球（類型 12）只有 MAP21 第 7 筆敵人帶著，巫師職業可以裝備。"
+  },
+  {
+   "from": "I04",
+   "ticket": "25.12",
+   "trace": "第 7 章 MAP06 的五個埋藏格全部帶碼 0、共用同一個旗標與同一筆記錄（風精之羽），第一格搜到後其餘四格因旗標已設而搜尋直接無反應。"
+  },
+  {
+   "from": "I04",
+   "ticket": "25.12",
+   "trace": "過場用地圖 MAP51 的可搜尋格記錄是一組獨特內容（金錢 12000、物品 B7、DA、CF、B8、88 與超出 ITEM.DAT 的 111），但 M51.DTL 沒有任何可搜尋格。"
+  },
+  {
+   "from": "I04",
+   "ticket": "25.12",
+   "trace": "MAP31–MAP63 各過場地圖的記錄都是與 MAP00 相同的範本（金錢 500、B4、B4、DE），事件碼層沒有可搜尋格。"
+  },
+  {
+   "from": "I04",
+   "ticket": "25.12",
+   "trace": "第 8 章 MAP07 碼 6、7 是種類 2（章節事件）內容 0 的記錄，那兩個碼只出現在重繪格與事件格上，沒有可搜尋格引用。"
+  },
+  {
+   "from": "I05",
+   "ticket": "25.12",
+   "trace": "MAP51.DAT 唯一的部署記錄（角色編號 0x43、等級 20）帶死亡腳本「金錢 5000」，但它只在過場裡出場，無法被擊倒。"
+  },
+  {
+   "from": "I05",
+   "ticket": "25.12",
+   "trace": "resource_info/map.md:81 寫地圖 31 以後的 MAP 檔帶著與 MAP00 相同的可搜尋格記錄，實際上多數是另一份共用表（500 元、B4、B4、DE），MAP00 的是（B4、B4、1000 元），MAP51 與 MAP56 又各不相同；MAP51 的格子事件表也不是 MAP00 的那份而是全為 (FF,00)。"
+  },
+  {
+   "from": "I05",
+   "ticket": "25.12",
+   "trace": "MAP56.DAT 的可搜尋格記錄表全為 0，是地圖 31 以後唯一不帶共用表的檔案之一。"
+  },
+  {
+   "from": "I06",
+   "ticket": "25.12",
+   "trace": "抽獎載入的 Bonus.wav 影像從不 free（src/vilbar.c:529 註解），只在發劍分支才會發生。"
+  },
+  {
+   "from": "I06",
+   "ticket": "25.12",
+   "trace": "抽獎旗標 0x64110 除抽獎本身外，由 fdps_title_screen（0002a2ec）與 fdps_load_game_screen（00024609）寫入、fdps_save_game_screen 讀出。"
+  },
+  {
+   "from": "I06",
+   "ticket": "25.12",
+   "trace": "fdps_roster_add_item_to_all 從章節 id 0x17 起無上限地跳過 slot 3（src/roster.c:506）。"
+  },
+  {
+   "from": "I07",
+   "ticket": "25.12",
+   "trace": "第 10 章回合事件中段分支沒有下界，回合 0 與 2 會以負波次呼叫 fdps_deploy_wave 並仍執行兩次鏡頭移動（src/chevt2b.c:274）。"
+  },
+  {
+   "from": "I08",
+   "ticket": "25.12",
+   "trace": "物品 `63` 光束砲的類型 `15` 不在 `PROEQU.DAT` 任何一筆的准許清單裡，沒有職業能裝備它。"
+  },
+  {
+   "from": "I08",
+   "ticket": "25.12",
+   "trace": "知識庫 assets/tables/classes.md 記載能走到 fdps_unit_can_equip_item 的單位職業碼最大 0x19，若屬實則 PROEQU.DAT 第 0x1A–0x23 筆（含妖魔、守護獸的 2D）在遊戲中從未被查詢。"
+  },
+  {
+   "from": "B1",
+   "ticket": "25.13",
+   "trace": "BACK24、BACK30、BACK36 沒有任何 ATTR 列指到，只會在結尾名單出現（名單第 8、10、12 張卡片）。"
+  },
+  {
+   "from": "B1",
+   "ticket": "25.13",
+   "trace": "BACK30 與 BACK28 內容相同，BACK30 唯一的用途是結尾名單第 10 張卡片。"
+  },
+  {
+   "from": "B2",
+   "ticket": "25.13",
+   "trace": "部署記錄中肖像 91（MAP04.DAT 第 32 筆：0x00、0x08、0x0F）、肖像 83（MAP21.DAT 第 8 筆：0x00、0x01、0x08、0x09）與肖像 117（MAP17.DAT 第 33 筆：0x00、0x01、0x02）帶有會進戰鬥畫面的法術，但 Fight.vfs 沒有 MAGIC083、MAGIC091、MAGIC117（也沒有 STAND117）。"
+  },
+  {
+   "from": "B2",
+   "ticket": "25.13",
+   "trace": "FRIAPRDA.DAT 肖像 21、31 的初始遮罩帶 0x06、肖像 22 的習得索引為 0xFF，但這幾筆只在以該 char_id 入隊或部署時才會被讀，而入隊常數只有 0–12。"
+  },
+  {
+   "from": "B2",
+   "ticket": "25.13",
+   "trace": "FDPS.LE 另有字串 magic0gg.saf（00031098）與 magic0bb.saf（000310ac），與 Magic%03d 無關，本次未追查其用途。"
+  },
+  {
+   "from": "B3",
+   "ticket": "25.13",
+   "trace": "AI 物理攻擊後經驗值發給被攻擊的目標（aiact.c:207），若 NPC（陣營 1）攻擊存活的敵方單位，fdps_unit_award_exp_and_level_up 不檢查陣營，敵方單位可能以 exp_carry 0xff 起算而升級並讀取肖像編號對應的 FRILEVUP／GETMGTAB。"
+  },
+  {
+   "from": "B3",
+   "ticket": "25.13",
+   "trace": "玩家版落雷術收尾片段 ME05.SAF 同樣是 66 byte 空殼，與 EE05 逐 byte 相同。"
+  },
+  {
+   "from": "B5",
+   "ticket": "25.13",
+   "trace": "敵方落雷術的完整演出 EB05、EL05 同樣因為沒有陣營 0 單位帶法術 0x05 而永遠不會被載入。"
+  },
+  {
+   "from": "B5",
+   "ticket": "25.13",
+   "trace": "ME34.SAF 與其他 16 個空殼不完全相同，唯一的 frame 停留 15 tick 而非 12 tick。"
+  },
+  {
+   "from": "B6",
+   "ticket": "25.13",
+   "trace": "src/main.c:325-336 的註解說 Fight.pal 算出的 FMER1/FMER2 寫出後沒有程式讀回，但 combat.c:821、cmbspell.c:351、church.c:227、ending.c:332 都用另外幾份同名字串 fopen 讀回，註解的結論是錯的。"
+  },
+  {
+   "from": "B6",
+   "ticket": "25.13",
+   "trace": "玩家方陣營 2 的部署記錄（地圖 3 第 21 筆、地圖 23 第 10 筆）帶法術 05，所以 MB05/ML05/ME05 與 EMG05 仍有路徑。"
+  },
+  {
+   "from": "S01",
+   "ticket": "25.14",
+   "trace": "MAP49.DAT 的 11 筆部署記錄死亡腳本都是 opcode 0、運算元 180（0xB4 藥草），可搜尋格記錄 0–3 為 500 金、藥草、藥草、解毒劑，但地圖 49 沒有任何格子引用。"
+  },
+  {
+   "from": "S01",
+   "ticket": "25.14",
+   "trace": "FDETXT50 與 FDETXT48、49、51 等過場文字區塊的 0x00–0x03 都照抄第 6 章的標題「第六章／帝國軍追擊」與勝敗條件。"
+  },
+  {
+   "from": "S02",
+   "ticket": "25.14",
+   "trace": "地圖 30 也沒有 MAP30、DSC30，FDETXT31.TXT 只有 36 byte。"
+  },
+  {
+   "from": "S02",
+   "ticket": "25.14",
+   "trace": "M31.DTL 宣告兩個平面並多帶第二平面與 1 byte，程式只讀第一平面。"
+  },
+  {
+   "from": "S02",
+   "ticket": "25.14",
+   "trace": "M310.CEL 是唯一 0x0D 為 1、使用不同像素編碼的圖磚檔，FDPS.LE 沒有讀這種編碼的程式碼。"
+  },
+  {
+   "from": "S02",
+   "ticket": "25.14",
+   "trace": "M320.MPL 與 M340.MPL 的地圖 32、34 也是開場過場用地圖，分別為 26×56 與 26×40。"
+  },
+  {
+   "from": "S04",
+   "ticket": "25.14",
+   "trace": "24:0x0F（蘭迪斯的「﹒﹒﹒﹒﹒﹒」，FDETXT24.TXT@0x622）沒有任何路徑會畫到，緊接在第 7 回合珊到場時說的 0x0E 之後。"
+  },
+  {
+   "from": "S04",
+   "ticket": "25.14",
+   "trace": "27:0x0C 最後叫的是「裘娜！把他敲昏！」，下一句 27:0x0D 的說話者卻是角色 4（亞克）；0x0C 裡「放開我！我要進去！」的說話者也標成角色 2，不是蘭迪斯。"
+  },
+  {
+   "from": "S04",
+   "ticket": "25.14",
+   "trace": "25:0x09、0x0E–0x11 是 57:0x09 與 60:0x09／0x0C／0x0E／0x0F 的逐字複本，實際顯示的是後者。"
+  },
+  {
+   "from": "S04",
+   "ticket": "25.14",
+   "trace": "WIN26 會切到地圖 62，但在那裡不畫任何文字；FDETXT63 和 FDETXT62 內容相同，63:0x09–0x0B 都沒有被讀到。"
+  },
+  {
+   "from": "S05",
+   "ticket": "25.14",
+   "trace": "FDETXT58 是第 9 章文字區塊的舊複本，0x08 寫「新奇的武器」而正式版 FDETXT09 寫「新奇的東西」，其餘村莊台詞相同。"
+  },
+  {
+   "from": "S05",
+   "ticket": "25.14",
+   "trace": "FDETXT41–52、55、56、62–65 帶有第 6、9、12、27 章的標題與勝敗條件（FDETXT62 的失敗條件為「全員死亡」，與 FDETXT27 不同），但村莊條目全空。"
+  },
+  {
+   "from": "S05",
+   "ticket": "25.14",
+   "trace": "FDETXT19 酒館台詞「天河星座中隱藏著奧妙的數字，關鍵握在你手中」可能是某章密碼的含糊提示。"
+  },
+  {
+   "from": "S06",
+   "ticket": "25.14",
+   "trace": "ICON0032.SAF 第 1 格使用的 11025 Hz、9184 取樣音效在全部 525 個 SAF 中只存在於 ICON0032，遊戲中不會響。"
+  },
+  {
+   "from": "S08",
+   "ticket": "25.14",
+   "trace": "fdps_cd_play_track_range（0003c892）與 fdps_cd_play_whole_disc（0003c8e6）在 FDPS.LE 中沒有任何呼叫者。"
+  },
+  {
+   "from": "S08",
+   "ticket": "25.14",
+   "trace": "章節音軌表第 7 列第 1 欄的索引 0x12（光碟 1 第 19 軌）只有第 8 章戰鬥中切換會用到，腳本裡也只有 ICON08 用一次。"
+  },
+  {
+   "from": "S09",
+   "ticket": "25.14",
+   "trace": "MAP17.DAT 的 wave 13（記錄 50–64）與 wave 1（記錄 0–14）角色與等級逐筆相同，但 wave 1 的記錄 9、12 帶死亡腳本 00/182、00/184，wave 13 的對應記錄都是 FF/0。"
+  },
+  {
+   "from": "S10",
+   "ticket": "25.14",
+   "trace": "MAP27.DAT 部署記錄 4（角色 0x54）的 wave 位元組是 255，而第 28 章沒有任何路徑部署 wave 255。"
+  },
+  {
+   "from": "S11",
+   "ticket": "25.14",
+   "trace": "第 28 章 slot 44 以回合 / 2 取波次，第 7 回合再次落在波次 3，MAP27 的波次 4 三筆從不出場（src/chevt6.c:124 已記載）。"
+  },
+  {
+   "from": "S11",
+   "ticket": "25.14",
+   "trace": "過場腳本 ICON00 部署 MAP32 的波次 16–18 與 MAP34 的波次 16、17、18、19、20。"
+  },
+  {
+   "from": "S12",
+   "ticket": "25.14",
+   "trace": "M09.CEL 第 33 格是任何其他圖磚表都沒有的獨有圖磚，M090.CEL 同索引改成第 20 格的複本且 M090.MPL 不使用它。"
+  },
+  {
+   "from": "S12",
+   "ticket": "25.14",
+   "trace": "M090.CEL 第 14 格與第 33 格（第 20 格複本）都未被 M090.MPL 使用。"
+  },
+  {
+   "from": "S13",
+   "ticket": "25.14",
+   "trace": "MAP02 回合事件第 13 筆 ff 00 00 的 handler 位元組是 0，跟填充值 ff ff 00 不同，看起來像打錯的填充列，不是刻意排在第 255 回合的事件"
+  }
+ ],
+ "pitfall_candidates": [
+  {
+   "from": "C3",
+   "pitfall": "fdps_roster_add_character 不寫名冊記錄的 +0x34 行為 byte，重建時若用 calloc 或 memset 清零名冊區塊、或在加入角色時補寫 ai_behavior = 0，會把原版的未初始化值固定成 0；兩個讀取它高 4 位的 AI 旗標因此在原版與重建版可能不同。"
+  },
+  {
+   "from": "C8",
+   "pitfall": "重建時若把 FDE.SAV 大小照畫面上的 3 格算成 0x312B + 3×0xA28，或把 checksum 放在 slot 區之後，就會與原版不同：檔案必須保持 0x59CB、保留第四格，checksum 在 +0x59C7，戰鬥中存檔也要把四格的 chapter byte 都初始化。"
+  },
+  {
+   "from": "I07",
+   "pitfall": "死亡腳本運算元要以帶號 16-bit 讀出：拾取訊息取名用帶號值（-1 → 0xC8 空字串），存進背包則只取低 byte（0xFF → 名稱 0x1C8「裂地術」）；照直覺用無號讀或統一取名，會讓拾取訊息顯示「裂地術」而與原版不同。"
+  },
+  {
+   "from": "B6",
+   "pitfall": "FMer1.tmp 這個字串在映像裡有三份（00061690、00061dc0、00061f64），main.c 啟動時用的那份只在 fdps_load_global_resources 內，但其他兩份被戰鬥、法術演出、轉職、結尾名單拿來讀回 Fight.pal 的混色表；若照 main.c:325-336 的註解以為 FMER1/FMER2 沒人讀而省掉寫檔，戰鬥時 fopen 會拿到 NULL 並交給 fread。"
+  }
+ ],
+ "stopped": "",
+ "category_labels": {
+  "residual": "殘留內容",
+  "stub": "空殼",
+  "sealed": "被封住的內容",
+  "predecessor_leftover": "前作遺留",
+  "excluded": "排除",
+  "negative": "否定性結論"
+ }
+}

@@ -36,6 +36,9 @@
 | `FDE.SAV` 不存在時，兩條寫檔路徑與只讀的版面組裝各自造初始映像而且造法不同：存讀檔畫面（`fdps_save_game_screen`、`fdps_saveload_screen_build`）整份 `memset` 成 `0xff` 並**跳過解密**，戰鬥選單的存檔（`fdps_battle_system_submenu`）只把 4 個 slot 的章節 byte 寫成 `0xff`、其餘留著 `malloc` 的原樣內容 | 抽一支共用的「讀檔或建空檔」helper，讓讀進來的與新造的映像都走同一次解密，或統一填 0。前者把 `0xff` 解密成雜訊，3 個空 slot 變成 3 格亂碼存檔；後者讓 slot 的章節 byte 變成 0（第 1 章），空 slot 全部顯示成有存檔 | [`resource_info/save.md`](../resource_info/save.md) |
 | 鍵盤環形緩衝區沒有滿檢查，寫索引追上讀索引之後 `fdps_read_keyboard_queue` 回報空佇列，而裡面積著十個未讀掃描碼 | 加一個計數或滿檢查。改了之後遊戲收到的按鍵序列就不一樣 | plate comment 的 `Rebuild note` |
 | 遊戲從來不呼叫 `srand`：`srand`（`00042d1a`）是 CRT 帶進來的孤兒碼，沒有任何 caller，種子從映像檔的初值 1 開始，所以每一輪遊戲的 `rand()` 序列一模一樣 | 在啟動時補一句 `srand(time(NULL))`，或以為種子在別處設過。命中、爆擊、連擊、異常狀態每一次判定的結果都由「在它之前總共呼叫過幾次 `rand()`」決定，補了種子等於把整個遊戲的隨機結果換掉 | plate comment（`00042d1a` 與 `00042cf2` 的 seed cell） |
+| 名冊記錄的 AI 行為 byte `+0x34` 從來沒有人初始化：名冊區塊在啟動時 `malloc`、不清零，`fdps_roster_add_character` 不寫 `+0x34`..`+0x36`，示範戰之後這塊更是已釋放的記憶體。讀它高 4 bit 的是 AI：`0x40` 讓物理與法術（法術編號 ≥ `0x12`）或物理與道具平手時改走物理攻擊，`0x80` 讓 HP 回復道具對該目標的分數乘 3。示範戰把名冊成員交給 AI 行動，兩個旗標在那裡讀到的就是堆積原有的 byte | 把名冊區塊改成 `calloc` 或配置後 `memset`，或在加入角色時順手補一句 `ai_behavior = 0`。兩個旗標在重建版就恆為 0，而原版是堆積殘值。部署記錄產生的單位不受影響：它們整 byte 抄部署記錄，出貨資料的高 4 bit 全是 0 | [`program_info/map_ai.md`](../program_info/map_ai.md)；`src/roster.c` 的註解 |
+| 第 28 章的援軍以「回合 ÷ 2」取波次（`fdps_chapter_28_event_deploy_wave_for_turn`，整數除法向零截斷，讀的是回合計數器加 1 之前的值），`MAP27.DAT` 的回合表在第 2、4、6、7、10、12、14、16、18 回合呼叫它，得到波次 1、2、3、3、5、6、7、8、9：第 7 回合把波次 3 再部署一次，波次 4 的三筆敵人永遠不出場 | 看到波次 4 有資料、第 7 回合又多一次呼叫，就把算式改成 `(turn + 1) / 2`、改成「第 n 次觸發部署第 n 波」的計數器，或把回合計數器改成先加 1 再分派事件。每一種都讓第 28 章換掉或多出一批援軍 | [`program_info/chapter.md`](../program_info/chapter.md)；`src/chevt6.c` 的註解 |
+| 村莊暗號表是 `fdps_check_secret_code_key`（`0x357a0`）裡 24 列的 auto 陣列，以「章節索引 − 1」取列。章節索引 25（第 26 章之前）有村莊、神秘商店也有貨，取到的第 25 列卻落在表外：前 4 byte 是這支函式自己還沒寫入的回傳值槽，後 4 byte 是存起來的 EBP，兩半都是看板選單的框架位址，所以那座神秘商店照常玩進不去 | 以章節索引直接取列，每一章都變成下一章的暗號；替表補第 25 列，就打開了原版封住的店；把表改成 `static`／全域，或增刪這支函式的區域變數，第 25 列就讀到別的內容，可能變成按得出來的暗號。改動這支之後要用 WDISASM 確認表仍複製在 `[EBP-0xc4]`、第 25 列仍疊在回傳值槽與存下的 EBP 上 | [`program_info/village.md`](../program_info/village.md)、[`program_info/known_bugs.md`](../program_info/known_bugs.md) |
 
 ## 不能加的檢查
 
@@ -100,6 +103,7 @@
 | DPMI 鎖頁的 `end` 是**範圍最後一個 byte**，送給 DPMI 的長度是 `(max - min) + 1`；`fdps_dpmi_lock_size(base, size)` 因此鎖的是 `size + 1` byte | 寫成 `size = end - start`，或把 wrapper 改成半開區間的 `base + size - 1`。少鎖一個 byte，而那個 byte 剛好落在頁邊界時 AIL 的中斷處理會踩到未鎖的頁 | plate comment 的 `Rebuild note` |
 | 反查調色盤立方體的 12-bit 索引順序是 **green:red:blue**，不是 RGB | 寫成 `(r << 8) \| (g << 4) \| b`。查表本身還是查得到顏色，只是查到的是另一個 | plate comment 的 `Rebuild note` |
 | CD 那一段有五支 function 的 body 裡**沒有 `RET`**：控制流以 `JMP` 落進鄰居的 body 借用它的收尾段（`0003bd99`、`0003be36`、`0003c4ff`、`0003c6bc`、`0003c7aa`）。那是 `wcc386` 把兩支近乎相同的 C function 的尾端合併掉的結果 | 照反組譯逐條轉錄、寫到最後一條指令就停。合併掉的那一段是這支 function 的 C 原始碼的一部分，漏掉它就漏掉尾端的儲存動作。反過來說也不能因此改邊界——把尾巴併回來會毀掉另一支 function 跳進去的目標 | [`program_info/code_pools.md`](../program_info/code_pools.md) |
+| 死亡腳本的物品運算元（部署記錄 `+0x17`）以帶號 16-bit 讀出，同一個值在兩處用不同寬度：「撿到〇〇！！」以帶號值 + `0xC9` 取名，交給 `fdps_unit_add_item` 的則只存低 byte。出貨資料 `MAP09.DAT` 有一筆運算元是 `0xFFFF`：訊息取到 `0xC8` 的空字串、畫面只有「撿到！！」，背包裡則是物品 `0xFF`，名稱讀到「裂地術」 | 先把運算元轉成 `unsigned char` 的物品編號，訊息與入包共用它，訊息就顯示「裂地術」；以無號 16-bit 讀，名稱索引變成 `0x100C8`、讀到文字區塊之外 | [`resource_info/map.md`](../resource_info/map.md)、[`assets/text/global_text.md`](../assets/text/global_text.md) |
 
 ## 不能照字面理解的資料
 
@@ -130,6 +134,7 @@
 | 三十支章節 init 處理函式看起來一模一樣，但**不能用迴圈或樣板生成**：`Icon%02d.dat` 的編號差 1、`fdps_roster_add_character` 必須排在 `fdps_chapter_state_reset` 之前（reset 會依名冊人數重建地圖單位，順序反過來新加入的角色會被歸零成退場）、而且第 17／22／23 章傳的游標目標不是 0 | 用一支樣板產生三十支。前兩項會讓某些章節少一個角色或播錯動畫，第三項只影響三章 | plate comment 的 `Rebuild note` |
 | 事件碼層 `M%02d.DTL` 與地形層 `M%02d0.MPL` 的寬度**在每一張地圖上都不同**：`fdps_map_load_tile_info` 以事件碼層自己的寬索引事件碼，重繪也各用各的寬 | 以為「疊在同一張地圖上的圖層尺寸相同」，用地形層的寬（或移動網格的寬）一起索引事件碼層。第 1 章 (9,15) 的寶箱會讀到別格的事件碼，整張圖的寶物、格子事件與重繪全部錯位 | [`resource_info/terrain.md`](../resource_info/terrain.md) |
 | 可搜尋格（寶箱、埋藏）的事件碼 **0 是有效的記錄索引**；同碼的多格共用同一筆記錄與同一個旗標 | 把事件碼 0 一律當成「這格沒有事件」而跳過——對一般格的格子事件這是對的，對寶箱與埋藏格則會讓第 1、2、3 章等處碼 0 的寶物搜不到；或把同碼的格當成各自獨立的寶物，變成每格都拿得到 | [`resource_info/map.md`](../resource_info/map.md) |
+| 存讀檔畫面只有 3 格（`SAVE_SLOT_COUNT` 是 3、游標以 3 取餘數），但 `FDE.SAV` 的 slot 區是 **4** 個 `0xa28` byte 的 slot：檔長固定 `0x59cb`，檢查碼在 `+0x59c7`、疊在第 4 個 slot 尾端的保留區上，戰鬥選單在檔案不存在時也會把第 4 個 slot 的章節 byte 寫成 `0xff` | 照畫面的格數把 slot 陣列宣告成 3 筆，檔長算成 `0x312b + 3 × 0xa28`、檢查碼接在 slot 區後面。檔長、檢查碼的位置與範圍全部跟著變，新舊兩版的存檔互不相容 | [`resource_info/save.md`](../resource_info/save.md) |
 
 ## 不能照編譯器慣例設定的旗標
 
