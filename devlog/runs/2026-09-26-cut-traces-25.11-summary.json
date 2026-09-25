@@ -1,0 +1,187 @@
+{
+ "ticket": "25.11",
+ "total": 28,
+ "complete": 28,
+ "unfinished": [],
+ "unfinished_detail": [],
+ "by_verdict": {
+  "holds": [
+   "T11-01",
+   "T11-02",
+   "T11-04",
+   "T11-07",
+   "T11-08",
+   "T11-09",
+   "T11-10",
+   "T11-11",
+   "T11-12",
+   "T11-15",
+   "T11-16",
+   "T11-17",
+   "T11-19",
+   "T11-21",
+   "T11-23",
+   "T11-24",
+   "T11-26",
+   "T11-27",
+   "T11-28"
+  ],
+  "refuted": [],
+  "needs_correction": [
+   "T11-03",
+   "T11-05",
+   "T11-06",
+   "T11-13",
+   "T11-14",
+   "T11-18",
+   "T11-20",
+   "T11-22",
+   "T11-25"
+  ]
+ },
+ "by_disposition": {
+  "absorbed": [
+   "T11-01",
+   "T11-04",
+   "T11-06",
+   "T11-07",
+   "T11-10",
+   "T11-11",
+   "T11-12",
+   "T11-13",
+   "T11-16",
+   "T11-18",
+   "T11-19",
+   "T11-21",
+   "T11-24",
+   "T11-26",
+   "T11-28"
+  ],
+  "addendum": [
+   "T11-05",
+   "T11-09"
+  ],
+  "new_entry": [
+   "T11-02"
+  ],
+  "exclude": [
+   "T11-08",
+   "T11-14",
+   "T11-15",
+   "T11-20",
+   "T11-25"
+  ],
+  "route": [
+   "T11-17",
+   "T11-22"
+  ],
+  "drop": [
+   "T11-03",
+   "T11-23",
+   "T11-27"
+  ]
+ },
+ "by_route": {
+  "known_bugs": [],
+  "pitfalls": [],
+  "kb_fix": [
+   "T11-17",
+   "T11-22"
+  ],
+  "25.11": [],
+  "25.12": [],
+  "25.13": [],
+  "25.14": []
+ },
+ "reread": [
+  {
+   "id": "T11-02",
+   "changed": true
+  },
+  {
+   "id": "T11-03",
+   "changed": false
+  },
+  {
+   "id": "T11-05",
+   "changed": false
+  },
+  {
+   "id": "T11-06",
+   "changed": false
+  },
+  {
+   "id": "T11-08",
+   "changed": false
+  },
+  {
+   "id": "T11-09",
+   "changed": true
+  },
+  {
+   "id": "T11-10",
+   "changed": false
+  },
+  {
+   "id": "T11-13",
+   "changed": false
+  },
+  {
+   "id": "T11-14",
+   "changed": true
+  },
+  {
+   "id": "T11-15",
+   "changed": true
+  },
+  {
+   "id": "T11-18",
+   "changed": false
+  },
+  {
+   "id": "T11-20",
+   "changed": true
+  },
+  {
+   "id": "T11-21",
+   "changed": false
+  },
+  {
+   "id": "T11-22",
+   "changed": false
+  },
+  {
+   "id": "T11-25",
+   "changed": true
+  }
+ ],
+ "still_open": [
+  {
+   "id": "T11-02",
+   "confidence": "high",
+   "open_question": "這 20 組是預留空位還是被抽掉圖的角色，資料無法區分；條目內已照實寫明，不影響分類（缺的是內容，依 I08 先例歸空殼）。"
+  },
+  {
+   "id": "T11-10",
+   "confidence": "high",
+   "open_question": "MAP46／52／55 的角色 97–9C 部署時職業代碼讀自 ENEMYDAT.DAT 緩衝區之後的堆積殘值，理論上可能碰巧是 27；那是越界讀取的偶然值，U05 已記同一個保留，不影響本條。"
+  },
+  {
+   "id": "T11-18",
+   "confidence": "high",
+   "open_question": "U07 的同一句也把 `GETMGTAB.DAT` 第 `1F` 筆說成武神的，嚴格說武神不學法術、不參照該筆；是否要在 U07 把「FRILEVUP.DAT／GETMGTAB.DAT」改成「RANKUP.DAT／FRILEVUP.DAT」留給整頁審閱決定，事實本身不受影響。"
+  },
+  {
+   "id": "T11-21",
+   "confidence": "high",
+   "open_question": "暗魔導士的 AI（行為 0 與 2）實際上會不會停在 (18,17) 並選擇以 (18,21) 為中心施放奔雷彈，只靠靜態資料推不出來，未經實機確認；這不影響本條已被 U09 收錄。"
+  },
+  {
+   "id": "T11-22",
+   "confidence": "high",
+   "open_question": "AI 會不會真的把幽魂帶到 (21,4)、或讓死神在 (24,6) 還有亡魂時停在 (20,6)，只看靜態資料推不出來（行為 03／02 與 fdps_map_actor_move_toward_nearest_reachable_opponent 漏 +1 的職業列都會影響落腳），未經實機確認；program_info/known_bugs.md 目前沒有收這條潛在當機路徑。"
+  }
+ ],
+ "pitfall_candidates": [],
+ "stopped": ""
+}
