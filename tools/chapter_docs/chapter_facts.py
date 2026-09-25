@@ -290,45 +290,8 @@ def chapter_text_draws():
     return out
 
 
-def _block_end(text, brace):
-    """Index just past the } matching the { at `brace`, or len(text)."""
-    depth = 0
-    for i in range(brace, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-    return len(text)
-
-
-def guarded_out_values(text, pos, var, local, shared):
-    """Values a local id cannot hold at the draw at `pos`, because the draw sits
-    inside an `if (var != VALUE) {` or `if (var) {` block of the same function.
-
-    global_text's scan folds a local to every value assigned to it, the
-    initializer included; a guard that skips the draw for the initializer
-    (the chapter-16 smith: the reply id starts at 0 and is drawn only when it
-    is not 0) makes that value no reader at all."""
-    body_start = text.rfind("\n", 0, pos)
-    for m in global_text._FUNCTION.finditer(text, 0, pos):
-        body_start = m.start()
-    out = set()
-    guard = re.compile(r"\bif\s*\(\s*" + re.escape(var)
-                       + r"\s*(?:!=\s*(\w+)\s*)?\)\s*\{")
-    for m in guard.finditer(text, body_start, pos):
-        if _block_end(text, m.end() - 1) <= pos:
-            continue
-        if m.group(1) is None:
-            out.add(0)
-            continue
-        value = global_text._macro_value(m.group(1), local, shared)
-        if value is None and re.fullmatch(r"\d+|0[xX][0-9a-fA-F]+", m.group(1)):
-            value = int(m.group(1), 0)
-        if value is not None:
-            out.add(value)
-    return out
+# The guard rule has one owner, global_text (tools/_index.md).
+guarded_out_values = global_text.guarded_out_values
 
 
 @lru_cache(maxsize=None)

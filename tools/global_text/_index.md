@@ -20,7 +20,7 @@ python tools/global_text/global_text.py verify [--game 遊戲目錄]
 
 - 原文：直接 import [`text_decode`](../text_decode/_index.md)，容器讀取借 [`cutscene_script`](../cutscene_script/_index.md) 的 `read_container`。
 - `FDETXT00` 的讀取端：先以 [`code_emit`](../code_emit/_index.md) 的 `strip_c` 清掉註解與字面值，再掃描 `src/` 裡每個 `fdps_draw_text(data_fdps_all_game_text_ptr, …)` 呼叫，以及每個寫入兩個代入槽（`data_fdps_dialog_last_action_text_id_param`、`data_fdps_dialog_subst_text_id_2`）的地方，條目運算式經同檔的 `#define` 解開。解得開的形狀只有三種：全是巨集與常數、一個執行期值加一個巨集、以及只被賦予巨集值的區域變數；執行期值若是有常數初值的區域表的一格，可到的條目就是基底加表中每個值。其他形狀一律報錯，不猜。
-- 章節區塊前 9 條的讀取端：同樣掃描，對象是 `data_fdps_current_chapter_text_ptr` 與存讀檔畫面自己載入的 `chapter_text`，只收寫死的條目。條目來自資料的呼叫（腳本的 `DRAW_TEXT`、死亡腳本、單位索引加偏移、片尾字幕）會不會落在前 9 條是資料的問題，由各章頁回答，這裡刻意略過。
+- 章節區塊前 9 條的讀取端：同樣掃描，對象是 `data_fdps_current_chapter_text_ptr` 與存讀檔畫面自己載入的 `chapter_text`，只收寫死的條目。條目是區域變數、而繪製包在 `if (變數 != 某值) {` 或 `if (變數) {` 裡時，被擋掉的值不算讀取端（`guarded_out_values`；第 16 章流浪工匠的回應編號初值 0 就是這樣剔掉的）；沒有讀取端的條目在表裡寫「沒有讀取端」。條目來自資料的呼叫（腳本的 `DRAW_TEXT`、死亡腳本、單位索引加偏移、片尾字幕）會不會落在前 9 條是資料的問題，由各章頁回答，這裡刻意略過。
 - 額外場景的條目由誰顯示：直接 import `cutscene_script` 的 `decode_all`，取每支腳本的 `trace.text_refs`（`DRAW_TEXT` 與 `ASK_THREE_WAY`）與 `SWITCH_MAP` 目標。
 
 手寫的只有 `FDETXT00` 的分區（`REGIONS`）、系統訊息的分組（`MESSAGE_GROUPS`）、沒有讀取端的條目（`NO_READER`）與頁面的說明文字。閘門檢查手寫部分與掃描結果一致：

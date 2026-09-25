@@ -306,6 +306,47 @@ def scan_readers(src_dir=SRC_DIR):
     return readers
 
 
+def _block_end(text, brace):
+    """Index just past the } matching the { at `brace`, or len(text)."""
+    depth = 0
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(text)
+
+
+def guarded_out_values(text, pos, var, local, shared):
+    """Values a local id cannot hold at the draw at `pos`, because the draw sits
+    inside an `if (var != VALUE) {` or `if (var) {` block of the same function.
+
+    _resolve folds a local to every value assigned to it, the initializer
+    included; a guard that skips the draw for the initializer (the chapter-16
+    smith: the reply id starts at 0 and is drawn only when it is not 0) makes
+    that value no reader at all."""
+    body_start = text.rfind("\n", 0, pos)
+    for m in _FUNCTION.finditer(text, 0, pos):
+        body_start = m.start()
+    out = set()
+    guard = re.compile(r"\bif\s*\(\s*" + re.escape(var)
+                       + r"\s*(?:!=\s*(\w+)\s*)?\)\s*\{")
+    for m in guard.finditer(text, body_start, pos):
+        if _block_end(text, m.end() - 1) <= pos:
+            continue
+        if m.group(1) is None:
+            out.add(0)
+            continue
+        value = _macro_value(m.group(1), local, shared)
+        if value is None and _NUMBER.match(m.group(1)):
+            value = _c_integer(m.group(1))
+        if value is not None:
+            out.add(value)
+    return out
+
+
 def scan_chapter_header_readers(src_dir=SRC_DIR):
     """Draws of a chapter block's first CHAPTER_HEADER_ENTRIES entries by a
     fixed id: {entry: [(function, file)]}.
@@ -314,7 +355,9 @@ def scan_chapter_header_readers(src_dir=SRC_DIR):
     come out of data -- a script's DRAW_TEXT operand, a death script's operand,
     a unit index plus a bias, the credits' caption base -- and which of those
     land below CHAPTER_HEADER_ENTRIES is a question about the data, which the
-    chapter pages answer, so such calls are passed over here by design."""
+    chapter pages answer, so such calls are passed over here by design.  A
+    local id's value that a guard around the draw rules out is no reader
+    (guarded_out_values)."""
     sources = _read_sources(src_dir)
     per_file, shared = _collect_macros(sources)
     found = {}
@@ -325,7 +368,11 @@ def scan_chapter_header_readers(src_dir=SRC_DIR):
             resolved = _resolve(expression, per_file[name], shared, _function_body(text, pos))
             if resolved is None or resolved[0] is None:
                 continue
-            for entry in resolved[0]:
+            ids = resolved[0]
+            if _IDENT.fullmatch(expression):
+                excluded = guarded_out_values(text, pos, expression, per_file[name], shared)
+                ids = tuple(i for i in ids if i not in excluded)
+            for entry in ids:
                 if entry < CHAPTER_HEADER_ENTRIES:
                     site = (_function_at(text, pos), name)
                     found.setdefault(entry, [])
@@ -457,7 +504,11 @@ def check_scene(blocks, reports):
 # Rendering
 # ---------------------------------------------------------------------------
 
-CUT_CONTENT = "../../cut_content/_index.md"
+# Where cut_content/ keeps what these pages leave out.
+CUT_GLYPH_ROW = "../../cut_content/story.md#s14-全域文字第-0-條的字模列"
+CUT_UNITS = "../../cut_content/units.md"
+CUT_LOTTERY = "../../cut_content/items.md#i06-酒館抽獎的三種大獎"
+CUT_NEVER_SHOWN = "../../cut_content/story.md#永遠不會顯示的文字總表"
 
 
 def _cell(text):
@@ -585,14 +636,14 @@ def render_global(texts, readers, header_readers):
     add("")
     add("| 章節區塊條目 | 讀取端 |")
     add("| --- | --- |")
-    for entry in sorted(header_readers):
-        sites = "、".join(f"`{f}`（`src/{n}`）" for f, n in header_readers[entry])
-        add(f"| {_hex(entry)} | {sites} |")
+    for entry in range(CHAPTER_HEADER_ENTRIES):
+        sites = "、".join(f"`{f}`（`src/{n}`）" for f, n in header_readers.get(entry, []))
+        add(f"| {_hex(entry)} | {sites or '沒有讀取端'} |")
     add("")
     add("## `0x000`：字模列")
     add("")
     add("第 0 條是一整列數字與大寫字母。沒有任何讀取端：名稱表的起點都大於 0，系統訊息也沒有寫死 0。"
-        f"它是永遠不會顯示的文字，內容由 [`cut_content/`]({CUT_CONTENT}) 收錄。")
+        f"它是永遠不會顯示的文字，內容由 [`cut_content/story.md`]({CUT_GLYPH_ROW}) 收錄。")
     add("")
 
     unit = REGION_BY_KEY["unit_names"]
@@ -607,7 +658,7 @@ def render_global(texts, readers, header_readers):
         "（見 [`assets/enemies.md`](../enemies.md)）照公式落在 `0x098`–`0x09d`，讀到的是種族名「妖鬼」到「其他」。")
     add("")
     add("一個編號的名稱會不會真的出現在畫面上，取決於那個單位有沒有出場；從未出場的單位由 "
-        f"[`cut_content/`]({CUT_CONTENT}) 擁有。")
+        f"[`cut_content/units.md`]({CUT_UNITS}) 擁有。")
     add("")
     add("讀取端：")
     add("")
@@ -648,7 +699,7 @@ def render_global(texts, readers, header_readers):
     add(f"## {_span(messages.first, messages.last, 3)}：系統訊息")
     add("")
     add("每一條都有寫死它的讀取端。`0x224`–`0x229` 的抽獎只在系統日期是 1998 年 1 月 28 日時開"
-        f"（`fdps_run_bonus_lottery`，`src/vilbar.c`），大獎是被封住的內容，見 [`cut_content/`]({CUT_CONTENT})。")
+        f"（`fdps_run_bonus_lottery`，`src/vilbar.c`），大獎是被封住的內容，見 [`cut_content/items.md`]({CUT_LOTTERY})。")
     add("")
     by_entry = {}
     for reader in readers:
@@ -713,7 +764,7 @@ def render_scene(blocks, reports):
     add("")
     add("- 章節區塊開頭放章名、勝敗條件與城鎮招牌的前 9 條，在這裡只是普通條目：有腳本引用就會顯示"
         f"（例如 `FDETXT{example[0]:02d}` 的 {_hex(example[1])}），沒有就不會。")
-    add(f"- 沒有腳本引用的條目與沒有任何腳本切過去的區塊不在本頁轉錄：它們是永遠不會顯示的文字，由 [`cut_content/`]({CUT_CONTENT}) 收錄。")
+    add(f"- 沒有腳本引用的條目與沒有任何腳本切過去的區塊不在本頁轉錄：它們是永遠不會顯示的文字，由 [`cut_content/story.md` 的總表]({CUT_NEVER_SHOWN}) 收錄。")
     add("- `{speaker char=n}` 換上肖像編號 n 的頭像與新的對話框、`{speaker unit=n}` 換上目前單位陣列第 n 格的頭像，"
         "都不顯示名字；角色是誰見 [`assets/`](../_index.md)。轉錄時 `{br}` 換成換行，`{speaker …}` 之前也換行。")
     add("")
@@ -737,7 +788,7 @@ def render_scene(blocks, reports):
     add("沒有任何腳本切過去、整個區塊永遠不會載入的："
         + "、".join(f"`FDETXT{b:02d}`（地圖 {b - 1}）" for b in never_loaded)
         + f"。有腳本切過去、但沒有一條被顯示的：" + "、".join(f"`FDETXT{b:02d}`" for b in nothing_shown)
-        + f"。這些區塊下文不再列出，見 [`cut_content/`]({CUT_CONTENT})。")
+        + f"。這些區塊下文不再列出，見 [`cut_content/story.md` 的總表]({CUT_NEVER_SHOWN})。")
     add("")
 
     for block in range(FIRST_SCENE_BLOCK, LAST_SCENE_BLOCK + 1):
@@ -751,7 +802,7 @@ def render_scene(blocks, reports):
         add(f"切到地圖 {block - 1} 的腳本：{'、'.join(parts)}。")
         if unshown:
             add("")
-            add(f"本區塊另有 {len(unshown)} 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`]({CUT_CONTENT})。")
+            add(f"本區塊另有 {len(unshown)} 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表]({CUT_NEVER_SHOWN})。")
         add("")
         for entry, sites in shown.items():
             where = "、".join(f"`{s}` `0x{offset:03x}`" for s, offset in sites)

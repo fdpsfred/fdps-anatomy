@@ -31,7 +31,7 @@
 
 | 章節區塊條目 | 讀取端 |
 | --- | --- |
-| `0x00` | `fdps_chapter_16_event_wandering_smith_forge`（`src/chevt3.c`） |
+| `0x00` | 沒有讀取端 |
 | `0x01` | `fdps_draw_save_slot_panel`（`src/savepnl.c`） |
 | `0x02` | `fdps_battle_show_win_fail_window`（`src/btlend.c`） |
 | `0x03` | `fdps_battle_show_win_fail_window`（`src/btlend.c`） |
@@ -43,7 +43,7 @@
 
 ## `0x000`：字模列
 
-第 0 條是一整列數字與大寫字母。沒有任何讀取端：名稱表的起點都大於 0，系統訊息也沒有寫死 0。它是永遠不會顯示的文字，內容由 [`cut_content/`](../../cut_content/_index.md) 收錄。
+第 0 條是一整列數字與大寫字母。沒有任何讀取端：名稱表的起點都大於 0，系統訊息也沒有寫死 0。它是永遠不會顯示的文字，內容由 [`cut_content/story.md`](../../cut_content/story.md#s14-全域文字第-0-條的字模列) 收錄。
 
 ## `0x001`–`0x096`：單位名
 
@@ -51,7 +51,7 @@
 
 本表延伸到 `0x096` 為止，後面緊接種族名。部署記錄用到的肖像編號 `0x97`–`0x9C`（見 [`assets/enemies.md`](../enemies.md)）照公式落在 `0x098`–`0x09d`，讀到的是種族名「妖鬼」到「其他」。
 
-一個編號的名稱會不會真的出現在畫面上，取決於那個單位有沒有出場；從未出場的單位由 [`cut_content/`](../../cut_content/_index.md) 擁有。
+一個編號的名稱會不會真的出現在畫面上，取決於那個單位有沒有出場；從未出場的單位由 [`cut_content/units.md`](../../cut_content/units.md) 擁有。
 
 讀取端：
 
@@ -536,7 +536,7 @@
 
 ## `0x1e6`–`0x22a`：系統訊息
 
-每一條都有寫死它的讀取端。`0x224`–`0x229` 的抽獎只在系統日期是 1998 年 1 月 28 日時開（`fdps_run_bonus_lottery`，`src/vilbar.c`），大獎是被封住的內容，見 [`cut_content/`](../../cut_content/_index.md)。
+每一條都有寫死它的讀取端。`0x224`–`0x229` 的抽獎只在系統日期是 1998 年 1 月 28 日時開（`fdps_run_bonus_lottery`，`src/vilbar.c`），大獎是被封住的內容，見 [`cut_content/items.md`](../../cut_content/items.md#i06-酒館抽獎的三種大獎)。
 
 ### `0x1e6`–`0x1e9`：敵兵死亡時的掉落
 

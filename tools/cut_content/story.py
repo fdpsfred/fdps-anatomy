@@ -55,7 +55,7 @@ HERE = Path(__file__).resolve().parent
 TOOLS = HERE.parent
 ROOT = TOOLS.parent
 for _sub in ("text_decode", "cutscene_script", "global_text", "map_decode", "cel_decode",
-             "saf_decode", "vfs_dump", "data_tables", "cd_scope"):
+             "saf_decode", "vfs_dump", "data_tables", "cd_scope", "chapter_docs"):
     sys.path.insert(0, str(TOOLS / _sub))
 sys.path.insert(0, str(HERE))
 
@@ -417,12 +417,13 @@ def chapter_judgement(n):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-# Entries a chapter judgement leaves out of never_shown although nothing shows
-# them, with the reason.  16:0x00: the source scan counts the wandering smith's
-# reply draw as a reader of 0, but that draw only runs when the reply id is not
-# CH16_NO_SWORD_FOUND (0), so it draws 0x0d or 0x0e and never 0x00
-# (src/chevt3.c fdps_chapter_16_event_wandering_smith_forge).
-NEVER_SHOWN_OVERRIDES = {(16, 0x00)}
+def judged_never_shown(n, judgement):
+    """{(n, entry)} a chapter judgement lists as never shown.  Entries are read
+    by value through chapter_facts.parse_entry, the owner of the judgement
+    format (an int, or a string written 0xNN)."""
+    import chapter_facts
+    return {(n, chapter_facts.parse_entry(item["entry"]))
+            for item in judgement.get("never_shown", [])}
 
 
 def never_shown_text(game):
@@ -440,9 +441,7 @@ def never_shown_text(game):
         if j is None:
             unsettled.add(n)
             continue
-        for item in j.get("never_shown", []):
-            never.add((n, int(str(item["entry"]), 16)))
-        never |= {key for key in NEVER_SHOWN_OVERRIDES if key[0] == n}
+        never |= judged_never_shown(n, j)
     return never, unsettled
 
 

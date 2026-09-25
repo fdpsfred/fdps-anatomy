@@ -141,6 +141,75 @@ def strong_components(nodes, succ):
     return result
 
 
+def function_owner(funcs):
+    """addr (hex string) -> the function whose body starts at or before it."""
+    starts = sorted(int(a, 16) for a in funcs)
+    import bisect
+
+    def owner(addr):
+        i = bisect.bisect_right(starts, int(addr, 16)) - 1
+        return "%08x" % starts[i] if i >= 0 else None
+    return owner
+
+
+def address_taken_roots(graph):
+    """Functions whose entry point is stored in a function-pointer table slot.
+
+    These are the roots a static walk cannot reach through a CALL: the AIL
+    driver tables with a run-time base, the 80x87 emulator's opcode tables,
+    the chapter and menu dispatch tables whose dispatcher itself is only
+    reached through a table.  A slot holding a mid-function address (a switch
+    jump table) makes no root: it is a label, not an address-taken function."""
+    roots = set()
+    for run in graph["pointer_runs"]:
+        for target, exact in zip(run["targets"], run["exact_entry"]):
+            if exact:
+                roots.add(target)
+    return roots
+
+
+def reach_from_roots(graph, funcs, roots):
+    """Depth of every function reachable from roots, an edge into a function's
+    body counting as reaching that function."""
+    owner = function_owner(funcs)
+    succ = defaultdict(set)
+    for src, dst, _kind, _site in graph["direct_edges"] + graph["indirect_edges"]:
+        target = dst if dst in funcs else owner(dst)
+        if target is not None:
+            succ[src].add(target)
+    depth = {r: 0 for r in roots}
+    queue = deque(sorted(roots))
+    while queue:
+        node = queue.popleft()
+        for nxt in sorted(succ[node]):
+            if nxt not in depth:
+                depth[nxt] = depth[node] + 1
+                queue.append(nxt)
+    return depth, succ
+
+
+# ghidra_snapshot/functions.txt: "address | body size | calling convention |
+# signature source | stack purge | flags | tags | prototype".
+SNAPSHOT_ADDRESS, SNAPSHOT_TAGS = 0, 6
+POOL_TAG = "pool_"
+
+
+def load_pools(path):
+    """{addr: pool} from the pool_* tag of each function in the Ghidra snapshot."""
+    pools = {}
+    if not os.path.isfile(path):
+        return pools
+    with io.open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("#") or line.startswith(" ") or "|" not in line:
+                continue
+            cells = [c.strip() for c in line.split("|")]
+            tags = cells[SNAPSHOT_TAGS].split(",")
+            pools[cells[SNAPSHOT_ADDRESS].lower()] = next(
+                (t[len(POOL_TAG):] for t in tags if t.startswith(POOL_TAG)), "?")
+    return pools
+
+
 def write_dot(path, graph, succ, depth):
     names = {f["addr"]: f["name"] for f in graph["functions"]}
     with io.open(path, "w", encoding="utf-8") as fh:
@@ -245,6 +314,48 @@ def main():
     add("| reachable from entry `%s` | %d |" % (entry, len(depth)))
     add("| unreachable | %d |" % len(unreached))
     add("| max depth | %d |" % max(depth.values()))
+    add("")
+
+    # Reachability with every address-taken function as an extra root: the
+    # figure program_info/architecture.md quotes.
+    roots = address_taken_roots(graph) | {entry}
+    rdepth, rsucc = reach_from_roots(graph, funcs, roots)
+    runreached = sorted(set(funcs) - set(rdepth))
+    rpred = defaultdict(set)
+    for src, dsts in rsucc.items():
+        for dst in dsts:
+            rpred[dst].add(src)
+    rislands = weak_components(runreached, rsucc, rpred)
+    pools = load_pools(os.path.join(REPO, "ghidra_snapshot", "functions.txt"))
+    by_pool = defaultdict(int)
+    for a in runreached:
+        by_pool[pools.get(a, "?")] += 1
+    isolated = sum(1 for c in rislands if len(c) == 1 and not rsucc[c[0]] and not rpred[c[0]])
+    add("## Reachability from the entry point and every address-taken function")
+    add("")
+    add("Roots: the entry point plus the %d functions whose entry point is stored in"
+        % (len(roots) - 1))
+    add("a function-pointer table slot (`exact` above; a mid-function slot is a")
+    add("switch label, not a root). An edge into a function's body reaches that")
+    add("function.")
+    add("")
+    add("| metric | value |")
+    add("| --- | --- |")
+    add("| reachable | %d |" % sum(1 for a in rdepth if a in funcs))
+    add("| unreachable | %d |" % len(runreached))
+    add("| unreachable by pool | %s |" % ", ".join(
+        "%s %d" % (p, n) for p, n in sorted(by_pool.items(), key=lambda kv: (-kv[1], kv[0]))))
+    add("| max depth | %d |" % max(rdepth.values()))
+    add("| weakly connected clusters among the unreachable | %d |" % len(rislands))
+    add("| of which isolated (no edge either way) | %d |" % isolated)
+    add("")
+    add("| size | address range |")
+    add("| --- | --- |")
+    for island in rislands[:6]:
+        add("| %d | `%s`-`%s` |" % (len(island), island[0], island[-1]))
+    add("")
+    add("Unreachable `fdps` functions: %s" % ", ".join(
+        "`%s` %s" % (a, funcs[a]["name"]) for a in runreached if pools.get(a) == "fdps"))
     add("")
 
     add("## Depth from the entry point")

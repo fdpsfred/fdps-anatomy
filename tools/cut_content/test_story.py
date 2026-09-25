@@ -73,6 +73,16 @@ class OwnershipTest(unittest.TestCase):
         self.assertEqual(pending, [((9, 17), "chapter judgement")])
 
 
+class JudgedNeverShownTest(unittest.TestCase):
+    def test_entries_are_read_by_value_whether_written_as_0xNN_or_as_an_int(self):
+        judgement = {"never_shown": [{"entry": "0x0d", "why": "x"}, {"entry": 19, "why": "y"}]}
+        self.assertEqual(story.judged_never_shown(30, judgement), {(30, 0x0D), (30, 19)})
+
+    def test_a_malformed_entry_is_an_error_not_a_guess(self):
+        with self.assertRaises(ValueError):
+            story.judged_never_shown(30, {"never_shown": [{"entry": "13", "why": "x"}]})
+
+
 class SlugTest(unittest.TestCase):
     def test_headings_become_github_anchors(self):
         self.assertEqual(story.slug("S1 地圖 49：索爾被假索爾擒住"), "s1-地圖-49索爾被假索爾擒住")

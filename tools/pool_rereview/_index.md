@@ -9,6 +9,7 @@
 | `build_packets.py` | 攤成一個 function 一份證據包與一份現況包，並算出還沒覆核的清單 |
 | `ApplyRereviewVerdicts.java` | 把覆核判定轉錄進 Ghidra：pool tag、改名、簽章、plate comment、邊界修正 |
 | `AuditNames.java` | 本票專屬的 gate：vendor 符號撞名、名稱前綴與 pool 衝突、pool tag 數量 |
+| `summarize_verdicts.py` | 把全部判定檔彙總成 [`program_info/code_pools.md`](../../program_info/code_pools.md) 引用的各項計數（各 pool 規模、兩遍判定的差異、停在中信心的軸），計數一律從判定檔算，不手改 |
 
 ## 執行
 

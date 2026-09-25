@@ -7,7 +7,7 @@
 | 檔案 | 用途 |
 | --- | --- |
 | `BuildCallGraph.java` | 從 Ghidra 匯出 function、直接呼叫邊、函式指標表與表分派的間接邊 |
-| `analyze_graph.py` | 算可達性、孤島分量、共用 helper 排名、遞迴環，產出報告與骨幹走查的工作清單 |
+| `analyze_graph.py` | 算可達性、孤島分量、共用 helper 排名、遞迴環，產出報告與骨幹走查的工作清單。可達性算兩種：只從 LE 進入點出發（骨幹走查的工作清單用這個），以及進入點加上「進入點存在函式指標表 slot 裡」的 function 一起出發（[`program_info/architecture.md`](../../program_info/architecture.md) 引用的數字；指向 function 中間的 slot 是 `switch` 標籤，不算起點；邊指進 function 本體的中間也算走到那個 function）。後者另按 Ghidra 快照的 `pool_*` 標籤分池計數 |
 
 ## 執行
 

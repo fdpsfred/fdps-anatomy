@@ -139,6 +139,72 @@ class ScanReadersTest(unittest.TestCase):
                 "}\n")})
 
 
+class ScanChapterHeaderReadersTest(unittest.TestCase):
+    def scan(self, files):
+        with source_tree(files) as src:
+            return global_text.scan_chapter_header_readers(Path(src))
+
+    def test_a_fixed_header_id_is_a_reader(self):
+        found = self.scan({"btlend.c": (
+            "#define WIN_TEXT 2\n"
+            "void fdps_win(void)\n"
+            "{\n"
+            "    fdps_draw_text(data_fdps_current_chapter_text_ptr, WIN_TEXT, d, p, 1, 2, 3);\n"
+            "}\n")})
+        self.assertEqual(found, {2: [("fdps_win", "btlend.c")]})
+
+    def test_an_initial_value_the_draw_is_guarded_against_is_no_reader(self):
+        # The chapter-16 smith: the reply id starts at 0 and is drawn only when
+        # it is not 0, so 0 is never drawn.
+        found = self.scan({"chevt3.c": (
+            "#define REPLY_A 0x0d\n"
+            "#define REPLY_B 0x0e\n"
+            "void fdps_smith(int k)\n"
+            "{\n"
+            "    int reply = 0;\n"
+            "    if (k) {\n"
+            "        reply = REPLY_A;\n"
+            "    } else if (k > 2) {\n"
+            "        reply = REPLY_B;\n"
+            "    }\n"
+            "    if (reply != 0) {\n"
+            "        fdps_draw_text(data_fdps_current_chapter_text_ptr, reply, d, p, 1, 2, 3);\n"
+            "    }\n"
+            "}\n")})
+        self.assertEqual(found, {})
+
+    def test_a_not_equal_guard_removes_exactly_the_value_it_names(self):
+        found = self.scan({"x.c": (
+            "#define SKIP 5\n"
+            "void fdps_x(int k)\n"
+            "{\n"
+            "    int id = SKIP;\n"
+            "    if (k) {\n"
+            "        id = 3;\n"
+            "    } else if (k > 1) {\n"
+            "        id = 0;\n"
+            "    }\n"
+            "    if (id != SKIP) {\n"
+            "        fdps_draw_text(data_fdps_current_chapter_text_ptr, id, d, p, 1, 2, 3);\n"
+            "    }\n"
+            "}\n")})
+        self.assertEqual(sorted(found), [0, 3])
+
+    def test_a_bare_truth_guard_removes_zero_only(self):
+        found = self.scan({"x.c": (
+            "void fdps_x(int k)\n"
+            "{\n"
+            "    int id = 0;\n"
+            "    if (k) {\n"
+            "        id = 3;\n"
+            "    }\n"
+            "    if (id) {\n"
+            "        fdps_draw_text(data_fdps_current_chapter_text_ptr, id, d, p, 1, 2, 3);\n"
+            "    }\n"
+            "}\n")})
+        self.assertEqual(found, {3: [("fdps_x", "x.c")]})
+
+
 class ClassifySceneBlockTest(unittest.TestCase):
     def test_entries_split_into_shown_never_shown_and_empty(self):
         texts = ["第十二章", "", "看！", "孩子"]

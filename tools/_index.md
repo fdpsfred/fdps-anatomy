@@ -13,11 +13,11 @@
 | `cutscene_script/cutscene_script.py` | 過場腳本的解碼，以及每一步當下的地圖、文字區塊、單位身分 | 需要過場內容的工作（票 25.6、25.8、25.14 等） |
 | `map_decode/map_decode.py` | 地圖的全部檔：`MAPnn.DAT`／`.COD`（`parse_map_dat`、`parse_map_cod`）、圖層（`parse_dtl`、`parse_mpl`、`parse_attr`、`parse_dsc`）、整張地圖的載入與一格的判讀（`load_map`、`tile_info`、`classify_cell`、`searchable_cells`）、全圖算圖（`render_map`） | `data_tables`、`data_skill`；需要地圖、部署記錄或寶物的工作（票 25.2 的 `cutscene_script` 待改、25.8、25.14 等） |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`、`data_tables`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
-| `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`），以及 `src/` 裡 `fdps_draw_text` 條目運算式的解析（`_draw_calls`、`_resolve` 等）；`FDETXT00` 的分區（`REGIONS`、`MESSAGE_GROUPS`）與兩張文字頁的重建（`build_pages`） | `chapter_docs`、`cut_content`、`data_skill` |
-| `data_tables/data_tables.py` | 名稱（`FDETXT00` 的條目基底）、`ENEMYDAT`／`RANKUP`／`SHOPnn` 與部署記錄的載入（`load` → `Game`）、使用效果代碼的說明（`USE_EFFECTS`），以及 `assets/` 產生表的閘門（`check`） | `chapter_docs`、`cut_content`、`cut_items`、`data_skill` |
+| `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`），以及 `src/` 裡 `fdps_draw_text` 條目運算式的解析（`_draw_calls`、`_resolve`、剔除被守衛擋掉的值的 `guarded_out_values` 等）；`FDETXT00` 的分區（`REGIONS`、`MESSAGE_GROUPS`）與兩張文字頁的重建（`build_pages`） | `chapter_docs`、`cut_content`、`data_skill` |
+| `data_tables/data_tables.py` | 名稱（`FDETXT00` 的條目基底）、`ENEMYDAT`／`RANKUP`／`SHOPnn` 與部署記錄的載入（`load` → `Game`）、使用效果代碼的說明（`USE_EFFECTS`），以及 `assets/` 產生表的閘門（`check`）與每張產生表的表頭（`TABLES`） | `chapter_docs`、`cut_content`、`cut_items`、`data_skill`、`kb_verify` |
 | `cut_content/cut_content.py` | `cut_content/` 的頁面結構（`collect`、`exclusion_ids`、`TOPICS`）與遊戲檔的讀取（`read_game_file`） | `cut_content` 的各產生器、`cut_traces`、`chapter_docs`、`data_skill` |
 | `cut_content/story.py` | 永遠不會顯示的文字與它歸哪個 `cut_content/` 條目（`never_shown_text`、`OWNERS`），以及把遊戲檔的容器解到暫存樹（`dump_tree`，給讀 `vfs_dump` 佈局的工具用） | `data_skill` |
-| `game_mechanics/check_mechanics.py` | 知識庫頁面的共通規則：function 引用對快照、未知符號、相對連結（含 `cut_content/` 的待建連結）、禁引 `workspace/`／`legacy/`、流水帳字眼 | `chapter_docs` |
+| `game_mechanics/check_mechanics.py` | 知識庫頁面的共通規則：function 引用對快照、未知符號、相對連結（含 `cut_content/` 的待建連結）、禁引 `workspace/`／`legacy/`、流水帳字眼 | `chapter_docs`、`kb_verify` |
 | `game_mechanics/apply_kb.py` | 把逐條判定的列插進 `rebuild_info/pitfalls.md` 的規則（`apply_pitfalls`） | `chapter_docs` |
 | `chapter_docs/chapter_facts.py` | 每一章的機械事實（`facts`）：部署與波次、可搜尋格、事件 slot、本章的過場腳本、章節文字區塊每一條的讀取端（`text_readers`），以及章節頁的產生區塊（`render_block`） | `data_skill` |
 | `chapter_docs/check_chapter.py`、`index.py` | 章節頁與 `chapters/_index.md` 產生區塊的填入與切分（`fill`、`regions`、`build_text`） | `data_skill` |
@@ -55,6 +55,7 @@
 | [`glyph/`](glyph/_index.md) | `FDETXT.FON` 字模對倚天字型逐像素比對、不吻合的字做成校對網頁讓開發者填字、合併成字模對照表（票 25.1） |
 | [`guide_offsets/`](guide_offsets/_index.md) | 把攻略站給的資料表偏移對回 `MISC.VFS` 成員，解表並與攻略站數值逐筆比對 |
 | [`guide_scrape/`](guide_scrape/_index.md) | 把攻略站的內容頁抓成原文鏡像並提供搜尋入口 |
+| [`kb_verify/`](kb_verify/_index.md) | 全知識庫逐條驗證（人手寫的文件一份或一段一個 agent，對照 `src/`、Ghidra 與遊戲檔）與跨文件一致性（修正的擴散、重複的擁有者、矛盾、刪減分類重判，一組一個 agent），兩段都是判定寫檔、第二位 agent 確認後才落地；另有全知識庫的確定性檢查與 `_index.md` 一致性檢查（票 25.17） |
 | [`kbd_probe/`](kbd_probe/_index.md) | 量 DOS/4GW 之下手塞 BIOS 鍵盤環形緩衝區後，鍵盤查詢何時看得到那些鍵（測試端要先等一個 timer tick 的依據） |
 | [`logic_naming/`](logic_naming/_index.md) | 遊戲邏輯 function 的語意命名、參數命名、calling convention 判定與行為註解（票 15 專屬的 workflow） |
 | [`map_decode/`](map_decode/_index.md) | 地圖圖層（`DTL`／`MPL`／`ATTR`／`DSC`）與 `MAPnn.DAT`／`.COD` 的解碼、每一格的判讀、不變量檢查、每張地圖的統計表，以及整張地圖的 PNG 算圖（票 25.3；25.8、25.14 用它產生地圖全圖） |

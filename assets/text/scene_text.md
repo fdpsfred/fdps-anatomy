@@ -9,7 +9,7 @@
 由此：
 
 - 章節區塊開頭放章名、勝敗條件與城鎮招牌的前 9 條，在這裡只是普通條目：有腳本引用就會顯示（例如 `FDETXT36` 的 `0x04`），沒有就不會。
-- 沒有腳本引用的條目與沒有任何腳本切過去的區塊不在本頁轉錄：它們是永遠不會顯示的文字，由 [`cut_content/`](../../cut_content/_index.md) 收錄。
+- 沒有腳本引用的條目與沒有任何腳本切過去的區塊不在本頁轉錄：它們是永遠不會顯示的文字，由 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表) 收錄。
 - `{speaker char=n}` 換上肖像編號 n 的頭像與新的對話框、`{speaker unit=n}` 換上目前單位陣列第 n 格的頭像，都不顯示名字；角色是誰見 [`assets/`](../_index.md)。轉錄時 `{br}` 換成換行，`{speaker …}` 之前也換行。
 
 ## 總表
@@ -52,7 +52,7 @@
 | `FDETXT64` | 63 | 34 | `WIN29` | `0x09`–`0x16` |
 | `FDETXT65` | 64 | 20 | `GOODEND` | `0x09`–`0x13` |
 
-沒有任何腳本切過去、整個區塊永遠不會載入的：`FDETXT31`（地圖 30）、`FDETXT32`（地圖 31）、`FDETXT34`（地圖 33）、`FDETXT50`（地圖 49）。有腳本切過去、但沒有一條被顯示的：`FDETXT42`、`FDETXT43`、`FDETXT63`。這些區塊下文不再列出，見 [`cut_content/`](../../cut_content/_index.md)。
+沒有任何腳本切過去、整個區塊永遠不會載入的：`FDETXT31`（地圖 30）、`FDETXT32`（地圖 31）、`FDETXT34`（地圖 33）、`FDETXT50`（地圖 49）。有腳本切過去、但沒有一條被顯示的：`FDETXT42`、`FDETXT43`、`FDETXT63`。這些區塊下文不再列出，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ## `FDETXT33`：地圖 32
 
@@ -815,7 +815,7 @@
 
 切到地圖 40 的腳本：`ICON11`（第 12 章開場，`fdps_chapter_12_init`）。
 
-本區塊另有 6 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 6 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x0a`（`ICON11` `0x0fd`）
 
@@ -919,7 +919,7 @@
 
 切到地圖 43 的腳本：`WIN00`（第 1 章勝利，`fdps_chapter_01_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN00` `0x0b3`）
 
@@ -992,7 +992,7 @@
 
 切到地圖 44 的腳本：`WIN18`（第 19 章勝利，`fdps_chapter_19_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN18` `0x0c8`）
 
@@ -1029,7 +1029,7 @@
 
 切到地圖 45 的腳本：`WIN17`（第 18 章勝利，`fdps_chapter_18_end`）、`WIN17-1`（第 18 章勝利，`fdps_chapter_18_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN17` `0x05b`）
 
@@ -1139,7 +1139,7 @@
 
 切到地圖 46 的腳本：`WIN05`（第 6 章勝利，`fdps_chapter_06_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN05` `0x029`）
 
@@ -1184,7 +1184,7 @@
 
 切到地圖 47 的腳本：`ICON06`（第 7 章開場，`fdps_chapter_07_init`）、`WIN24`（第 25 章勝利，`fdps_chapter_25_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON06` `0x044`）
 
@@ -1245,7 +1245,7 @@
 
 切到地圖 48 的腳本：`ICON07`（第 8 章開場，`fdps_chapter_08_init`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON07` `0x014`）
 
@@ -1320,7 +1320,7 @@
 
 切到地圖 50 的腳本：`WIN22`（第 23 章勝利，`fdps_chapter_23_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN22` `0x104`）
 
@@ -1375,7 +1375,7 @@
 
 切到地圖 51 的腳本：`WIN20`（第 21 章勝利，`fdps_chapter_21_end`）、`WIN24`（第 25 章勝利，`fdps_chapter_25_end`）。
 
-本區塊另有 6 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 6 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x0b`（`WIN20` `0x0ee`）
 
@@ -1530,7 +1530,7 @@
 
 切到地圖 52 的腳本：`ICON11`（第 12 章開場，`fdps_chapter_12_init`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON11` `0x0a1`）
 
@@ -1548,7 +1548,7 @@
 
 切到地圖 53 的腳本：`WIN11`（第 12 章勝利，`fdps_chapter_12_end`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN11` `0x031`）
 
@@ -1571,7 +1571,7 @@
 
 切到地圖 54 的腳本：`ICON08`（第 9 章開場，`fdps_chapter_09_init`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON08` `0x028`）
 
@@ -1620,7 +1620,7 @@
 
 切到地圖 55 的腳本：`ICON08`（第 9 章開場，`fdps_chapter_09_init`）。
 
-本區塊另有 5 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 5 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON08` `0x0cf`、`ICON08` `0x0eb`、`ICON08` `0x102`）
 
@@ -1659,7 +1659,7 @@
 
 切到地圖 56 的腳本：`ICON24`（第 25 章開場，`fdps_chapter_25_init`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON24` `0x0a5`）
 
@@ -1731,7 +1731,7 @@
 
 切到地圖 57 的腳本：`WIN08`（第 9 章勝利，`fdps_chapter_09_end`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN08` `0x018`）
 
@@ -1770,7 +1770,7 @@
 
 切到地圖 58 的腳本：`ICON19`（第 20 章開場，`fdps_chapter_20_init`）。
 
-本區塊另有 13 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 13 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`ICON19` `0x01f`）
 
@@ -1907,7 +1907,7 @@
 
 切到地圖 59 的腳本：`WIN24`（第 25 章勝利，`fdps_chapter_25_end`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN24` `0x040`）
 
@@ -2055,7 +2055,7 @@
 
 切到地圖 60 的腳本：`WIN16`（第 17 章勝利，`fdps_chapter_17_end`）。
 
-本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 9 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN16` `0x1da`）
 
@@ -2092,7 +2092,7 @@
 
 切到地圖 61 的腳本：`WINGA26`（第 27 章勝利，`fdps_chapter_27_end`）。
 
-本區塊另有 5 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 5 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WINGA26` `0x3f0`）
 
@@ -2129,7 +2129,7 @@
 
 切到地圖 63 的腳本：`WIN29`（第 30 章勝利，`fdps_chapter_30_end`）。
 
-本區塊另有 15 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 15 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`WIN29` `0x7a3`）
 
@@ -2376,7 +2376,7 @@
 
 切到地圖 64 的腳本：`GOODEND`（第 30 章勝利，`fdps_chapter_30_end`）。
 
-本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/`](../../cut_content/_index.md)。
+本區塊另有 4 條有內容、但沒有腳本引用的條目，永遠不會顯示，見 [`cut_content/story.md` 的總表](../../cut_content/story.md#永遠不會顯示的文字總表)。
 
 ### `0x09`（`GOODEND` `0x0a6`）
 
