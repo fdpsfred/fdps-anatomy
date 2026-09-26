@@ -298,10 +298,22 @@ def main(argv=None):
     ap.add_argument("--landed-all", action="store_true",
                     help="every chapters/chNN.md that exists, strictly")
     ap.add_argument("--template", type=int, metavar="N")
+    ap.add_argument("--refill", nargs="+", type=int, metavar="N",
+                    help="regenerate the blocks of landed pages in place (after a judgement "
+                         "record or the data changed); the prose is not touched")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     if a.template:
         print(template(a.template), end="")
+        return 0
+    if a.refill:
+        for n in a.refill:
+            path = LANDED / f"ch{n:02d}.md"
+            text = path.read_text(encoding="utf-8")
+            new = fill(text, n, facts.load_judgement(n))
+            if new != text:
+                path.write_bytes(new.encode("utf-8"))
+                print("refilled %s" % path.name)
         return 0
     if a.landed_all:
         a.landed = [n for n in facts.CHAPTERS if (LANDED / f"ch{n:02d}.md").exists()]

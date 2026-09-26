@@ -22,6 +22,8 @@
 | `consist_ticket25_17.js` | 第二段 workflow：一項一個 agent、gate、回掃、落地（`apply`、`cut_content.py index` 重產總表、全部閘門）、收尾報告到 `devlog/runs/<date>-kb-consist-*.json`；要在第一段落地之後才跑，擴散項目是從落地紀錄產生的 |
 | `kbrefused.py` | 一致性段落地時被拒收的修正（`old` 已被同一段落上先落地的另一筆修正改掉）：`triage` 把新文字已經逐字在頁面上的判為已涵蓋、記進 `workspace/kb_refused/triage.json`，其餘每一筆凍結成一個項目；其他子命令沿用 `kbconsist.py` 的判定檔格式、gate、回掃與落地（`use_workspace` 換成自己的項目清單與判定檔） |
 | `refused_ticket25_17.js` | 第三段 workflow：被拒收的修正一筆一個 agent，判斷現行文字是否已經說出那筆修正要說的事實，不是就寫出對現行文字的修正；gate、回掃、落地與全部閘門、收尾報告到 `devlog/runs/<date>-kb-refused-*.json` |
+| `kboutside.py` | 前三段判定裡的 `outside`（修正不在被判的那一頁：`src/`／`tests/` 註解、`tools/` 的產生器與手寫資料、別的頁、票、Ghidra）：`freeze` 把三份收尾報告的每一條依它提到的非知識庫檔案以 union-find 分組（只提到知識庫頁的依第一頁），同一段註解的多條請求落在同一組、由同一個 agent 一次寫好；`apply` 只落地第二位 agent 確認或修改的修正，C 原始碼的修正整檔比對（`strip_c` 之後）必須只差註解或只差識別字改名，不寫 `docs/adr/`、`devlog/`、`README.md`，重產只能從固定清單選（`REGENERATE`）；`ghidra` 印出要由票的 session 逐項做的 Ghidra 改動 |
+| `outside_ticket25_17.js` | 第四段 workflow：一組一個 agent，逐條判斷請求是否已做、是否屬實，屬實的寫出修正；gate、回掃、落地（`apply`、重產、知識庫閘門、動到的工具的單元測試、完整建置閘門）、收尾報告到 `devlog/runs/<date>-kb-outside-*.json` |
 | `test_kb_verify.py` | 單元測試：`python -m unittest tools/kb_verify/test_kb_verify.py` |
 
 判定檔在 `workspace/kb_verify/verdicts/` 與 `workspace/kb_consist/verdicts/`，落地紀錄在 `workspace/kb_verify/applied.json`。
@@ -35,11 +37,14 @@ Workflow({ scriptPath: "tools/kb_verify/consist_ticket25_17.js",
            args: { date: "YYYY-MM-DD", exclude: [還不能改的頁] } })
 Workflow({ scriptPath: "tools/kb_verify/refused_ticket25_17.js",
            args: { date: "YYYY-MM-DD" } })                     （一致性段有拒收時）
+Workflow({ scriptPath: "tools/kb_verify/outside_ticket25_17.js",
+           args: { date: "YYYY-MM-DD" } })                     （最後：前三段的 outside）
+python tools/kb_verify/kboutside.py ghidra                    （票的 session 逐項做 Ghidra 改動）
 ```
 
 兩支的最後都有落地段：`apply` 只落地第二位 agent 確認或修改的修正，其餘每一項（沒有判定、判定不過 gate、還沒回掃、`old` 已經不是恰好一次、`exclude` 擋下的頁）都以名字列在拒收清單，不靜默略過；接著跑全部知識庫閘門（`check_chapter.py --landed-all`、`index.py verify`、`data_tables.py check`、`global_text.py verify`、`cut_content.py check`、`story.py check --final`、`data_skill/build.py`、`kbverify.py indexes`），`lint` 的剩餘筆數只列出、由票的 session 人工檢視（驗證者判定「照原樣成立」的會留在裡面）。閘門不過時落地段只回報，修正要判斷，歸票的 session。`exclude` 擋下的頁之後直接再跑一次 `apply` 即可補落地。
 
-需要改 `src/` 註解、Ghidra 或產生器的修正不自動落地：判定檔的 `outside` 欄寫明位置與內容，收尾報告彙整成清單，由票的 session 逐項處理（改 `src/` 註解後跑完整回歸閘，改 Ghidra 後查 bookmark、calling convention、存檔並匯出快照）。
+需要改 `src/` 註解、Ghidra 或產生器的修正不在前三段落地：判定檔的 `outside` 欄寫明位置與內容，收尾報告彙整成清單，由第四段逐組判定並落地（落地後跑完整建置閘門）；Ghidra 改動由票的 session 照 `kboutside.py ghidra` 逐項做，做完查 bookmark、calling convention、存檔並匯出快照。
 
 兩支都可重跑續跑：判定檔通過 gate 的項目不再判一次，已落地的判定檔帶 `_landed_sha1`／`_landed`，不會落地兩次。
 

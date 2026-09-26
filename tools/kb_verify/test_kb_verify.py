@@ -247,5 +247,43 @@ class ConsistTest(unittest.TestCase):
             self.assertEqual(kbconsist.duplicate_groups(), [])
 
 
+class OutsideTest(unittest.TestCase):
+    SRC = "int f(void)\n{\n    /* the old comment */\n    return 1;\n}\n"
+
+    def test_a_comment_or_a_rename_is_allowed_in_c_source_a_code_change_is_not(self):
+        import kboutside
+        self.assertIsNone(kboutside.code_change(self.SRC, self.SRC.replace("old comment", "new one")))
+        self.assertIsNone(kboutside.code_change(self.SRC, self.SRC.replace("f(void)", "g(void)")))
+        self.assertIsNotNone(kboutside.code_change(self.SRC, self.SRC.replace("return 1", "return 2")))
+
+    def test_fixes_naming_a_common_source_file_are_one_group(self):
+        import kboutside
+        fixes = [("V:a#1", "src/text.c 的註解要改", "", "program_info/dialog.md"),
+                 ("C:X1", "src/text.c 與 tests/text.c 的註解", "", None),
+                 ("C:X2", "tests/text.c:936 同樣", "", None),
+                 ("V:b#2", "rebuild_info/pitfalls.md 那一列", "", "program_info/cd_audio.md"),
+                 ("V:c#3", "同頁另一段", "", "program_info/code_pools.md")]
+        groups, _ = kboutside.group(fixes)
+        self.assertEqual(sorted(groups), [["C:X1", "C:X2", "V:a#1"], ["V:b#2"], ["V:c#3"]])
+
+    def test_edits_to_decision_records_and_generated_pages_are_refused(self):
+        import kboutside
+        files = {"docs/adr/0004-x.md": "old\n", "assets/text/global_text.md": "old\n",
+                 "src/a.c": self.SRC}
+        with TempRepo(files):
+            saved = kboutside.REPO
+            kboutside.REPO = kbverify.REPO
+            try:
+                problems, texts = kboutside.check_edits([
+                    {"file": "docs/adr/0004-x.md", "old": "old", "new": "new", "why": "w"},
+                    {"file": "assets/text/global_text.md", "old": "old", "new": "new", "why": "w"},
+                    {"file": "src/a.c", "old": "return 1", "new": "return 2", "why": "w"},
+                    {"file": "src/a.c", "old": "the old comment", "new": "a better one", "why": "w"}])
+            finally:
+                kboutside.REPO = saved
+        self.assertEqual(len(problems), 3)
+        self.assertIn("a better one", texts["src/a.c"])
+
+
 if __name__ == "__main__":
     unittest.main()
