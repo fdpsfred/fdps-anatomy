@@ -68,8 +68,8 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 - `00014ab0` 的型別修正：已套用，`void_int_fn` 改為 `void(int unit_index)`。
 - 快照裡不存在的函式名 `fdps_collect_defeated_unit_events`：5 處改為實名。
 - plate comment 的 `FUN_` 佔位名：使用者同意一次替換，673 個換成現名；剩下的都指向至今仍無正式名稱的 vendor／CRT function。
-- CD 模組的 stack probe：使用者先決定明文放棄，後來改為隨旗標一起對齊原版，歸票 22.2。
-- 遊戲段那 150 個直接推送：查清了，全部落在 `-oe` 展開的副本裡。連帶查出原版遊戲段的旗標是 `-s -ot -oe=25 -d2`、10.0a 的 C 沒有 `_inline`，`rebuild_info/build_flags.md` 已依 `tools/build_flags/` 的可重現量測改寫。使用者決定重建版完全對齊（含依原版 translation unit 重新分檔），開成票 22.2。
+- CD 模組的 stack probe：使用者先決定明文放棄，後來改為隨旗標一起對齊原版、歸票 22.2；票 22.2 最後由開發者決定不做（wontfix），所以 CD 模組維持不帶 probe。
+- 遊戲段那 150 個直接推送：查清了，全部落在 `-oe` 展開的副本裡。連帶查出原版遊戲段的旗標是 `-s -ot -oe=25 -d2`、10.0a 的 C 沒有 `_inline`，`rebuild_info/build_flags.md` 已依 `tools/build_flags/` 的可重現量測改寫。使用者當時決定重建版完全對齊（含依原版 translation unit 重新分檔），開成票 22.2；之後開發者決定不做（票 22.2 wontfix），重建版維持統一旗標組。
 - `routing.json` 對 `data_fdps_battle_ai_best_physical_target_x` 的號性：列進票 23 的交接表。
 
 **Blocked by:** 21, 21.5, 21.6, 21.7, 22.1 — 全部已完成

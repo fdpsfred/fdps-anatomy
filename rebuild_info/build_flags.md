@@ -152,7 +152,7 @@ DPMI 模組  開最佳化、帶 -s、不帶 -d2（確切組合未定案）
 
 **`fdps_timer_tick_handler`（`0x30790`）的序幕少推 EBX（`56 57 55 89 e5`），但仍是遊戲段旗標組的產物。** 同一段 C 宣告成 `__cdecl`、以遊戲段旗標組編譯，產出與原版的 26 byte 逐 byte 相同；不加 `__cdecl` 就是標準的四推序幕、多出 2 byte。Watcom 的 `__cdecl` 把 EBX 當成可破壞，所以不保存。這支是交給 `AIL_register_timer` 的 callback。
 
-**重建版不用原版的這幾組旗標。** 重建的建置對每個 unit 都用同一組 `-bt=dos4g -mf -4s -fpi -s -ot -od`（`tools/fdps_build/build_min.py` 的 `CFLAGS`，`build_emit.py` 與 `build_game.py` 共用），所以重建版的遊戲段沒有 `-oe`／`-d2`、CD 模組沒有 stack probe。行為上兩者等價（ADR-0001；probe 只在堆疊已經用爆時才讓行為分岔）。旗標不能單獨照搬：`-oe` 只在同一個 translation unit 內展開，而 `src/` 的分檔與原版的 unit 邊界不同，照搬會展開原版沒展開的呼叫。要逐 byte 對照原版，得另外用上面的旗標重編一份（`tools/build_flags/fn_match.py`），不能拿建置產出的 `.OBJ` 直接比。
+**重建版不用原版的這幾組旗標。** 重建的建置對每個 unit 都用同一組 `-bt=dos4g -mf -4s -fpi -s -ot -od`（`tools/fdps_build/build_min.py` 的 `CFLAGS`，`build_emit.py` 與 `build_game.py` 共用），所以重建版的遊戲段沒有 `-oe`／`-d2`、CD 模組沒有 stack probe。行為上兩者等價（ADR-0001；probe 只在堆疊已經用爆時才讓行為分岔）。旗標不能單獨照搬：`-oe` 只在同一個 translation unit 內展開，而 `src/` 的分檔與原版的 unit 邊界不同，照搬會展開原版沒展開的呼叫。要逐 byte 對照原版，得另外用上面的旗標重編一份（`tools/build_flags/fn_match.py`），不能拿建置產出的 `.OBJ` 直接比。重建版維持統一旗標組是定案：對齊原版的旗標與 translation unit 邊界不是功能等價所需，不做。
 
 ### inline 展開來自 `-oe`，不是原始碼的關鍵字
 

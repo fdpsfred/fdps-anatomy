@@ -32,7 +32,7 @@ MSCDEX 呼叫點用指令特徵搜不到，是因為中斷編號都是執行期�
 
 ### DOSBox-X 的 MSCDEX 不讀未初始化的欄位
 
-DOSBox-X 2026.08.02 內建的 MSCDEX（DOSBox-X 原始碼的 `src/dos/dos_mscdex.cpp`）處理 `INT 2Fh` AX=1510h 的 IOCTL Input（命令 3）與 IOCTL Output（命令 `0x0C`）時，request header 除了 `+1`（subunit，MSCDEX 先依 CX 覆寫再讀）之外只讀 `+2`（命令碼）與 `+0x0E`／`+0x10`（transfer address），宣告長度（`+0`）、`+0x12` 之後的欄位、以及超出 26 byte 的部分一概不讀；分派只看 transfer buffer 的第一個 byte（control block 代碼）。Read Audio Track Info（control block `0x0B`）只讀 block `+1` 的音軌號，無論成功與否都無條件寫回 block `+2`..`+6`（frame、second、minute、0、attr），查詢被拒時寫的是零。因此在 DOSBox-X 下，各 CD 請求在 header 與 control block 裡留下的未初始化堆疊位元組不影響結果，重建版的堆疊配置不同也不會造成行為差異。
+DOSBox-X 2026.08.02 內建的 MSCDEX（DOSBox-X 原始碼的 `src/dos/dos_mscdex.cpp`）處理 `INT 2Fh` AX=1510h 的 IOCTL Input（命令 3）與 IOCTL Output（命令 `0x0C`）時，request header 除了 `+1`（subunit，MSCDEX 先依 CX 覆寫再讀）之外只讀 `+2`（命令碼）與 `+0x0E`／`+0x10`（transfer address），宣告長度（`+0`）、`+0x12` 之後的欄位、以及超出 26 byte 的部分一概不讀；分派只看 transfer buffer 的第一個 byte（control block 代碼）。Read Audio Track Info（control block `0x0B`）只讀 block `+1` 的音軌號，無論成功與否都無條件寫回 block `+2`..`+6`（frame、second、minute、0、attr），查詢被拒時寫的是零。因此在 DOSBox-X 下，各 CD 請求在 header 與 control block 裡留下的未初始化堆疊位元組不影響結果，重建版的堆疊配置不同也不會造成行為差異。遊戲端（各請求留下哪些未初始化的位元組、`0x3bce2` 宣告的長度）已對過 `src/`；模擬器端的讀法沒有對照 DOSBox-X 原始碼或實測驗證過（[`open_issues.md`](../open_issues.md)）。
 
 ## 啟動時的光碟偵測
 
