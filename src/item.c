@@ -807,7 +807,7 @@ void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
    (aitarget.h).  PUSH 0x1 at 00025516 is that collector's
    select_enemy_side, which runs the opposite way round from a select mode: 1
    keeps side 0, the enemy side. */
-#define ITEM_USE_DISTANCE_LINE_BIT 0x10
+#define ITEM_USE_DISTANCE_LINE_BASE 0x10
 #define LINE_SWEEP_KEEPS_ENEMY_SIDE 1
 
 /* The two use-effect codes that make this menu ask for a DESTINATION tile on
@@ -983,7 +983,7 @@ int fdps_battle_item_menu(int unit_index)
                        covers from where the cursor ended up.  THIS SWEEP RUNS
                        EVEN ON A CANCELLED AIM, and it is the count and the list
                        the apply below would be given. */
-                    if (use_distance < ITEM_USE_DISTANCE_LINE_BIT) {
+                    if (use_distance < ITEM_USE_DISTANCE_LINE_BASE) {
                         target_count = fdps_collect_targets_in_range(
                             data_fdps_map_cursor_world_x / MAP_TILE_SIZE,
                             data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
@@ -995,7 +995,7 @@ int fdps_battle_item_menu(int unit_index)
                             data_fdps_map_cursor_world_y / MAP_TILE_SIZE,
                             targets, saved_cursor_x / MAP_TILE_SIZE,
                             saved_cursor_y / MAP_TILE_SIZE,
-                            use_distance - ITEM_USE_DISTANCE_LINE_BIT,
+                            use_distance - ITEM_USE_DISTANCE_LINE_BASE,
                             LINE_SWEEP_KEEPS_ENEMY_SIDE);
                     }
                     fdps_map_grid_reset();

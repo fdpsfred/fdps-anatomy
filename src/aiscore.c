@@ -226,7 +226,7 @@ int fdps_map_actor_score_best_attack(int unit_index, int side_select)
    use_distance byte is compared as a number, not masked: below 0x10 it is the
    reach, from 0x10 up the item covers a straight line whose length is the
    byte less 0x10. */
-#define ITEM_USE_DISTANCE_LINE_BIT 0x10
+#define ITEM_USE_DISTANCE_LINE_BASE 0x10
 
 /* 00013040.  Picks the best item use the actor could make this turn -- which
    bag entry to spend and which tile to aim it at -- and publishes the choice
@@ -319,7 +319,7 @@ int fdps_map_actor_score_best_item(int unit_index, int side_select)
 
         aim_min_dist = 0;
         aim_reach = (int) item->use_distance;
-        if (aim_reach >= ITEM_USE_DISTANCE_LINE_BIT) {
+        if (aim_reach >= ITEM_USE_DISTANCE_LINE_BASE) {
             aim_reach = ITEM_SEARCH_LINE_AIM_REACH;
             aim_min_dist = ITEM_SEARCH_LINE_AIM_MIN_DIST;
         }
@@ -342,7 +342,7 @@ int fdps_map_actor_score_best_item(int unit_index, int side_select)
             }
 
             use_distance = (int) item->use_distance;
-            if (use_distance < ITEM_USE_DISTANCE_LINE_BIT) {
+            if (use_distance < ITEM_USE_DISTANCE_LINE_BASE) {
                 target_count =
                     fdps_collect_targets_in_range(aim_x, aim_y,
                                                   target_indices,
@@ -353,7 +353,7 @@ int fdps_map_actor_score_best_item(int unit_index, int side_select)
                     fdps_collect_targets_in_line(aim_x, aim_y, target_indices,
                                                  actor_x, actor_y,
                                                  use_distance -
-                                                 ITEM_USE_DISTANCE_LINE_BIT,
+                                                 ITEM_USE_DISTANCE_LINE_BASE,
                                                  target_select_mode);
             }
             fdps_map_grid_reset();

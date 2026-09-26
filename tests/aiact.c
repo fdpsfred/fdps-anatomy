@@ -1288,8 +1288,9 @@ static void as_the_animation_flag_is_an_equality_with_one(void)
 #define AI_AREA_RADIUS 1
 #define AI_AREA_MODE (AI_AREA_RADIUS + 2)
 
-/* The line record: bit 0x10 marks the shape and the low nibble is the beam's
-   length in tiles.  Its radius is 0, so the diamond the sweep opens under is
+/* The line record: a use_distance of 0x10 or more makes it a line, and the
+   byte less 0x10 is the beam's length in tiles (compared and subtracted, not
+   masked).  Its radius is 0, so the diamond the sweep opens under is
    mode 2 and the mode the sweep itself runs in is 6. */
 #define AI_BEAM_TILES 5
 #define AI_LINE_USE_DISTANCE (0x10 + AI_BEAM_TILES)

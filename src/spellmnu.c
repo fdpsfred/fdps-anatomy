@@ -649,10 +649,10 @@ int fdps_spell_list_select_loop(int unit_index, unsigned char *window_buf,
    whose length is the byte less 0x10.  The byte is compared as a number, not
    masked: the test is CMP dword ptr [EBP-0xc],0xf / JLE at 00027e46, so 0x0f
    is the last radius and the line arm is the one that falls through, and the
-   line length is SUB EAX,0x10 at 00027e64 -- CAST_RANGE_LINE_BIT is
+   line length is SUB EAX,0x10 at 00027e64 -- CAST_RANGE_LINE_BASE is
    subtracted, never tested as a bit or used to extract a low nibble. */
 #define CAST_RANGE_LAST_RADIUS 0x0f
-#define CAST_RANGE_LINE_BIT 0x10
+#define CAST_RANGE_LINE_BASE 0x10
 
 /* The min_dist argument every sweep here passes, PUSH 0x0 at 00027ddb,
    00027ed9 and 00027f41: the caster's own tile is kept.  The item menu is the
@@ -854,7 +854,7 @@ int fdps_battle_spell_command(int unit_index)
                     data_fdps_map_cursor_world_y / MAP_TILE_SIZE, targets,
                     (int) line_origin_unit->pos_x,
                     (int) line_origin_unit->pos_y,
-                    cast_range - CAST_RANGE_LINE_BIT,
+                    cast_range - CAST_RANGE_LINE_BASE,
                     LINE_SWEEP_KEEPS_ENEMY_SIDE);
                 fdps_play_sfx(LINE_SWEEP_SOUND);
             } else {

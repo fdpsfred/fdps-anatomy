@@ -170,8 +170,10 @@ extern struct fdps_class_equip_record *fdps_get_class_equip_record(int class_ind
 
 /* Returns a pointer to record spell_id of the MAGICDAT.DAT spell table: the
    signed power word -- damage, heal amount, or, when negative, the attack
-   multiplier as a percentage -- the hit rate, the cast distance with its
-   straight-line bit 0x10, the blast radius, the MP cost and the target side,
+   multiplier as a percentage -- the hit rate, the cast distance (a reach up
+   to 0x0f, from 0x10 up a straight line of the byte less 0x10: a value
+   compare and a subtraction, not a bit), the blast radius, the MP cost and
+   the target side,
    in the 7 bytes of struct fdps_spell_effect.
 
    spell_id is the spell number, 0x00-0x27 over the 40 records the 280-byte

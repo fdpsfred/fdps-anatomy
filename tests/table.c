@@ -1378,7 +1378,7 @@ static long spell_offset(int spell_id)
    belonging to some other field.  The values are ones the file really carries:
    power 0xff06 is -250, the form the eight attack-multiplier spells store (a
    2.50x multiplier held as the negative percentage, assets/tables/spells.md);
-   cast_range_flags 0x17 is the straight-line bit 0x10 over a range of 7;
+   cast_range_flags 0x17 is a straight line of 0x17 - 0x10 = 7 tiles;
    mp_cost 130 is above 0x7f, which separates the unsigned byte the layout
    declares from a signed one; and target_side 0x03 is the third value the
    field takes -- spell 0x16 carries it, against the 0x00 and 0x01 the field's
