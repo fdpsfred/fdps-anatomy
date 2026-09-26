@@ -1,10 +1,10 @@
 # 已知原版 bug
 
-**驗證對象**：`FDPS.LE` 原版執行檔裡玩家玩得出來的程式缺陷，每一條的成因以此檔為唯一正典。涵蓋的 function 與所在的 `src/` 檔：`0x19f80`（全螢幕物理結算，`src/combat.c`）；`0x1c3a0`、`0x1c520`（地圖上的物理結算，`src/unitatk.c`）；`0x1dd30`、`0x28460`、`0x29080`（經驗、傷害與異常免疫，`src/unitstat.c`）；`0x18b10`（`ENEMYDAT.DAT` 取記錄，`src/table.c`）；`0x126b0`、`0x12c10`（`src/mapai.c`）、`0x12230`、`0x13040`、`0x132b0`（`src/aiscore.c`）、`0x12e50`、`0x27180`（`src/aiact.c`）、`0x11460`（`src/movegrid.c`）、`0x11e50`（`src/aitarget.c`）、`0x2b4f0`、`0x2c6a0`、`0x2d7c0`（`src/mapcur.c`）（地圖 AI、目標收集與游標）；`0x252b0`、`0x262a0`（玩家使用道具，`src/item.c`）；`0x3a2e0`（`src/btlend.c`）、`0x3aad0`（`src/chpost1.c`）、`0x3ae80`、`0x3b150`、`0x3b3d0`（`src/chpost2.c`）、`0x39e70`（`src/roster.c`）（章節勝敗判定與章節結束）；`0x21650`（`src/icon.c`）、`0x2db50`（`src/unit.c`）、`0x374e0`（`src/chevt2.c`）、`0x12960`、`0x15470`（`src/btlturn.c`）、`0x14ab0`（`src/btlmenu.c`）（戰鬥中播放的過場）；`0x2a2b0`（`src/title.c`）、`0x241e0`（`src/save.c`）（標題選單與存檔）；`0x31210`、`0x357a0`（`src/village.c`）、`0x36460`（`src/vilbar.c`）、`0x36af0`（`src/roster.c`）（村莊）；`0x39550`（`src/chevt6.c`）（第 28 章援軍）；`0x18d60`（`src/combat.c`）、`0x1a4c0`（`src/cmbspell.c`）、`0x2a140`（`src/vfs.c`）（戰鬥畫面素材的載入）；`0x1d990`（`src/death.c`）、`0x25d20`（`src/unititem.c`）（死亡腳本的掉落物）。
+**驗證對象**：`FDPS.LE` 原版執行檔裡玩家玩得出來的程式缺陷，每一條的成因以此檔為唯一正典。涵蓋的 function 與所在的 `src/` 檔：`0x19f80`（全螢幕物理結算，`src/combat.c`）；`0x1c3a0`、`0x1c520`（地圖上的物理結算，`src/unitatk.c`）；`0x1dd30`、`0x28460`、`0x29080`（經驗、傷害與異常免疫，`src/unitstat.c`）；`0x18b10`（`ENEMYDAT.DAT` 取記錄，`src/table.c`）；`0x126b0`、`0x12c10`（`src/mapai.c`）、`0x12230`、`0x13040`、`0x132b0`（`src/aiscore.c`）、`0x12e50`、`0x27180`（`src/aiact.c`）、`0x11460`（`src/movegrid.c`）、`0x11e50`（`src/aitarget.c`）、`0x2b4f0`、`0x2c6a0`、`0x2d7c0`（`src/mapcur.c`）（地圖 AI、目標收集與游標）；`0x252b0`、`0x262a0`（玩家使用道具，`src/item.c`）；`0x3a2e0`（`src/btlend.c`）、`0x3aad0`（`src/chpost1.c`）、`0x3ae80`、`0x3b150`、`0x3b3d0`（`src/chpost2.c`）、`0x39e70`（`src/roster.c`）（章節勝敗判定與章節結束）；`0x21650`（`src/icon.c`）、`0x2db50`（`src/unit.c`）、`0x374e0`（`src/chevt2.c`）、`0x12960`、`0x15470`（`src/btlturn.c`）、`0x14ab0`（`src/btlmenu.c`）（戰鬥中播放的過場）；`0x2a2b0`（`src/title.c`）、`0x241e0`（`src/save.c`）（標題選單與存檔）；`0x31210`、`0x357a0`（`src/village.c`）、`0x36460`（`src/vilbar.c`）、`0x36af0`（`src/roster.c`）（村莊）；`0x39550`（`src/chevt6.c`）（第 28 章援軍）；`0x18d60`（`src/combat.c`）、`0x1a4c0`（`src/cmbspell.c`）、`0x2a140`（`src/vfs.c`）（戰鬥畫面素材的載入）；`0x1d990`（`src/death.c`）、`0x25d20`（`src/unititem.c`）（死亡腳本的掉落物）；`0x1fa30`（`src/unitstat.c`）（中毒結算）。
 
 依功能等價（[ADR-0001](../docs/adr/0001-only-functional-equivalence.md)），下列每一條重建版都照原樣保留。每條寫三件事：**現象**是玩家看到什麼，**成因**是程式哪裡做錯，**重建**一行指向重建時會怎麼寫錯的正典（[`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md) 的對應列，或該 function 的 plate comment `Rebuild note`）。各機制頁只以一行提到這些 bug 並連回這裡；被 bug 封住的內容由 [`cut_content/`](../cut_content/_index.md) 擁有，這裡只寫一行。
 
-原版之所以會讀到「陣列之外」的值（第 4、12、13、22 條）或「堆疊上的殘值」（第 18、19 條），而且每次都讀到同一種結果，是因為堆積與堆疊的佈局只由呼叫序列決定；佈局本身由 [`memory_layout.md`](memory_layout.md) 擁有。
+原版之所以會讀到「陣列之外」的值（第 4、12、13、22 條）或「堆疊上的殘值」（第 18、19 條），讀到什麼取決於當時的堆積與堆疊佈局。堆疊佈局由呼叫序列決定；堆積佈局由 malloc／free 的呼叫序列與尺寸決定，而戰鬥中單位陣列每次搬移時配置的墊塊大小取自亂數，所以陣列之外讀到的內容不是靜態可定的固定值。佈局本身由 [`memory_layout.md`](memory_layout.md) 擁有。
 
 ## 清單
 
@@ -17,7 +17,7 @@
 | 5 | 神聖之水補錯邊 | `fdps_map_actor_use_item`（`0x27180`） | 敵人補我方、NPC 補敵人 |
 | 6 | 三種行動分數相同時 AI 原地不動 | `fdps_map_actor_take_best_action`（`0x12c10`） | 該單位整回合不動也不休息 |
 | 7 | 「走得到的最近對手」用錯職業的地形消耗 | `fdps_map_actor_move_toward_nearest_reachable_opponent`（`0x126b0`） | 敵人選錯要走向的目標 |
-| 8 | 友軍 NPC 的「走得到的最近對手」找到自己 | `fdps_move_path_trace`（`0x11460`） | NPC 不沿路找敵人 |
+| 8 | 友軍 NPC 的「走得到的最近對手」找到自己 | `fdps_map_actor_move_toward_nearest_reachable_opponent`（`0x126b0`） | NPC 不沿路找敵人 |
 | 9 | 敵人的光束道具軌跡畫出地圖 | `fdps_map_actor_use_item`（`0x27180`） | 軌跡出現在錯誤的格子上 |
 | 10 | 大地之劍、白銀之槍在玩家手上「使用」無效 | `fdps_battle_item_menu`（`0x252b0`） | 一件打空、一件無法確認；封住白銀之槍的使用效果 |
 | 11 | 第 14、20 章的法蓮娜死亡不算敗北 | `fdps_battle_check_default_end_conditions`（`0x3a2e0`） | 與畫面上的失敗條件不符 |
@@ -28,11 +28,11 @@
 | 16 | 只存過 slot 的玩家從標題進不了讀檔畫面 | `fdps_title_screen`（`0x2a2b0`） | 「讀檔」反灰 |
 | 17 | 標題讀檔畫面取消後，可能跳過一次存檔畫面 | `fdps_run_village_phase`（`0x31210`） | 章節之間沒機會存檔 |
 | 18 | 酒館抽獎永遠只發藥草 | `fdps_run_bonus_lottery`（`0x36460`） | 封住三種大獎 |
-| 19 | 第 26 章前的神秘商店進不去 | `fdps_check_secret_code_key`（`0x357a0`） | 封住那一家的貨 |
+| 19 | 第 26 章前的秘密商店進不去 | `fdps_check_secret_code_key`（`0x357a0`） | 封住那一家的貨 |
 | 20 | 第 28 章援軍的波次 3 出場兩次、波次 4 永不出場 | `fdps_chapter_28_event_deploy_wave_for_turn`（`0x39550`） | 封住三名敵兵 |
 | 21 | 第 17、23 章幾個沒有戰鬥畫面的單位被捲入全螢幕戰鬥時程式結束 | `fdps_vfs_load_entry`（`0x2a140`） | 回到 DOS（潛在，觸發未經實機確認） |
 | 22 | 第 10 章一名敵兵掉出表外物品 `FF` | `fdps_run_death_scripts`（`0x1d990`） | 背包多一件名為「裂地術」、數值不定的物品 |
-| 23 | 中毒致死不執行死亡腳本 | `fdps_battle_tick_status_effects`（`0x1fa30`） | 毒死的單位不掉寶、不觸發援軍、不下敗北判定 |
+| 23 | 中毒致死不執行死亡腳本 | `fdps_battle_tick_status_effects`（`0x1fa30`） | 毒死的單位不掉寶、不觸發援軍與章節事件、不下勝敗判定 |
 
 ## 1. 連擊的經驗只算最後一擊
 
@@ -62,13 +62,13 @@
 
 **現象**：第 13 章（`MAP12`）有一個陣營 0、肖像編號 `0D` 的敵人，第 15、19、24 章（`MAP14`、`MAP18`、`MAP23`）決鬥波次的挑戰者是陣營 0、肖像編號 `23`。我方用全螢幕攻擊、法術或傷害道具打這幾個單位時，得到的經驗不是任何資料表裡的數，而是記憶體裡剛好在那個位置的值（最後仍被 99 夾住）。
 
-**成因**：`fdps_combat_compute_hit_outcome`（`0x19f80`）與 `fdps_unit_apply_damage`（`0x28460`）只以守方陣營 byte 為 0 判定「這是敵人」，就把「肖像編號 − `0x3c`」交給 `fdps_get_enemy_record`（`0x18b10`）；後者直接回傳 `ENEMYDAT.DAT` 緩衝區 + 索引 × 10，不檢查範圍。肖像 `0D` 得索引 −47、`23` 得 −25，經驗欄位（記錄 `+9`）分別讀自緩衝區之前第 461 與 241 byte 的堆積內容。地圖上的 `fdps_unit_resolve_attack_hit`（`0x1c520`）另外要求肖像編號 ≥ `0x3c`，對這些單位不給經驗。部署記錄的陣營與角色編號是兩個獨立欄位，格式見 [`../resource_info/map.md`](../resource_info/map.md)，各章的部署見 [`../chapters/_index.md`](../chapters/_index.md)。
+**成因**：`fdps_combat_compute_hit_outcome`（`0x19f80`）與 `fdps_unit_apply_damage`（`0x28460`）只以守方陣營 byte 為 0 判定「這是敵人」，就把「肖像編號 − `0x3c`」交給 `fdps_get_enemy_record`（`0x18b10`）；後者直接回傳 `ENEMYDAT.DAT` 緩衝區 + 索引 × 10，不檢查範圍。肖像 `0D` 得索引 −47、`23` 得 −25，經驗欄位（記錄 `+9`）分別讀自緩衝區之前第 461 與 241 byte 的堆積內容。地圖上的 `fdps_unit_resolve_attack_hit`（`0x1c520`）不看守方陣營、改以肖像編號 ≥ `0x3c` 判定，對這些單位不給經驗。部署記錄的陣營與角色編號是兩個獨立欄位，格式見 [`../resource_info/map.md`](../resource_info/map.md)，各章的部署見 [`../chapters/_index.md`](../chapters/_index.md)。
 
 **重建**：照原樣保留，不補下界檢查，見 [`pitfalls.md` 的「不能加的檢查」](../rebuild_info/pitfalls.md#不能加的檢查)。
 
 ## 5. 神聖之水補錯邊：敵人補我方，友軍 NPC 補敵人
 
-**現象**：第 24 章第 4 波的 26 名敵人帶著神聖之水。一名 HP ≤ 上限 1/3 的我方或友軍單位站在這種敵人的上下左右時，只要敵人沒有打得死人的攻擊、也沒有更高分的法術，它就對那名單位使用神聖之水（名目回復量 1000），把對方補回來。第 26 章第 3 波的 4 名友軍 NPC 也帶著神聖之水，會拿來補站在旁邊的重傷敵人。
+**現象**：第 24 章第 4 波的 26 名敵人帶著神聖之水。一名 HP ≤ 上限 1/3 的我方或友軍單位站在這種敵人的上下左右時，只要敵人沒有打得死人的攻擊、也沒有分數不低於它的法術，它就對那名單位使用神聖之水（名目回復量 1000），把對方補回來。第 26 章第 3 波的 4 名友軍 NPC 也帶著神聖之水，會拿來補站在旁邊的重傷敵人。
 
 **成因**：AI 的道具評分 `fdps_map_actor_score_best_item`（`0x13040`）與執行 `fdps_map_actor_use_item`（`0x27180`）在敵方階段（side_select 0）把 `ITEM.DAT` 的對象 byte（`+0x11`）做布林反轉（`byte == 0`），友軍階段直接用原值，結果當 `fdps_collect_targets_in_range`（`0x11e50`）的陣營篩選（0 收陣營 0、1 收陣營 ≠ 0、2 收陣營 1、3 收陣營 2，其他值一個都不收）。藥草、回復劑、再生藥（`B4`–`B6`）的對象 byte 是 5，反轉成 0，敵人補的是自己人；神聖之水（`C2`）的對象 byte 是 0，反轉成 1，敵人補的是我方與友軍；友軍階段的 0 則是陣營 0，也就是敵人。評分 `fdps_score_targets_for_item`（`0x132b0`）給 HP ≤ 上限/3 的目標 8 分、≤ 上限/2 的 3 分，不看道具的回復量；攻擊評分 `fdps_map_actor_score_best_attack`（`0x12230`）的非致命一擊也是 8 分，而 `fdps_map_actor_take_best_action`（`0x12c10`）在攻擊與道具同分、法術較低時選道具。同一個反轉讓 `B4`–`B6` 在友軍階段變成模式 5，友軍 NPC 永遠不會使用這三種藥。道具數值見 [`../assets/items.md`](../assets/items.md)，AI 評分的完整規則見 [`map_ai.md`](map_ai.md)。
 
@@ -136,9 +136,9 @@
 
 ## 13. 第 24 章提早清場後接受決鬥，挑戰者自動認輸
 
-**現象**：在第 7 回合之前清完敵人，接受狂戰士的決鬥後，第一回合我方結束時狂戰士就被判落敗，裘娜不戰而勝、妖刀村正換成妖刀正宗。攻略站記載相同。
+**現象**：在第 7 回合之前清完敵人，接受狂戰士的決鬥後，第一回合我方結束時狂戰士就被判落敗，裘娜不戰而勝、妖刀村正換成妖刀正宗。這是攻略站記載的結果；程式並不保證每次如此，取決於單位陣列之外的一個 byte（見成因）。從第 7 回合起到第 15 回合的波次 5 出場之前清場時，狂戰士是否同樣認輸沒有查證。
 
-**成因**：`fdps_chapter_24_post_action`（`0x3b3d0`）的結構與第 12 條相同（回合 ≤ 25、裘娜帶著 `A6`），勝負判定問的是寫死的單位 `0x52`。它的退場掃描上界是「目前單位數 − 1」，剛附加在尾端的挑戰者倖存；但只有五個回合波次都已出場時挑戰者才落在 `0x52`。提早清場時 `0x52` 在陣列之外，`fdps_unit_is_retired`（`0x109b0`）讀到的堆積內容表現為「已退場」，於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。
+**成因**：`fdps_chapter_24_post_action`（`0x3b3d0`）的結構與第 12 條相同（回合 ≤ 25、裘娜帶著 `A6`），勝負判定問的是寫死的單位 `0x52`。它的退場掃描上界是「目前單位數 − 1」，剛附加在尾端的挑戰者倖存；但只有五個回合波次都已出場時挑戰者才落在 `0x52`。第 15 回合敵方階段前的波次 5 出場之前清場時，`0x52` 在陣列之外，`fdps_unit_is_retired`（`0x109b0`）沒有邊界檢查，讀的是單位陣列之後的堆積內容；那裡被當成旗標 byte 的位置 bit 0 為 1 時就表現為「已退場」，於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。
 
 **重建**：照原樣保留，判定用寫死的 `0x52`；堆積佈局一變，挑戰者會不會認輸跟著變，見 [`pitfalls.md` 的「不能修的原版 bug」](../rebuild_info/pitfalls.md#不能修的原版-bug)。
 
@@ -184,13 +184,13 @@
 
 **重建**：照原樣保留，重建版讀到的殘值也要落在 0、1、2 之外，見 [`pitfalls.md` 的「不能修的原版 bug」](../rebuild_info/pitfalls.md#不能修的原版-bug)。
 
-## 19. 第 26 章前的神秘商店進不去
+## 19. 第 26 章前的秘密商店進不去
 
-**現象**：第 25 章打完、進第 26 章之前的村莊，看板選單的神秘商店無論輸入什麼暗號都進不去。攻略站也記載「無法進入，只能透過修改」。
+**現象**：第 25 章打完、進第 26 章之前的村莊，看板選單的秘密商店無論輸入什麼暗號都進不去。攻略站也記載「無法進入，只能透過修改」。
 
-**成因**：`fdps_run_village_phase`（`0x31210`）讓章節索引 1–15、18–20、23–25 都有村莊，但看板選單 `fdps_village_signboard_menu`（`0x31bc0`）呼叫的 `fdps_check_secret_code_key`（`0x357a0`）只有 24 列、每列 8 byte 的暗號表：它把表複製到自己的堆疊框架 `[EBP-0xc4]`，以 `[EBP-0xcc + 章節索引 × 8 + 目前位置]` 取字元，也就是第「章節索引 − 1」列。章節索引 25 取到第 24 列，落在表外：前 4 byte 是這支函式自己還沒寫入的回傳值槽 `[EBP-4]`，後 4 byte 是存起來的呼叫端 EBP。暗號因此變成執行期堆疊上的殘值與位址 byte，不是按鍵掃描碼湊得出來的序列。暗號比對的規則見 [`village.md`](village.md)。
+**成因**：`fdps_run_village_phase`（`0x31210`）讓章節索引 1–15、18–20、23–25 都有村莊，但看板選單 `fdps_village_signboard_menu`（`0x31bc0`）呼叫的 `fdps_check_secret_code_key`（`0x357a0`）只有 24 列、每列 8 byte 的暗號表：它把表複製到自己的堆疊框架 `[EBP-0xc4]`，以 `[EBP-0xcc + 章節索引 × 8 + 目前位置]` 取字元，也就是索引「章節索引 − 1」的那一列（索引從 0 起算）。章節索引 25 取到索引 24、也就是第 25 列，落在表外：前 4 byte 是這支函式自己還沒寫入的回傳值槽 `[EBP-4]`，後 4 byte 是存起來的呼叫端 EBP。比對時兩半平常裝的都是看板選單的框架指標，暗號因此是這個由 DOS/4GW 在執行期決定的堆疊位址的 little-endian byte，映像裡沒有；只有從最低 byte 起、到第一個 0 byte 之前的每個 byte 恰好都是按得出來的 make code 時才進得去，否則任何輸入都進不去。暗號比對的規則見 [`village.md`](village.md)。
 
-**被封住的內容**：這座神秘商店本身見 [`cut_content/code.md`](../cut_content/code.md) 的 C1，`SHOP25.DAT` 神秘商店那一列的貨見 [`cut_content/items.md`](../cut_content/items.md) 的 I09。
+**被封住的內容**：這座秘密商店本身見 [`cut_content/code.md`](../cut_content/code.md) 的 C1，`SHOP25.DAT` 秘密商店那一列的貨見 [`cut_content/items.md`](../cut_content/items.md) 的 I09。
 
 **重建**：照原樣保留，表長 24 列、以「章節索引 − 1」取列，不補範圍檢查，見 [`pitfalls.md` 的「不能修的原版 bug」](../rebuild_info/pitfalls.md#不能修的原版-bug) 的村莊暗號表一列。
 
@@ -208,9 +208,9 @@
 
 **現象**：下面這幾個單位只要成為全螢幕物理交戰或法術演出的一方，畫面印出找不到檔案的訊息、等一個按鍵後遊戲結束回到 DOS，存檔以外的進度全部失去：第 17 章關在 (18,23) 牢房裡的人質 `0E` 亞雷斯，第 23 章圍牆後的亡魂 `24`–`27`。平常碰不到他們，只有射程或施法距離穿過牆時才會捲進去：第 17 章（地圖 16）暗魔導士站在 (18,17) 放奔雷彈；第 23 章（地圖 22）幽魂站在 (21,4) 以靈擊打 (24,4)，或死神站在 (20,6) 對 (24,6) 放咒殺術（(21,3) 對著的 (24,3) 是亡魂的目的地，亡魂一到就退場）。AI 會不會真的站上這幾格、選這個目標，靜態分析判斷不了，沒有實機確認過。
 
-**成因**：全螢幕的物理交戰 `fdps_combat_play_attack_exchange`（`0x18d60`）與法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）以雙方（法術則是施法者與每個目標）的肖像編號組出 `Stand%03d.saf`（十進位三位數），經 `fdps_vfs_load_entry`（`0x2a140`）從 `FIGHT.VFS` 載入。成員不存在時 `fdps_vfs_load_entry` 在底層讀取器印出訊息之後等一個按鍵，接著 `exit(1)`，沒有任何退路。`FIGHT.VFS` 沒有 `STAND014` 與 `STAND036`–`STAND039`，也就是肖像編號 `0x0E` 與 `0x24`–`0x27`。戰鬥動畫關閉時，AI 發動的交戰改在地圖上結算，不載入戰鬥畫面，不會當機；玩家的施法則不看這個開關、一律走全螢幕演出（[`spell.md`](spell.md)），玩家的法術若選中這幾個單位，同樣會結束程式。容器格式見 [`../resource_info/vfs.md`](../resource_info/vfs.md)，這兩章的部署見 [第 17 章](../chapters/ch17.md)與[第 23 章](../chapters/ch23.md)。
+**成因**：全螢幕的物理交戰 `fdps_combat_play_attack_exchange`（`0x18d60`）與法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）以雙方（法術則是施法者與每個目標）的肖像編號組出 `Stand%03d.saf`（十進位三位數），經 `fdps_vfs_load_entry`（`0x2a140`）從 `FIGHT.VFS` 載入。成員不存在時 `fdps_vfs_load_entry` 在底層讀取器印出訊息之後等一個按鍵，接著 `exit(1)`，沒有任何退路。`FIGHT.VFS` 沒有 `STAND014` 與 `STAND036`–`STAND039`，也就是肖像編號 `0x0E` 與 `0x24`–`0x27`。戰鬥動畫關閉時，AI 發動的交戰與施法都改在地圖上結算，不載入戰鬥畫面，不會當機；玩家的施法則不看這個開關、一律走全螢幕演出（[`spell.md`](spell.md)），玩家的法術若選中這幾個單位，同樣會結束程式。容器格式見 [`../resource_info/vfs.md`](../resource_info/vfs.md)，這兩章的部署見 [第 17 章](../chapters/ch17.md)與[第 23 章](../chapters/ch23.md)。
 
-`FIGHT.VFS` 另外缺的 `STAND` 屬於正常流程不會上戰鬥畫面的單位（過場演員、MP 係數 0 而從不施法的單位），逐一的理由見 [`cut_content/_index.md`](../cut_content/_index.md) 排除清單的 U09。
+`FIGHT.VFS` 缺的其他 `STAND` 屬於正常流程不會上戰鬥畫面的單位（部署後就退場的過場演員、只部署在過場地圖的演員）。章節地圖上有單位部署的缺檔（含本條的 `STAND014` 與 `STAND036`–`STAND039`）與逐一的理由見 [`cut_content/_index.md`](../cut_content/_index.md) 排除清單的 U09，只部署在過場地圖的見同一清單的 U16。
 
 **重建**：照原樣保留，載入失敗照樣結束程式，不補替代素材也不略過演出。
 
@@ -226,7 +226,7 @@
 
 ## 23. 中毒致死不執行死亡腳本
 
-**現象**：單位在陣營階段開始時被中毒扣血打死，照常倒下、退場，但它部署記錄上的死亡腳本不執行：不掉物品、不給金錢、不觸發章節事件，也不下死亡腳本的勝敗判定。已知會影響遊戲的有三處：第 6 章第 7 筆騎兵若是毒死，他死亡時才部署的波次 2 援軍永遠不會出場；第 6 章的索爾若是毒死，他的敗北死亡腳本不執行，戰鬥照常繼續；第 12 章被選中的守護獸若是毒死，這一局拿不到牠身上的神兵（`58` 修佩魯、`59` 雷德、`5A` 亞德尼恩），前兩把連帶讓第 16 章流浪鐵匠的交易做不成（[`../chapters/ch06.md`](../chapters/ch06.md)、[`../chapters/ch12.md`](../chapters/ch12.md)、[`../chapters/ch16.md`](../chapters/ch16.md)）。第 1 章的索爾不受影響：`fdps_chapter_01_post_action`（`0x3a3b0`）自己判定敗北，毒死時只是遺言少畫一次。
+**現象**：單位在陣營階段開始時被中毒扣血打死，照常倒下、退場，但它部署記錄上的死亡腳本不執行：不掉物品、不給金錢、不觸發章節事件，也不下死亡腳本的勝敗判定。已知會影響遊戲的有下列幾處：第 6 章第 7 筆騎兵若是毒死，他死亡時才部署的波次 2 援軍永遠不會出場；第 6 章的索爾若是毒死，他的敗北死亡腳本不執行，戰鬥照常繼續；第 8 章第 18 筆守衛若是毒死，費塔加不會改去開牢門，要由我方單位自己走上牢門格；第 12 章被選中的守護獸若是毒死，這一局拿不到牠身上的神兵（`58` 修佩魯、`59` 雷德、`5A` 亞德尼恩），前兩把連帶讓第 16 章流浪工匠的交易做不成；第 13 章中央那名暗魔導士若是毒死，全軍永遠不轉為進攻；第 22 章的巫湯婆婆、第 23 章的死神若是毒死，這兩章的過關只由這兩個魔王的死亡腳本寫入，這一局就無法過關（[`../chapters/ch06.md`](../chapters/ch06.md)、[`../chapters/ch08.md`](../chapters/ch08.md)、[`../chapters/ch12.md`](../chapters/ch12.md)、[`../chapters/ch13.md`](../chapters/ch13.md)、[`../chapters/ch16.md`](../chapters/ch16.md)、[`../chapters/ch22.md`](../chapters/ch22.md)、[`../chapters/ch23.md`](../chapters/ch23.md)）。第 1 章的索爾不受影響：`fdps_chapter_01_post_action`（`0x3a3b0`）自己判定敗北，毒死時只是遺言少畫一次。
 
 **成因**：中毒扣血由 `fdps_battle_tick_status_effects`（`0x1fa30`）在陣營階段開始時結算，它把 HP 歸零的單位交給 `fdps_play_death_animation_and_mark_dead`（`0x1d6c0`）標成退場，再呼叫本章的行動後處理，中間不呼叫 `fdps_collect_death_scripts`（`0x26180`）與 `fdps_run_death_scripts`（`0x1d990`）；死亡腳本只在攻擊交戰與施法之後收集，而收集函式跳過已經標成退場的單位，之後也不會補收。流程見 [`battle.md`](battle.md)，死亡腳本的格式見 [`../resource_info/map.md`](../resource_info/map.md)。守護獸（職業 `0x21`）對全螢幕戰鬥與法術的異常免疫，只有在關掉戰鬥動畫、由牠發起物理攻擊、被我方以帶中毒效果的武器（第 12 章前買得到的 `31` 黑暗之杖）反擊時才會中毒（第 3 條）；正常擊倒時神兵照樣掉落，所以那三把劍不是被封住的內容。
 

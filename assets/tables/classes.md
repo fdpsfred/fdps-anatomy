@@ -12,7 +12,7 @@
 
 ### 索引是職業代碼加 1
 
-取值函式 `0x18b70` 算的是 `base + index * 10`，而呼叫端傳進去的是「職業代碼 + 1」——`MOV AL, [record + 0x20]` 取執行期人物 record 的職業代碼，`INC EAX`，再呼叫。第 0 筆是八個地形一律 1、暴擊 0、魔抗補數 0 的預設 record，`0x11e50` 與 `0x13040` 這類不針對特定單位的呼叫直接傳 0 取它。
+取值函式 `0x18b70` 算的是 `base + index * 10`，而呼叫端傳進去的是「職業代碼 + 1」——`MOV AL, [record + 0x20]` 取執行期人物 record 的職業代碼，`INC EAX`，再呼叫。第 0 筆是八個地形一律 1、暴擊 0、魔抗補數 0 的預設 record，`fdps_collect_targets_in_range`（`0x11e50`）、`fdps_map_actor_score_best_item`（`0x13040`）、`fdps_map_actor_score_best_spell`（`0x13420`）三個不針對特定單位的呼叫直接傳 0 取它。唯一的例外是 `fdps_map_actor_move_toward_nearest_reachable_opponent`（`0x126b0`）：它取了職業代碼沒有 `INC` 就呼叫，拿到的是職業代碼少 1 那個職業的列，職業 `0x00` 則拿到預設 record；這是原版 bug，見 [已知原版 bug](../../program_info/known_bugs.md)。
 
 ## `PROEQU.DAT` 的一筆，6 byte
 
@@ -30,7 +30,7 @@
 
 ### 沒有 sentinel，也沒有任何界限
 
-唯一的讀取端 `fdps_unit_can_equip_item` 六格全掃，不因為讀到 `0xFF` 就停；空位用 `0xFF` 而不是 `0x00`，是因為 `0x00` 本身就是一個活的物品類型代碼。取值函式本身也什麼都不檢查：216 byte 只裝得下職業代碼 `0x00`–`0x23` 的 36 筆，而職業代碼一路到 `0x27`，所以 `0x24`–`0x27` 會讀到檔案後面；乘法是帶號的，負的索引會讀到檔案前面；表基底也不測 null。重建時照直覺補上終止判斷會改變行為，見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md)。
+唯一的讀取端 `fdps_unit_can_equip_item` 六格全掃，不因為讀到 `0xFF` 就停；空位的 `0xFF` 不是任何物品 record 的類型值；`0x00` 雖然不是有內容物品的類型，卻是 `ITEM.DAT` 裡 `0xE2`–`0xFA` 那 25 筆全零 record 的類型，拿它填空位會讓有空位的職業都准許這些 record。取值函式本身也什麼都不檢查：216 byte 只裝得下職業代碼 `0x00`–`0x23` 的 36 筆，而職業代碼一路到 `0x27`，所以 `0x24`–`0x27` 會讀到檔案後面；乘法是帶號的，負的索引會讀到檔案前面；表基底也不測 null。重建時照直覺改寫會錯在哪，見 [`rebuild_info/pitfalls.md`](../../rebuild_info/pitfalls.md)。
 
 ### 兩張表的越界讀取在遊戲中走不到
 

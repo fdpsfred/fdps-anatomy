@@ -1,0 +1,872 @@
+{
+ "items": 353,
+ "by_kind": {
+  "propagation": 84,
+  "duplicate": 32,
+  "conflict": 193,
+  "pitfall": 37,
+  "reclass": 7
+ },
+ "complete": 353,
+ "unfinished": [],
+ "by_verdict": {
+  "fixed": 156,
+  "consistent": 197
+ },
+ "edits_landing": 292,
+ "rejected": [],
+ "outside_fixes": [
+  {
+   "id": "P6",
+   "outside": "src/chevt5b.c 約 481-487 行 fdps_chapter_26_event_wave_2_defeated_line 的註解說 fdps_run_death_scripts 推的是「the index of the unit that made the killing action」，AI 路徑傳的是被攻擊的單位或 data_fdps_battle_ai_best_physical_target_idx，應改成「its first argument (the acting unit on the player's side, data_fdps_battle_ai_best_physical_target_idx on the map-AI paths)」之類的寫法；不影響程式碼。"
+  },
+  {
+   "id": "P8",
+   "outside": "src/chinit1b.c 的 fdps_chapter_15_init 區塊註解「WHAT THE CLEAR IS FOR」段（約第 526-528 行）寫 \"so nothing else undoes it, and without this handler's own call the fortress cannon would sit out the first player phase\"，不正確：fdps_battle_advance_turn 在敵方階段前也會清 bit 7（src/btlturn.c:852）。應改為：without this call the cannon would carry bit 7 through the whole first player and NPC phase -- drawn with the acted frame and greying out Save in the battle system menu -- until fdps_battle_advance_turn clears it before the enemy phase, so it still fires in the first enemy phase."
+  },
+  {
+   "id": "P32",
+   "outside": "非知識庫的附帶不精確處（不影響本項判定）：src/cd.c、src/cdtoc.c、src/cdaudio.c 檔頭註解把 CD 區塊寫成「0003bade to 0003c96x」，實際終點是 0003c97b（最後一支 fdps_cd_read_audio_position 在 0003c93a，長 0x42）；.scratch/fdps-rebuild/issues/22-full-function-emit.md:55 寫「0x3bade–0x3c93f，32 支」，應為 0x3bade–0x3c97b、33 支（32 支帶 __CHK）。"
+  },
+  {
+   "id": "P41",
+   "outside": "docs/adr/0004-reuse-fd2-ail-library.md 第 33 行：把「`0003ccf8`、`0003cbc1`、`0003c9db`、`0003c9eb` 四支的 xref 是空的，」改為「`0003ccf8`、`0003c9db`、`0003c9eb` 三支的 xref 是空的，`0003cbc1` 只被 `0003ccf8` 呼叫，」（Ghidra：0003cbc1 有一個來自 0003cd49 的呼叫 xref）。ADR 不是知識庫頁面，gate 不接受直接編輯。"
+  },
+  {
+   "id": "P60",
+   "outside": "src/cd.c 第 15–19 行與 src/cdaudio.c 第 10–14 行的檔頭註解說「block from 0003bade to 0003c96x」裡「every function」都以 PUSH <frame size> / CALL __CHK 開頭：範圍應寫 0003bade to 0003c97b，且其中 fdps_cd_status_is_not_busy（0003c6d0，在 src/cd.c）是沒有框架、不呼叫 __CHK 的葉函式，應改成「every function in that block except the frameless leaf fdps_cd_status_is_not_busy」。src/cdtoc.c 第 6–9 行的範圍「0003c96x」同樣應改為 0003c97b（它說 cdtoc 自己的每支都有 probe，這部分正確）。"
+  },
+  {
+   "id": "P62",
+   "outside": "tools/data_emit/check_data.py 開頭 docstring（第 7-8 行）仍寫 \"finds the symbol's address in the unit-test image's wlink map, reads its bytes out of EMITTEST.EXE\"，只描述預設映像；可補一句 \"(or, with --image game, FDE.EXE and its map)\"。不影響知識庫。"
+  },
+  {
+   "id": "P69",
+   "outside": "src/movegrid.c 在 fdps_battle_move_unit_toward（000119e0）上方的註解「THE GRID IS REBUILT FOUR TIMES AND THE ROUNDS ARE NOT INTERCHANGEABLE」漏列放寬重試找到路時改目的地前的那次重建（reset、mark、flood，以真實移動力），而「Collapsing any two of them into one shared setup changes which tiles the walk may use」對那次與 round 4 不成立；應改為最多五次重建、該次與 round 4 設定相同，其餘不可合併。Ghidra 的 plate comment 若有同文亦同改。"
+  },
+  {
+   "id": "P70",
+   "outside": "src/ 註解需要改掉「唯一」的說法（知識庫頁面不受影響）：(1) src/chpost1.h 第 8 章 post_action 註解 'It is the only handler in this file that neither forwards to nor opens with fdps_battle_check_default_end_conditions' —— 同檔第 3、10 章也不呼叫，應改為 'one of the three handlers in this file (chapters 3, 8, 10) that ...'。(2) src/chpost1.c 0003a8c0 註解 'The only handler in this file that does not call the shared test' —— 同上，改為 'One of three handlers in this file (with chapters 3 and 8) that ...'。(3) src/chend1.h fdps_chapter_10_end 註解與 src/chend1.c 對應註解 'is the only test in/of its family that never calls ... fdps_battle_check_default_end_conditions' —— 第 3、8 章也不呼叫，改為不帶唯一性的說法。(4) src/chend1.c fdps_chapter_08_end 註解 'which is the only handler of that family that neither forwards to nor opens with the shared end test' —— 同上。(5) src/chpost2.h 第 22 章 post_action 註解 'This is the only handler in this file that does not forward to fdps_battle_check_default_end_conditions' 與 src/chend2.c fdps_chapter_22_end 註解 'the only handler in its own family that does not forward to' —— 同檔第 23 章 post_action 也不呼叫，改為 'one of the two handlers in this file (chapters 22, 23) that ...'。src/chpost3.c:451 已正確寫出 'Nine of the thirty post-action handlers never call 0x0003a2e0'，可作為用詞依據。"
+  },
+  {
+   "id": "P78",
+   "outside": "可選：src/cmbspell.c:117 的註解把施法者 Magic 動畫的 lead-in 寫成 \"the frame the build-up phase ends on\"，與同檔 :298 的 \"ends the opening phase\" 及 :461 的第一段描述用詞不一致（build-up 在知識庫指的是蓄力段 B）；建議改為 \"the frame the opening phase ends on\"。不影響行為。"
+  },
+  {
+   "id": "X1",
+   "outside": "工作票 .scratch/fdps-rebuild/issues/22.2-align-compile-flags.md 不是知識庫頁面，要由票的 session 手改：把 `**Status:** needs-triage — 使用者已決定要做，開工時機待定` 改成 `**Status:** wontfix — 使用者決定不做；重建版維持每個 unit 同一組 `-s -ot -od` 旗標，現況與等價性依據見 `rebuild_info/build_flags.md``（理由：票面狀態停在 2026-09-22 開票當時，與使用者後來「不做」的決定及 build_flags.md 的現況結論矛盾）。知識庫頁面本身已一致，不需修改。"
+  },
+  {
+   "id": "X10",
+   "outside": "src/unitstat.c 的 fdps_level_up_apply_stat_gain 前置註解（\"the upper figure printed there is one MORE than any level-up can actually roll\"）同樣沒有排除上下限相等的項目，可改為只適用於兩值不同的成對值；僅註解，不影響程式。"
+  },
+  {
+   "id": "X15",
+   "outside": "1) tools/guide_offsets/crosscheck.py 第 296 行註解「Mismatches that have been investigated; the data file wins in every case.」改為：數值欄位的歧異以資料檔為準；appearance.spells 的歧異兩邊都對，攻略站列的是玩家實際拿到的狀態（第 1 章勝利授予的業火，或戰鬥結束名冊寫回蓋過名冊記錄的同編號部署記錄遮罩），資料檔是入隊時的 FRIAPRDA.DAT 遮罩，見 assets/characters.md。ACCEPTED 的四筆說明改為：0x00「攻略站的業火由第 1 章勝利處理 fdps_chapter_01_end 在名冊寫回前授予，FRIAPRDA.DAT 遮罩本身是空的」；0x02「攻略站列的是 MAP07 第 19 筆 LV15 費塔加部署記錄的遮罩 08 09（09 標 Lv15），FRIAPRDA.DAT 遮罩是 00 08 09」；0x0A「攻略站列的 05 06 07 0C 20 是 MAP23 第 10 筆 LV15 珊部署記錄的遮罩，FRIAPRDA.DAT 遮罩是 00 01 05 06 0C 0E 0F」；0x0B「MAP18 第 42 筆 LV2 蘭斯洛特部署記錄的遮罩是空的、攻略站沒列他；FRIAPRDA.DAT 遮罩有 06」。2) tools/data_skill/build.py 第 55-61 行註解「Guide values that the data file contradicts」與 DISCREPANCIES 中 character 0x00／0x02／0x0A／0x0B 四筆的 note 同步改成上面的說法（可加一個欄位如 \"guide_right\": true 或在 note 標明攻略站列的是玩家實際狀態）；第 963 行 rule 字串「攻略站與資料檔不一致的地方以資料檔為準」加上例外「人物初始法術的歧異除外，攻略站列的是入隊後實際拿到的法術」，重跑 build.py 重生 .claude/skills/fdps-data/fdps_data.json。3) .claude/skills/fdps-data/SKILL.md 第 58 行「數值與攻略站不一致的地方以資料檔為準」加同樣的例外。知識庫頁面（assets/characters.md）已正確，不需修改。"
+  },
+  {
+   "id": "X21",
+   "outside": "assets/text/global_text.md 是 tools/global_text/global_text.py 的產生物，不能直接編輯。請把 tools/global_text/global_text.py 第 678 行的說明文字 \"種族代碼 0–6 各有名稱，後面三條是空字串。\" 改成 \"種族代碼 0–6 各有名稱，剛好填滿本區。表尾之後 `0x09e`–`0x0a0` 三條是空字串，再來就是職業名。\"，然後跑 python tools/global_text/global_text.py build 重新產生頁面（verify 應通過）。"
+  },
+  {
+   "id": "X29",
+   "outside": "1) cut_content/_index.md 總表 C1、I09 兩列的標題由 tools/cut_content/cut_content.py index 從 code.md／items.md 標題重生，套用本判定的標題改名後要重跑一次。2) tools/cut_content/story.py 第 621 行 VILLAGE_SCREEN 的 8: \"神秘商店\" 改為 \"秘密商店\"，再重生 cut_content/story.md 的 <!-- story:S5-text --> 區（FDETXT58／59 `0x08` 兩個小標）。3) tools/cut_items/acquisition.py 第 91 行 sealed_shop 標籤「`SHOP25.DAT` 神秘商店」改為「`SHOP25.DAT` 秘密商店」。cut_content/code.md 的攻略站原文引文「神秘商店：無法進入，只能透過修改」照原文保留。"
+  },
+  {
+   "id": "X30",
+   "outside": "tools/cut_content/story.py 第 621 行 VILLAGE_SCREEN 的 8: \"神秘商店\" 改成 \"秘密商店\"，重跑後 cut_content/story.md story:S5-text 區塊裡 FDETXT58、FDETXT59 `0x08` 的小標跟著改；cut_content/_index.md 總表 C1、I09 兩列的標題由 cut_content.py index 依 code.md、items.md 改過的標題重生；tools/cut_items/acquisition.py 第 91 行 sealed_shop 標籤「`SHOP25.DAT` 神秘商店」與 tools/cut_items/_index.md 第 34 行「神秘商店的暗號表」改成「秘密商店」。cut_content/code.md C1 逐字引用攻略站「神秘商店：無法進入，只能透過修改」的引文保留原文。"
+  },
+  {
+   "id": "X31",
+   "outside": "同樣的「位元＋低 4 位」說法也出現在 ITEM.DAT 的 use_distance：assets/items.md:313、assets/tables/items.md:18（src/item.c:986/998、src/aiact.c:470/475、src/aiscore.c:345/355 都是 < 0x10 / 減 0x10 的大小判斷），以及 .claude/skills/fdps-data/SKILL.md:63 對 distance 與 use_distance 的說明；另外 src/aiscore.h:77、115 與 src/aiact.c:321、src/item.c:805 的註解也以「bit 0x10」「low nibble」描述。這些不屬於本項 MAGICDAT 錨點，應另行統一為「0x10 以上為直線，長度為值減 0x10」。"
+  },
+  {
+   "id": "X35",
+   "outside": "src/unitstat.c 約 668-673 行 fdps_level_up_apply_stat_gain 前的註解寫「the largest gain a pair can give is growth_pair[1] - 1」與「the upper figure printed there is one MORE than any level-up can actually roll」，對上下限相等的組（此時成長固定為 growth_pair[0] == growth_pair[1]）不成立，應加上「when the two bytes differ」的限定；src/church.c 約 929-930 行註解「which are one greater than the growth maximum the tables print」同樣只在上下限不同時成立，應改為 one greater than the largest roll only when min < max。"
+  },
+  {
+   "id": "X36",
+   "outside": "src/unitstat.c:670-673 的註解說 assets/characters.md 成長表印的上限「one MORE than any level-up can actually roll」，應補上「when the two bytes differ; an equal pair gains exactly that figure」。"
+  },
+  {
+   "id": "X38",
+   "outside": "src/table.h 約 122-125 行 fdps_get_class_record 的註解只列出 fdps_collect_targets_in_range 與 fdps_map_actor_score_best_item 兩個傳字面值 0 的呼叫端，漏了 fdps_map_actor_score_best_spell（src/aiscore.c:551，SPELL_SEARCH_DEFAULT_CLASS_ROW = 0）；應改為三個。"
+  },
+  {
+   "id": "X39",
+   "outside": "src/table.h 第 159–161 行 fdps_get_class_equip_record 的註解寫「the unused positions hold 0xFF, never 0x00, which is itself a live item type」，建議改為「0x00 is the type of the 25 all-zero ITEM.DAT records 0xE2-0xFA and of no item with content」。Ghidra 對 fdps_get_class_equip_record（0x18ba0 附近 plate comment 的 Rebuild note (2)）寫「0x00 is a live item type ... would let every class equip all of them」，建議把 live 改為只屬於 25 筆全零 record、every class 改為 every class with an unused position（第 0x0B、0x0C、0x0F–0x12、0x20 筆沒有空位）。"
+  },
+  {
+   "id": "X41",
+   "outside": "src 註解修正（不影響編譯結果）：(1) src/table.c 約第 179-186 行 fdps_get_class_record 的註解，把「the eleven callers form as the unit's class code PLUS ONE」與「The two callers that want that default row, fdps_collect_targets_in_range at 00011e90 and fdps_map_actor_score_best_item at 00013056」改為：11 個呼叫端中 7 個傳 class code + 1；3 個要預設列的呼叫端 fdps_collect_targets_in_range（00011e90）、fdps_map_actor_score_best_item（00013056）、fdps_map_actor_score_best_spell（00013436）push literal 0；fdps_map_actor_move_toward_nearest_reachable_opponent（000126f6）漏了 INC，傳原值（原版 bug，見 program_info/known_bugs.md），並把「shift both of those literal-zero calls」改為 all three。(2) src/table.h 約第 150 行「without the INC that every caller of fdps_get_class_record applies」改為「that the per-unit callers of fdps_get_class_record apply」之類不說 every 的寫法。(3) src/spell.c 約第 46-47 行「Every caller of fdps_get_class_record in the image applies this bias」改為：每個針對特定單位的呼叫端都加這個偏置，唯一漏加的是 fdps_map_actor_move_toward_nearest_reachable_opponent（原版 bug）。"
+  },
+  {
+   "id": "X46",
+   "outside": "src/chpost1.c 中 fdps_chapter_01_post_action 前註解的最後一段（\"The chapter's two stated lose conditions ...\" 起）應改寫：刪去 \"Unlike chapters 2 and 5, which carry their 索爾 condition as a death script on his deployment record, chapter 1 enforces it here in code\"，改為 \"索爾's deployment record in map00.dat (entry 21) also carries a death script, opcode 5 with operand 0x0f, so a 索爾 struck down in combat has his line drawn twice -- once by the death-script runner and once here; a 索爾 killed by poison bypasses the death scripts, and only this store ends that battle.  Chapters 2, 5 and 6 rely on the death script alone (operand 255), chapter 4 on its post-action test alone.\"，保留後面 \"it is the only post-action handler in the file that speaks before it decides\" 的意思。只改註解，不動程式碼。"
+  },
+  {
+   "id": "X48",
+   "outside": "src/chevt1.c 在 fdps_chapter_04_event_for_turn 前的註解（約第 670–675 行）要改寫：刪去「map03.dat already authors all five at behaviour code 0 (deployment record byte 0x11, copied into record byte 0x34 at 0002379d), so against the shipped data the merges change nothing unless play has moved one of those units off mode 0.」，改為說明這五個是執行期單位索引而非部署記錄編號：slot 0–2、索爾 u3、ICON03.DAT 先後部署的法蓮娜 u4、崖上追兵 u5–u9、替身 u10 都佔位（退場不收縮陣列），波次 1 因此落在 u11–u25，u13 是記錄 #3 冰魔導士、u15–u18 是記錄 #6–#9，這五筆在 map03.dat 的行為碼（記錄 byte 0x11）都是 2，merge 把它們改成 0，是實際生效的解除固守。只改註解，不動程式碼。"
+  },
+  {
+   "id": "X49",
+   "outside": "src/chevt1.c 在 fdps_chapter_05_event_enemies_advance 的註解（約第 759-761 行）寫「map04.dat deploys 33 records behind the 5 party slots and the opening script has all of them on the field」，但 33 筆中有 3 筆波次 FF 永遠不部署，在場的是索爾加上開場過場的 29 名（索引 5-34）；結論（迴圈不出單位陣列）不變，可改寫為 30 筆實際部署的記錄。"
+  },
+  {
+   "id": "X50",
+   "outside": "src/chevt1.c 第 759–763 行，fdps_chapter_05_event_enemies_advance 前的註解：把 \"Chapter 5's map04.dat deploys 33 records behind the 5 party slots and the opening script has all of them on the field before a unit can reach the trigger tile, so the walk stays inside the unit array;\" 改成類似 \"Chapter 5's map04.dat has 33 deployment records, three of them wave 0xff and never deployed; the guest hero (wave 0) takes index 5 behind the 5 party slots and the opening script appends the other 29 at indices 6..0x22 before a unit can reach the trigger tile, so the walk stays inside the unit array;\"。只改註解，不影響編譯結果。"
+  },
+  {
+   "id": "X53",
+   "outside": "tools/chapter_docs/judgements/ch06.json 中 0x0c 那一筆的 why（現為「勝利腳本畫的是 `FDETXT47` 的 0x0a 副本，本章區塊的 0x0c 沒有讀取端」）改為「勝利腳本畫的是 `FDETXT47` 的 0x0a（「每個人的一生中」那段的說話者不同，見本節開頭說明），本章區塊的 0x0c 沒有讀取端」，再重跑 chapter_docs 產生 chapters/ch06.md。可選：tools/cut_content/story.py 約第 708 行的「只差控制碼（換行、換頁或說話者）」是泛稱，若要精確可改為依實際差異列出是哪一種控制碼不同。"
+  },
+  {
+   "id": "X56",
+   "outside": "src/chpost1.c 第 562-563 行 fdps_chapter_09_post_action 前的註解，把 \"Nothing here is carried as a map death script: every deployment record in map08.dat has a zero death-script opcode.\" 改為類似第 10 章的寫法：\"Nothing here is carried as a map death script: the only non-255 death-script opcodes in map08.dat are the 0s on the two enemies that drop a B6 and the 1s on the two that drop 3000 and 1000 gold.\"（只改註解，不影響建置產物）。"
+  },
+  {
+   "id": "X60",
+   "outside": "src/chinit1b.c 中 fdps_chapter_15_init 上方註解 \"WHAT THE CLEAR IS FOR\" 段落的 \"without this handler's own call the fortress cannon would sit out the first player phase\" 不精確：砲座是 side 0（敵方），第一個玩家階段本來就不行動；應改為 without it the cannon keeps bit 7 through the first player and ally phases -- drawn in its acted frame and greying out Save in fdps_battle_system_submenu -- until fdps_battle_advance_turn clears it after the enemy-phase banner, so it still fires in the first enemy phase。"
+  },
+  {
+   "id": "X61",
+   "outside": "src/chinit1b.c 的 fdps_chapter_15_init 註解「WHAT THE CLEAR IS FOR」段寫 \"without this handler's own call the fortress cannon would sit out the first player phase\"，容易讀成砲座停擺；建議改為說明後果是第一個玩家階段存檔反灰、砲座以已行動影格畫出，而它在 fdps_battle_advance_turn 的敵方階段前清除後照常開火（見 src/btlmenu.c 的存檔可用判定）。"
+  },
+  {
+   "id": "X62",
+   "outside": "src/chinit1b.c 的 fdps_chapter_15_init 註解（WHAT THE CLEAR IS FOR 段末 \"without this handler's own call the fortress cannon would sit out the first player phase\"）與 src/chinit1b.h 的同名宣告註解（\"so without this handler's own call the cannon would sit out the first player phase\"）應改為：without this handler's own call the cannon would carry the acted bit through the first player phase -- drawn with the acted frame and greying out the battle menu's save entry (src/btlmenu.c) -- while still firing in the first enemy phase, since fdps_battle_advance_turn clears the bit again before it."
+  },
+  {
+   "id": "X63",
+   "outside": "src/chpost1.c:805 的註解 'FDETXT15.TXT holds twenty-nine entries, so all three are in range' 應改成 'FDETXT15.TXT holds twenty-five entries (0x00..0x18), so all three are in range, 0x18 being the last'。tests/chpost1.c:2719-2723 的註解說 CH15_TEXT_ENTRIES 是 'FDETXT15.TXT's own entry count'，但值卻是 29：要把常數改成 25（0x18 是最後一條，仍涵蓋 0x16..0x18），不然就把註解改成「一個剛好涵蓋 0x18 的合成筆數，不是原檔的筆數」。"
+  },
+  {
+   "id": "X64",
+   "outside": "src/chevt3.c 第 633–635 行 fdps_chapter_16_event_enemies_advance_for_turn 上方註解的句子「Chapter 16's map15.dat lays 10 player records down at 0..9 and its 25 enemy deployment records at 0x0a..0x22, so unit index = deployment record index + 10 and the two ranges are records 15..24 and 0..15.」應改為：map15.dat 的 10 個我方 slot 在 0..9，之後 fdps_build_map_unit_array 依記錄順序放波次 0 的 13 筆（記錄 0..8 與 15..18，成為 0x0a..0x16），開場過場的 DEPLOY_WAVE 再依序附加波次 1（0x17..0x18）、2（0x19..0x1c）、3（0x1d..0x20）、4（0x21..0x22），所以第 5 回合的範圍是波次 2、3、4，其他回合的範圍是波次 0 全部與波次 1，並非「記錄編號 + 10」。只改註解，程式碼不動；ghidra_snapshot/comments.txt 沒有這句，Ghidra 不需改。"
+  },
+  {
+   "id": "X69",
+   "outside": "tools/chapter_docs/judgements/ch20.json entry \"0x0c\" 的 why 改為：「凱倫諾特那段的另一個版本：開場過場在地圖 58 畫的是 `FDETXT59` 的 0x0c（「作抉擇」「怎麼作」「我已經不想」，蘭迪斯最後那段的斷行與換頁也不同），本章區塊的這一條沒有讀取端」，再重跑 tools/chapter_docs 重新產生 chapters/ch20.md 的 dialogue 區域。"
+  },
+  {
+   "id": "X72",
+   "outside": "src/chevt4.c 的 fdps_chapter_23_event_boss_defeat 前置註解（約 897-902 行，「THE EXCHANGE IS A REMOVE THEN AN ADD」段）要改：把「so with a full bag 反禁制器 lands back in the contract's old slot and with a gappy one it lands in the first hole instead」改成「so 反禁制器 lands in the first empty entry left after the repack -- with a full bag that is the last entry, which is the contract's old slot only when the contract was last」。只動註解，程式碼不變。"
+  },
+  {
+   "id": "X73",
+   "outside": "src/chpost2.c 的 fdps_chapter_23_post_action 前註解（「Slot 0x1f is NOT a roster slot ...」一段，約 722–730 行）與 CHAPTER_23_SECOND_LOSS_UNIT_INDEX 上方註解（739–741 行），以及 src/chpost2.h 的 fdps_chapter_23_post_action 註解（280–285 行）要改寫：0x1f 是 MAP22.DAT 部署記錄 21（11 個我方 slot 之後接波次 0 的記錄 1–21），陣營 1、角色 0x24、AI 行為 7、目的地 (24, 3)、MAP22.COD 起點 (24, 24)，即亡靈隊伍的最後一名，它走到地獄之門退場就是攻略站所說的「蘭迪斯從戰場上方消失」；entry 0x14 是尤利安「蘭迪斯！！！」與法蓮娜「不～要～～～！」，刪去「deployment record format has not been decoded」「font glyph indices」「not established」等字句。只改註解，不動程式碼。"
+  },
+  {
+   "id": "X77",
+   "outside": "src/chevt5.c 註解修正（不動程式碼）：CH25_BOW_*_TEXT_ID 前的註解把 \"the merchant's pitch, his question, the sale and the refusal\" 改為 \"the village woman's (村婦) pitch, her question, the sale and the refusal\"；CH25_MERCHANT_FACE 的註解 \"FACE.CEL record 0x77, the merchant.\" 改為 \"FACE.CEL record 0x77, 村婦 (the village woman).\"；同檔 CH25_WIND_GOD_BOW_PRICE 註解的 \"so the merchant asks the shop rate\"、函式 plate 的 \"瑪麗安 stops on the merchant's tile\" 以及函式內兩處 \"merchant's tile\" / \"answered the merchant\" 一併改為村婦 / the village woman。巨集名 CH25_MERCHANT_FACE 若要改名須同步 Ghidra 與命名規則，非本項必要。"
+  },
+  {
+   "id": "X81",
+   "outside": "src/chinit2b.c:511 與 src/chinit2b.h:212 的 \"eighty-nine opcodes\" 建議改成 \"eighty-nine opcodes before the closing END (ninety counting it)\"，寫明不含 END；同檔的 ICON25（:188 與 .h:79 的 142）、ICON27（:403 與 .h:167 的 thirty-one）同樣是不含 END 的數字，宜一併註明。另外 src/chinit2b.c:294 與 src/chinit2b.h:122 的 ICON26.DAT \"seventy-five opcodes\" 與 ch27.md 的 75 步（含 END）同算法，和同檔其他三章不一致：若統一為不含 END 應改成 seventy-four，或統一改為含 END 的算法（ICON25=143、ICON27=32、ICON28=90）。這些都是 src 註解，不影響編譯結果。"
+  },
+  {
+   "id": "X84",
+   "outside": "src/chevt6.c 與 src/chevt6.h 的註解及巨集名稱把兩種不死者的名稱寫反，需改正：chevt6.c:674 的 \"0x55 is 死靈 and 0x6a is 白骨戰士\" 改為 \"0x55 is 白骨戰士 and 0x6a is 死靈\"；chevt6.c:678-679、686-689 的巨集 CH30_REVIVE_WRAITH_* 應對應 0x6a／(15, 13)、CH30_REVIVE_SKELETON_* 對應 0x55／(5, 12)（交換名稱，或改名為 CH30_REVIVE_SKELETON_CHAR_ID 0x55 / anchor 5,12 與 CH30_REVIVE_WRAITH_CHAR_ID 0x6a / anchor 15,13，並同步 chevt6.c:817-842 的使用處，行為不變）；chevt6.c:351 的 \"two of character id 0x55 and two of character id 0x6a ... the LV20 死靈 x2 and LV20 白骨戰士 x2\" 改成先白骨戰士後死靈；chevt6.h:288-289 改為 \"every 白骨戰士 (character id 0x55) and 死靈 (character id 0x6a)\"，chevt6.h:302 改為 \"(5, 12) for 白骨戰士 and (15, 13) for 死靈\"。tests/chevt6.c:1893 附近 \"One dead 死靈 ... Its anchor is (5, 12)\" 同樣寫反，應改為白骨戰士（或把測試對象改為 0x6a）；並查 tests/chevt6.c 其餘提到死靈／白骨戰士的註解。Ghidra 內 0x10760 的註解若有同樣寫法也應一併改正。"
+  },
+  {
+   "id": "X95",
+   "outside": "Ghidra（FDPS.LE）：把 000304e0 fdps_audio_init 的參數 param1 改名為 tick_rate_hz、000568db fdps_blit_dispatch 的參數 arg6 改名為 mode_operand，之後重匯 ghidra_snapshot；改完後 code_pools.md 這段兩個例外的句子可刪回「參數名稱全部語意化」。tools/logic_naming/AuditNaming.java 的參數殘留檢查只抓 param_N 形式，漏掉 param1／argN，可一併補上。"
+  },
+  {
+   "id": "X106",
+   "outside": "src/unitatk.c 第 122-127 行：註解改為與 src/combat.c 第 98-105 行相同的說法（門檻看肖像編號本身，>10 涵蓋 0x0b 蘭斯洛特與 0x0f 起的所有轉職型態及非隊員單位；00..0b 是十二名我方人物，10 不是名冊的分界），常數 LAST_PERMANENT_ROSTER_PORTRAIT_ID／GUEST_LEVEL_PENALTY 改名為 combat.c 的 XP_PENALTY_PORTRAIT_ID_THRESHOLD／XP_ATTACKER_LEVEL_PENALTY（值 10 與 0x1e 不變，第 571、573 行的引用一併改），並拿掉「keeps a guest from farming experience」這個沒有依據的理由；若 tests/ 有沿用 guest 字樣的測試名稱也一併改。Ghidra FDPS.LE 0x1c520（fdps_unit_resolve_attack_hit）的 plate comment 中「which is 蘭斯洛特 and every guest or NPC unit rather than the eleven permanent roster characters」改為「which catches 蘭斯洛特 (0x0b) and every promoted form (0x0f and up) as well as the non-party portraits; 0x00..0x0b are the twelve player characters, so 10 is not the roster boundary」，改完重新匯出 ghidra_snapshot。"
+  },
+  {
+   "id": "X127",
+   "outside": "tools/global_data/_index.md（工具索引，不在知識庫頁面的編輯範圍）兩處改寫：(1)「1,100 多個 anchor 塞不進一次 session，分次跑是常態。」改為「一千多個 anchor（數量見 [`program_info/data_structures.md`](../../program_info/data_structures.md)）塞不進一次 session，分次跑是常態。」——判定清單是 1,040 個、匯出是 1,386 個；(2)「415 個字串已經帶著 Ghidra 的 `s_` 標籤」改為「字串字面值（數量見 [`program_info/data_structures.md`](../../program_info/data_structures.md)）已經帶著 Ghidra 的 `s_` 標籤」——匯出裡的字串是 346 個。數量只由 data_structures.md 擁有。"
+  },
+  {
+   "id": "X128",
+   "outside": "tools/global_data/_index.md「字串字面值不在清單上」一節第一句：把「415 個字串已經帶著 Ghidra 的 `s_` 標籤，而重建之後它們是敘述句裡的字面值而不是具名全域」改為「字串字面值多半已經帶著 Ghidra 的 `s_` 標籤（被排除的數量記在 [`program_info/data_structures.md`](../../program_info/data_structures.md)），而重建之後它們是敘述句裡的字面值而不是具名全域」。415 與匯出（346 個字串 anchor）及 Ghidra 現況（348 個 s_ 資料項）都不符，而這個數字的擁有者是 program_info/data_structures.md。"
+  },
+  {
+   "id": "X129",
+   "outside": "src/text.c 第 355-357 行 fdps_draw_text 前的註解：把 'comes out as glyph index -3 and reads six bytes in front of the font sheet.' 改成 'comes out as glyph index -3 and, at the game's glyph stride of 0x20 (FONT_GLYPH_STRIDE_BYTES in main.c), reads 0x60 bytes in front of the font sheet.'。tests/text.c 的「six bytes」（第 936、1157 行）在測試自訂的跨距 2 下成立，可視需要補一句 'at this test's stride of 2' 以免誤讀，但不是錯誤。"
+  },
+  {
+   "id": "X136",
+   "outside": "src/aitarget.c 在 fdps_collect_targets_in_range 前的註解（\"an impassable cell (flag bit 0x40) cuts it short\"）把 0x40 稱為 impassable cell；0x40 其實是 fdps_move_grid_mark_zone_of_control 標在對立單位所站格的佔格旗標，而且每個呼叫點之前網格都已 reset，實際上不會出現。建議改成說明 0x40 是單位佔格旗標、所有呼叫點都在剛 reset 的網格上呼叫，所以射程實際上是地圖內的曼哈頓菱形。"
+  },
+  {
+   "id": "X145",
+   "outside": "docs/adr/0004-reuse-fd2-ail-library.md 第 32 行「這七個裡有四個正好落在那 16 個之中」是三支 DPMI 還算在 ail 時的算法；以現在的 pool 判定，七個裡只有 00044dc0 落在前作庫沒有本體的 13 個之中。ADR 是決策記錄，是否改寫由票的 session 決定。"
+  },
+  {
+   "id": "X146",
+   "outside": "src/audio.c 中 fdps_timer_tick_handler（0x30790）上方的註解說原版序幕少推 EBX 是 register allocation；實際成因是原版把它宣告成 __cdecl（以遊戲段旗標組重編 __cdecl 版逐 byte 相同）。行為等價不需改碼，只需改註解措辭。"
+  },
+  {
+   "id": "X154",
+   "outside": "tools/code_emit/_index.md（不是知識庫頁，gate 不收）：build_emit.py 那一列的「再把兩邊全部編譯**連結兩次**成 `EMITTEST.EXE`」改為「再把兩邊全部編譯、**最多連結兩次**（第一次有未定義符號才帶 stub 模組再連一次）成 `EMITTEST.EXE`」；map 那一條的「**兩次連結都寫 map**（`out/EMITTEST.MAP`，第二次覆蓋第一次，」改為「**每次連結都寫 map**（`out/EMITTEST.MAP`，有第二次連結時覆蓋第一次，」。依據是 build_emit.py stub_pass 在第一次連結沒有未定義符號時直接返回。"
+  },
+  {
+   "id": "X156",
+   "outside": "tools/fdps_build/smoke/smoke.c lines 24-28 (the file header comment; not a knowledge-base page): replace 'The MSCDEX probe repeats what the original main() does at 0x3c636: a DPMI simulate-real-mode-interrupt (INT 31h AX=0300h) carrying INT 2Fh AX=1500h, the installation check, whose BX answer is the number of CD drives.' with wording such as: 'The MSCDEX probe sends INT 2Fh AX=1500h, the installation check whose BX answer is the number of CD drives, through a DPMI simulate-real-mode-interrupt (INT 31h AX=0300h) -- the path the original's device-request sender fdps_cd_device_request (0x3bb7d) uses. The original's own installation check, fdps_cdrom_detect (0x3c636, called from main), issues it directly with int386(0x2f, ...) instead.' Keep the following sentence about exit(1) (main exits when fdps_cdrom_detect does not return 1). No code change; the smoke program's behaviour is unaffected."
+  },
+  {
+   "id": "X158",
+   "outside": "tools/code_emit/build_routing.py 對 functions 與 globals 寫出的 \"status\": \"pending\" 是沒有讀者的死欄位，會讓人誤以為 routing.json 記錄進度。建議在產生器中拿掉這兩處 status（skipped 區的 \"skip\" 同樣沒有讀者，可一併移除或改在 _doc 註明它只是分類標記），再以 build_routing.py 重生 routing.json／routing.md；或至少在 routing.json 的 _doc 字串註明進度在 emit_state.json。不影響知識庫頁面。"
+  },
+  {
+   "id": "X160",
+   "outside": "src/gamedata.c, comment above data_fdps_inverse_palette_cube (000643f0): says the overrun stores glyph bytes into the cube's \"first 84 bytes\"; the reach is 0x643f0..0x6443f, i.e. the first 80 bytes (glyph index tops out at 399 because unit_idx[400] resets the cursor). Same file, comment above data_fdps_all_game_text_ptr (000643c4): \"(glyph and unit-index stores)\" -- unit-index stores never go past 0x64377, only glyph stores reach this pointer."
+  },
+  {
+   "id": "X161",
+   "outside": "src/gamedata.c 第 253-257 行 data_fdps_inverse_palette_cube 前的註解把 \"stores glyph bytes into its first 84 bytes\" 改成 \"its first 80 bytes (up to 0x6443f)\"。tools/data_emit/data/manifest.json 中 data_fdps_battle_teleport_dest_tile_x、data_fdps_teleport_destination_tile_y 與 data_fdps_inverse_palette_cube 三筆的 basis 字串，把 0x64120..0x644b2 改成 0x64120..0x6443f、把 0x643f0..0x644b2 改成 0x643f0..0x6443f（若 manifest 由產生器寫出，改對應的產生器來源）。"
+  },
+  {
+   "id": "X162",
+   "outside": "src/gamedata.c 的 data_fdps_inverse_palette_cube 註解（000643f0 那一段）把 \"stores glyph bytes into its first 84 bytes\" 改成 \"stores glyph bytes into its first 80 bytes (up to 0x6443f)\"。tools/data_emit/data/manifest.json 的四條 basis 字串：兩處 \"writes through 0x64120..0x644b2\" 改為 \"0x64120..0x6443f\"；data_fdps_number_glyph_sheet_ptr 那條的 \"reach 0x643af..0x64443\" 改為 \"reach 0x643b0..0x6443f\"；data_fdps_inverse_palette_cube 那條的 \"reach 0x643f0..0x644b2\" 改為 \"reach 0x643f0..0x6443f\"。"
+  },
+  {
+   "id": "X163",
+   "outside": "src/indicat.c 第 4-7 行檔頭註解過時：把 'The file owns one of the four queue globals, the glyph ids; the cell x offsets, the unit indices and the cursor are gamedata.c's, in the contiguous run the queue's overrun writes through.' 改為 'The file owns none of the four queue globals: the cell x offsets, the unit indices, the glyph ids and the cursor are all gamedata.c's, in the contiguous run the queue's overrun writes through.'（與 src/indicat.h:26-32 及 gamedata.c:80 一致）。"
+  },
+  {
+   "id": "X165",
+   "outside": "tests/menu.c:352 的 ring_unstage 註解寫 \"fdps_deploy_map_units does the same\"，應改成 \"fdps_build_map_unit_array does the same\"（該函式在 src/deploy.c，位址 0x22be0）；其餘註解內容（載入器以計數守門、fdps_shutdown_free_resources 對 command sprite sheet 不守門）與 src 相符。"
+  },
+  {
+   "id": "X166",
+   "outside": "tools/code_emit/_index.md「資料」節末段（不是知識庫頁面，本閘門不收）：把「`undefined.json` 是第一次連結報出的未定義符號，也就是票 23 的權威工作清單，每次建置重新產生；」改為「`undefined.json` 是第一次連結報出的未定義符號，也就是資料 emit 的權威工作清單，每次建置重新產生（兩次連結的意義見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md)）；」，以功能而非票號稱呼並連回擁有者。"
+  },
+  {
+   "id": "X167",
+   "outside": "tools/code_emit/_index.md（kbconsist 不把它當知識庫頁，無法以頁面 edit 落地）：把「下一次呼叫的第一段（Recover）自己丟掉 `src/`／`tests/` 的殘骸、把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。`src/`／`tests/` 以外的地方髒了它會停下來報告而不是自行處理，那時才需要人。」改為「下一次呼叫的第一段（Recover）自己丟掉界線內的殘骸——界線是 pipeline 各段自己會寫的六個路徑，不只 `src/`／`tests/`，還含 `data/`、`ghidra_snapshot/`（這一項改為重新匯出）、`build_routing.py` 與 `rebuild_info/code_layout.md`——把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。界線外的地方髒了它會停下來報告而不是自行處理，那時才需要人。」"
+  },
+  {
+   "id": "X169",
+   "outside": "tools/global_data/_index.md〈字串字面值不在清單上〉第一句「415 個字串已經帶著 Ghidra 的 `s_` 標籤，而重建之後它們是敘述句裡的字面值而不是具名全域」改為「帶著 Ghidra `s_` 標籤的字串不判定：重建之後它們是敘述句裡的字面值而不是具名全域」——415 與目前 Ghidra 狀態（348 筆 s_ 主名稱、108 筆 binary_artifact_string_literal_）不符，數量由 ghidra_snapshot/data.txt 擁有，工具頁不重寫會過時的數字。"
+  },
+  {
+   "id": "X170",
+   "outside": "tools/pool_triage/fid/_index.md 第 32 行（extract_watcom_symbols.py 那一列）：把「用 `wlib -l` 取出實際連結的四個程式庫的全部公開符號，命名的對照基準」改為「用 `wlib -l` 取出實際連結的三個程式庫與啟動 object `CSTRTX3S.OBJ` 的全部公開符號，命名的對照基準」。腳本的 LIBRARIES 只有 CLIB3S.LIB、MATH387S.LIB、emu387.lib 三個，CSTRTX3S.OBJ 是 LOOSE_OBJECTS。"
+  },
+  {
+   "id": "X177",
+   "outside": "src/chend2.c 第 192–195 行 CH18_PROMOTION_SWEEP_UNITS 的註解要改：刪去 \"which is exactly the set the church will promote -- PROMOTABLE_PORTRAIT_COUNT in src/church.c is 9 as well\"，改寫為類似 \"This is NOT the set the church will promote: the church tests portrait_id < PROMOTABLE_PORTRAIT_COUNT (src/church.c), i.e. characters 0-8, which includes 瑪麗安 (character 5, slot 9) and excludes 蓋亞 (character 9, slot 7), who sits inside this range and can never change class.\" 只改註解，不動程式碼。"
+  },
+  {
+   "id": "X178",
+   "outside": "src/chevt3.c 中 fdps_chapter_16_event_enemies_advance_for_turn（00038020）plate 註解的第 633–635 行（\"Chapter 16's map15.dat lays 10 player records down at 0..9 and its 25 enemy deployment records at 0x0a..0x22, so unit index = deployment record index + 10 and the two ranges are records 15..24 and 0..15.\"）改為依波次的排列，例如：\"Chapter 16's map15.dat has 10 player slots at 0..9.  The unit array holds wave 0 first in record order (records 0..8 at 0x0a..0x12, records 15..18 at 0x13..0x16), then the opening cutscene's DEPLOY_WAVE calls append wave 1 (records 9..10 at 0x17..0x18), wave 2 (records 11..14 at 0x19..0x1c), wave 3 (records 19..22 at 0x1d..0x20) and wave 4 (records 23..24 at 0x21..0x22).  So unit index is not record index + 10 here: the turn-5 range is waves 2, 3 and 4, and the other range is all of wave 0 plus wave 1, with 0x19 (the first wave-2 flier) shared.\" 只改註解，程式碼不動；若 Ghidra 的 plate comment 帶同一句，也照改。"
+  },
+  {
+   "id": "X179",
+   "outside": "src/chevt4.c 註解：(1) fdps_chapter_22_event_boss_defeat 前的 THE STORE INTO THE BOSS'S RECORD 段（約 766-774 行）與 fdps_chapter_23_event_boss_defeat 前的同名段（約 881-889 行），把『So clearing the byte is what gives the line a face ... renders the (dying) line with no speaker』改為：search 跳過退場單位但仍把最後一筆相符記錄交出，所以不清的話頭像照畫、只是 fdps_draw_text 改以滑入動畫開窗（fdps_message_window_open_from_tile(-1, ...)）；清 byte 讓 lookup 回傳索引、從魔王的格子以縮放動畫開窗；第 22 章另讓 fdps_battle_destroy_remaining_enemies 在過關時再播她一次死亡動畫。(2) 約 788 與 915 行的 fdps_collect_defeated_unit_events 改為 fdps_collect_death_scripts。Ghidra（非唯讀工作時）：0x388b0 與 0x38950 的 plate comment Rebuild note 裡『or the dying line renders with no speaker』同樣改為『or the dying line opens with the slide-in instead of zooming out of the boss's tile』，改後重匯 ghidra_snapshot。"
+  },
+  {
+   "id": "X180",
+   "outside": "src/chevt6.c:673-679 的註解改成 \"0x55 is 白骨戰士 and 0x6a is 死靈\"，巨集改名為 CH30_REVIVE_SKELETON_CHAR_ID 0x55 與 CH30_REVIVE_WRAITH_CHAR_ID 0x6a，錨點巨集改成 CH30_REVIVE_SKELETON_ANCHOR_X/Y = 5/12、CH30_REVIVE_WRAITH_ANCHOR_X/Y = 15/13，並同步 chevt6.c:817-842 的使用處（比較順序照原版先比 0x55 再比 0x6a，行為不變）；tools/build_flags/fn_variants.py:102-103 的 regex 以巨集名稱比對，要跟著對調；src/chevt6.c:350-351 改成 \"two of character id 0x55 (白骨戰士) and two of character id 0x6a (死靈) ... the LV20 白骨戰士 x2 and LV20 死靈 x2\"；src/chevt6.h:288-289 改成 \"every 白骨戰士 (character id 0x55) and 死靈 (character id 0x6a)\"，:302 改成 \"(5, 12) for 白骨戰士 and (15, 13) for 死靈\"；Ghidra FDPS.LE 00010760 plate comment 的 \"0x55 (死靈) or 0x6a (白骨戰士)\" 改成 \"0x55 (白骨戰士) or 0x6a (死靈)\"，首句 \"every 死靈 and 白骨戰士\" 可保留，改完重匯 ghidra_snapshot。"
+  },
+  {
+   "id": "X181",
+   "outside": "src/ 註解需改正（知識庫頁面無誤）：(1) src/chpost1.c 0003a8c0 註解開頭 \"The only handler in this file that does not call the shared test\" 改為如 \"One of the three handlers in this file (chapters 3, 8 and 10) that do not call the shared test\"；(2) src/chpost1.h 第 8 章宣告註解 \"It is the only handler in this file that neither forwards to nor opens with fdps_battle_check_default_end_conditions\" 改為與第 3、10 章同屬不呼叫者；(3) src/chpost1.h 第 10 章宣告註解 \"Alone among the handlers in this file it does NOT call\" 同樣改為三者之一；(4) src/chend1.c 第 8 章結束處理註解 \"which is the only handler of that family that neither forwards to nor opens with the shared end test\" 改掉「only」（同一家族還有第 3、10、22、23、25、26、27、30 章）。同類錯誤、本項範圍外但應一併處理：src/chpost2.h 第 22 章宣告註解 \"This is the only handler in this file that does not forward to\" 與 src/chend2.c 稱 fdps_chapter_22_post_action \"is the only handler in its own family that does not forward to\"，第 23 章（同在 chpost2.c）也不呼叫 0x3a2e0，須一併改正。"
+  },
+  {
+   "id": "X182",
+   "outside": "src/chpost1.c 第 104-108 行 fdps_chapter_01_post_action 上方註解：把 'Unlike chapters 2 and 5, which carry their 索爾 condition as a death script on his deployment record, chapter 1 enforces it here in code -- and it is the only post-action handler in the file that speaks before it decides.' 改成說明第 1 章兩條路都有：map00.dat 第 21 筆（索爾）也帶死亡腳本 opcode 5、運算元 0x0f，被擊倒時 fdps_run_death_scripts 先畫同一句遺言並判定敗北，這支處理函式再畫一次；毒死不經過死亡腳本，敗北只靠這裡成立，所以不能照第 2 章的形狀拿掉這個判定（rebuild_info/pitfalls.md 已收）。僅改註解，不動程式碼。"
+  },
+  {
+   "id": "X183",
+   "outside": "src/chpost2.c 第 618-625 行 fdps_chapter_22_post_action 上方註解的最後一句「Adding the forward here would let the chapter clear itself the moment the last minion fell, with the boss still standing.」是錯的：巫湯婆婆（MAP21.DAT 記錄 #7）是 side 0，她未退場時共用判定的掃描會把結束碼放回 0。應改寫為：the boss is herself a side-0 record, so while she stands the shared sweep never clears the chapter either; the forward only changes the outcome when she is retired without her death script running (a poison death, program_info/known_bugs.md item 23) -- the original can then never be cleared, while the forwarded version clears once every side-0 unit is down. 同樣的論證也出現在 src/chpost2.c:713（第 23 章，死神）與 src/chpost3.c:93（三名將軍），本項未查證，應由各自的項目確認魔王的陣營。"
+  },
+  {
+   "id": "X184",
+   "outside": "src/church.c 第 924-927 行 fdps_church_promote_loop 前的註解要改寫：把 \"Writing the obvious `clazz < 9` lets 蓋亞, 珊 and 蘭斯洛特 through, and every already-promoted unit with them, and then indexes a RankUp.dat that holds nine records out of bounds\" 改成類似 \"Writing the obvious `clazz < 9` lets 蘭斯洛特 (class 08) through along with every promoted form whose class code is 01-08 (蘭迪斯's, 裘娜's and 亞克's), shuts out 法蓮娜, 費塔加, 瑪麗安, 尤利安, 琴琴 and 布蘭多 (initial classes 0D, 0D, 0A, 10, 13, 16), and indexes RankUp.dat, which holds nine records, out of bounds with 蘭斯洛特's character id 0x0b (rebuild_info/pitfalls.md).\"；蓋亞（職業 19）與珊（職業 0E）不在職業代碼小於 9 的範圍內。"
+  },
+  {
+   "id": "X185",
+   "outside": "src/mapai.c 第 601-609 行 AI_BEHAVIOR_PHYSICAL_TIE_BIT 上方的註解要限縮：把 \"Nothing in the shipped game can raise it ... so both ties always take their clear-bit arm\" 改成只對部署記錄產生的單位成立，並補一句：fdps_roster_add_character never writes +0x34, fdps_build_map_unit_array copies roster records whole, and fdps_title_demo puts the twelve roster members on side 1 under the map AI with only the low nibble reset, so in the title demo the bit is whatever the uninitialised roster block held (rebuild_info/pitfalls.md)."
+  },
+  {
+   "id": "X186",
+   "outside": "src/movegrid.c 第 986-996 行 fdps_battle_move_unit_toward 的註解：'THE GRID IS REBUILT FOUR TIMES' 應改為最多五次（三到五次），並補上改目的地前 00011af4 的 reset + mark + flood（真實移動力）這一輪，說明它與 Round 4（00011cef）設定相同；Ghidra FDPS.LE 000119e0 的對應註解（ghidra_snapshot/comments.txt:299 'the grid is set up four separate times'）同樣改成最多五次並列入 00011af4 那一輪，改後重新匯出快照。"
+  },
+  {
+   "id": "X187",
+   "outside": "src/text.c 第 355-357 行 fdps_draw_text 的註解 'comes out as glyph index -3 and reads six bytes in front of the font sheet' 應改為 'reads 0x60 bytes (three 0x20-byte glyph strides) in front of the font sheet'。tests/text.c 第 936 與 1157 行的 'six bytes' 是在 2-byte 測試間距下成立，可順手註明 'at the fixture's 2-byte stride'，非必要。"
+  },
+  {
+   "id": "X188",
+   "outside": "src/transit.c 的 fdps_transition_zoom 函式前註解（「BOTH CENTRE DIVISIONS TRUNCATE TOWARD ZERO」段落）最後一句「writing the obvious >> 3 moves that step's centre by a quarter pixel.」應改為「writing the obvious >> 3 moves that step's centre by a whole pixel, since the division comes before the multiply by 4 into quarter pixels.」。只改註解，不影響程式碼。"
+  },
+  {
+   "id": "X189",
+   "outside": "src/unitstat.c:663-664 的 fdps_level_up_apply_stat_gain 註解「Half the pairs in FRILEVUP.DAT are equal, so both halves of that are ordinary」改為「Of the 175 pairs in the 35 FRILEVUP.DAT rows that hold any growth, 26 are equal (15 of the 155 pairs of the forms the party levels through, 00-0b and 0f-21, mostly the DX pair), so both paths are ordinary」；src/unitstat.h:319-320「Half of FRILEVUP.DAT's 300 pairs are equal」同樣改成這個數字（300 對中的 151 對大多來自全零列）；tests/unitstat.c:2343-2344「Half of FRILEVUP.DAT's pairs are equal」一併改寫。三處都只改註解，不影響程式碼。"
+  },
+  {
+   "id": "X192",
+   "outside": "src/gamedata.h 第 326–333 行 data_fdps_map_cell_event_triggered_flags 的註解要改寫（原始碼註解，非知識庫頁面）：改成三類寫入者——(1) 搜尋與 AI 搶寶箱（0001038b、0001868b、000188aa）與第 30 章第 2 波事件 fdps_chapter_30_event_deploy_wave_2（00039876，元素 2）寫 1 後呼叫 fdps_map_apply_triggered_cell_changes；(2) icon script 的 opcode 0x13（00021c8f）寫入腳本運算元 script[offset+2]（任意值，不一定是 1）後同樣呼叫重繪；(3) 各章事件處理函式（chevt1–6、chpost1–3、chend1b/chend2 等）借用元素 0x10–0x12 當一次性閂鎖或計數，不呼叫重繪，fdps_chapter_30_event_deploy_wave_4（00039830）只是其中之一，不是唯一例外。"
+  },
+  {
+   "id": "X193",
+   "outside": "tools/saf_decode/saf_decode.py module docstring, frame section: replace the +0x04/+0x05 description. Old text: \"      +0x04  u8   a count the caller reads for its own purposes. The player\\n                  itself ignores this byte and the next one; the only readers\\n                  are the attack sequence at 0x196d0 and the battle opening at\\n                  0x18d60, which reach a frame through 0x140e0 rather than\\n                  through the section tables.\\n      +0x05  u8   the impact marker: the attack sequence counts these frames\\n                  and drains the target's HP bar across them\" New text: \"      +0x04  u8   a frame index the caller reads for its own purposes (only\\n                  frame 0's is read). The player itself ignores this byte and\\n                  the next one; the only readers are the attack sequence at\\n                  0x196d0 and the spell sequence at 0x1a4c0 (both bytes), the\\n                  battle opening at 0x18d60 (this byte), and the credit roll at\\n                  0x1ba40 (reads this byte and never uses it). All of them\\n                  reach a frame through 0x140e0 rather than through the\\n                  section tables.\\n      +0x05  u8   the impact marker: the attack and spell sequences count these\\n                  frames and drain the target's HP bar across them\" Reason: docstring lists only 0x196d0 and 0x18d60 as readers; src (cmbspell.c 0x1a4c0 reads both bytes, ending.c 0x1ba40 reads +0x04 and never uses it) and resource_info/saf.md name four readers."
+  },
+  {
+   "id": "PF5",
+   "outside": "src/aitarget.c 在 fdps_collect_targets_in_range 前的註解（CMP [EBP+0x20],0x10 那段）寫「an impassable cell (flag bit 0x40) cuts it short」，與事實不符：0x40 是控制區標在單位所在格的位元而不是地形不可通行，而且呼叫時網格已 reset、第 0 列每種地形消耗 1，擴散形實際上不會被任何格擋住；應改為說明擴散形在 reset 過的網格上以每格 1 的消耗擴散，結果等同地圖邊界內的曼哈頓菱形。"
+  },
+  {
+   "id": "PF14",
+   "outside": "src/mapdraw.c 在 fdps_build_scene_layer_draw_order 上方註解（改用 qsort 的段落結尾）與 fdps_draw_scene_layers 上方註解（捲動 tick latch 段落結尾）以「(rebuild_info/pitfalls.md)」作引用，但 pitfalls.md 沒有圖層排序的列；前者應改為指向 0002c220 plate comment 的 Rebuild note（或 resource_info/terrain.md），以免讀者去 pitfalls.md 找不到對應條目。"
+  },
+  {
+   "id": "PF15",
+   "outside": "Ghidra 0002c330 (fdps_draw_scene_layer) 的 plate comment 'Rebuild note:' 段可補一句：the flag byte is read from the unanimated tile's attribute row and the fixed blend level from the animated frame's row, so reading both from one row agrees only while the frames' levels match（src/mapdraw.c 的註解已有，Ghidra 端缺）。"
+  },
+  {
+   "id": "PF25",
+   "outside": "Ghidra（FDPS.LE）0001e3f0 fdps_battle_advance_turn 的 plate comment 尾端補一段 Rebuild note：the three MP-regeneration passes are independent -- unit 4 (equipped 0xa6/0xa7), unit 8 (equipped 0xb1), then every unit holding 0xb3 -- and the shard pass does not skip units 4 and 8, so a unit qualifying for both regenerates twice in one turn (once only if the first fills MP); none of the passes tests the side byte or the poison/paralysis timers. Merging them into one 'at most once per unit' loop, or reusing the rest sweep's guard, changes the result. 之後重跑 tools/ghidra_snapshot/ExportGhidraSnapshot.java。"
+  },
+  {
+   "id": "R2",
+   "outside": "cut_content/_index.md 總表的 C10 一列要由 tools/cut_content/cut_content.py index 重新產生（前作遺留改為殘留內容）。"
+  },
+  {
+   "id": "R3a",
+   "outside": "tools/cut_content/story.py：把 `([(30, 0x13)], \"另一版的道別\")` 從 S4_GROUPS 刪掉；_owners() 的 S13b 範圍把 `(30, 0x14, None)` 改成 `(30, 0x13, 0x14)`；NOTE_OVERRIDES 加 `(30, 0x13): \"前半與 `FDETXT64` `0x11` 逐字相同，後半的同行邀約改寫成再會約定\"`。之後重跑 story.md 的產生區塊（story:S4-text 刪掉 `FDETXT30` `0x13` 全文、總表 `FDETXT30` `0x13` 那一列改成 S13b 並帶說明）、tools/chapter_docs 重生 chapters/ch30.md 的 dialogue 區塊（`0x13` 的連結由 S4 改為 S13b（排除清單）；tools/chapter_docs/judgements/ch30.json 的 `0x13` why 宜改為「蘭迪斯與法蓮娜道別的舊稿：`WIN29.DAT` 切到地圖 63 後畫的是改寫成再會約定的 `FDETXT64` `0x11`，本區塊的這條沒有讀取端」），以及 cut_content.py index 重生總表。tools/cut_content/_index.md 第 15 列「第 30 章歸 S4 的四條」是當時驗證範圍的描述，定案後可改為「第 30 章的四條」。"
+  },
+  {
+   "id": "R3b",
+   "outside": "tools/cut_content/story.py：(1) S4_GROUPS 在 ([(30, 0x13)], \"另一版的道別\") 之後加一筆 ([(30, 0x14)], \"另一版的道別的結尾：蘭迪斯獨自啟程\")；(2) _owners() 的 S13b 清單刪掉 (30, 0x14, None)；(3) NOTE_OVERRIDES 刪掉 (30, 0x14) 那一項（它只供 S13b 的說明欄用）。之後重生 cut_content/story.md 的 story:S4-text 與 story:text-index 區塊（FDETXT30 0x14 改列 S4，可與 0x13 合併成 `0x13`–`0x14` 一列）、cut_content/_index.md 總表（python tools/cut_content/cut_content.py index），以及 chapters/ch30.md 的 chapter_docs:dialogue 區塊（FDETXT30 `0x14` 的說明改連 S4 而非 S13b，由 tools/chapter_docs 產生）。"
+  }
+ ],
+ "developer_questions": [
+  {
+   "id": "X74",
+   "question": "如需確定第 7–14 回合的結果，要實機在第 7–14 回合之間清場並接受決鬥，看狂戰士是否第一回合就認輸。"
+  }
+ ],
+ "still_open": [
+  {
+   "id": "P56",
+   "confidence": "high",
+   "open_question": "build_flags.md 的 2,587 個推送點未涵蓋 0x3c000–0x3cbc0 的 CD 與 DPMI 常式；若要改成全遊戲 C 程式碼的數字需重量，並連動同檔第 116、201 行與票 22.2。"
+  },
+  {
+   "id": "X1",
+   "confidence": "medium",
+   "open_question": "「不做」這個決定在 repo 內沒有一手記錄（沒有 devlog 或 commit），唯一來源是使用者的專案記憶；若開發者其實仍打算做，只要把票面狀態維持原樣即可，知識庫頁面兩種情況都正確。"
+  },
+  {
+   "id": "X13",
+   "confidence": "high",
+   "open_question": "旁見：攻略站 fdps/list 印 英雄 HP 12-19，FRILEVUP.DAT 索引 21 的 HP 原值是 12 14（18-20，實際 18-19），攻略站下限的 12 與資料不符；assets/characters.md 第 7 行說 31 列升級成長與資料檔逐筆相符，這一格要另行確認是攻略站誤植還是說法需修正，不在本項範圍。"
+  },
+  {
+   "id": "X74",
+   "confidence": "high",
+   "open_question": "第 7–14 回合清場並接受決鬥時，單位陣列之後的那個 byte 的 bit 0 是否為 1（狂戰士是否同樣自動認輸），靜態分析判斷不出來。"
+  },
+  {
+   "id": "X75",
+   "confidence": "high",
+   "open_question": "陣列之外那一格在實際遊玩中 bit 0 為 1 的機率有多高，靜態無法定出；攻略站只記載了認輸的結果。"
+  },
+  {
+   "id": "X106",
+   "confidence": "high",
+   "open_question": "界線 10 在程式裡還有什麼意義，src/combat.c 也寫明尚未確立；數值行為不受影響。"
+  },
+  {
+   "id": "X141",
+   "confidence": "high",
+   "open_question": "spell.md 與 battle.md 的驗證對象另外重疊 `0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（battle.md 以 src/unitstat.c 列入、spell.md 以效果規則列入），不在本項範圍，需另行決定單一擁有者。"
+  },
+  {
+   "id": "X146",
+   "confidence": "high",
+   "open_question": "DPMI 模組確切的最佳化選項（-s 之外）未定案：預設最佳化加 EBX 可破壞的宣告只重現 6 支中 3 支。"
+  },
+  {
+   "id": "PF5",
+   "confidence": "high",
+   "open_question": "program_info/spell.md「可瞄準範圍」第 1 步寫「帶不可通行旗標的格會擋住擴散」、第 3 步寫「半徑內隔著不可通行地形的單位不會被打到」，與 program_info/movement.md「單位與地形都擋不住」及上列證據矛盾，屬於另一個衝突項目，本項未改。"
+  },
+  {
+   "id": "R3a",
+   "confidence": "medium",
+   "open_question": "舊稿後半「邀她同行、她沉默」的字句在顯示版中沒有對應句，把它看成同一場景的改寫而非另一段劇情是判讀；依據是顯示版以逐字相同的開頭接續、同一位置、分開的結局不變，且與 `0x14` 與既有 S13b 先例一致。"
+  },
+  {
+   "id": "R4",
+   "confidence": "medium",
+   "open_question": "「全員死亡」是第 27 章表頭改寫前的舊稿，還是複製到過場區塊後改寫的，現有資料與程式都分不出先後。"
+  }
+ ],
+ "not_reread": [],
+ "refused_at_landing": [
+  {
+   "id": "P13",
+   "doc": "program_info/chapter.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P30",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P40",
+   "doc": "program_info/code_pools.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P57",
+   "doc": "program_info/code_pools.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P57",
+   "doc": "rebuild_info/naming.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P57",
+   "doc": "program_info/architecture.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P57",
+   "doc": "rebuild_info/build_flags.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "P75",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X13",
+   "doc": "assets/characters.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X14",
+   "doc": "assets/characters.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X17",
+   "doc": "assets/classes.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/code.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/items.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/story.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/story.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "cut_content/_index.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "chapters/ch09.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "chapters/ch19.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "chapters/ch25.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X30",
+   "doc": "chapters/_index.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X32",
+   "doc": "assets/spells.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X35",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X35",
+   "doc": "assets/characters.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X35",
+   "doc": "program_info/battle.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X36",
+   "doc": "assets/characters.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X36",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X37",
+   "doc": "assets/characters.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X37",
+   "doc": "program_info/battle.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X37",
+   "doc": "program_info/battle.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X37",
+   "doc": "program_info/village.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X51",
+   "doc": "chapters/ch06.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X55",
+   "doc": "program_info/chapter.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X60",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X61",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X62",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X71",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X71",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X75",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X75",
+   "doc": "program_info/chapter.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X76",
+   "doc": "program_info/known_bugs.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X87",
+   "doc": "resource_info/map.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X91",
+   "doc": "program_info/chapter.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X91",
+   "doc": "program_info/chapter.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X94",
+   "doc": "program_info/code_pools.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X104",
+   "doc": "program_info/map_ai.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X110",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X111",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X117",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X137",
+   "doc": "program_info/movement.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X141",
+   "doc": "program_info/spell.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X141",
+   "doc": "program_info/spell.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X141",
+   "doc": "program_info/spell.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X145",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X145",
+   "doc": "program_info/code_pools.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X154",
+   "doc": "rebuild_info/emit_pipeline.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X159",
+   "doc": "rebuild_info/emit_pipeline.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X171",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X174",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "X186",
+   "doc": "program_info/movement.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF2",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF4",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF9",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF10",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF30",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "PF37",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "R3b",
+   "doc": "cut_content/story.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "R3b",
+   "doc": "cut_content/story.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "R3b",
+   "doc": "cut_content/story.md",
+   "why": "old occurs 0 times now"
+  },
+  {
+   "id": "R3b",
+   "doc": "cut_content/_index.md",
+   "why": "old occurs 0 times now"
+  }
+ ],
+ "stopped": ""
+}

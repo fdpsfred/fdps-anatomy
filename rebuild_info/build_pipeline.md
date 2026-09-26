@@ -62,7 +62,7 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 
 外部相依缺一項就明確報出是哪一項，而不是讓後面的步驟以難解的方式失敗：DOSBox-X 執行檔、Watcom 安裝根與其下的 `wcc386` / `wlink` / `DOS4GW.EXE` / 標頭檔 / 三個程式庫、`clib3s.lib` 是否含 `stk386` 模組（殘缺安裝的辨識法）、光碟 `.cue` 與它指名的 `.bin`。要組譯的階段另外檢查 `wasm`，要驗證音效的階段另外檢查 `DIG.INI` 與驅動程式映像。
 
-## 目前的驗證程式
+## 驗證程式
 
 `tools/fdps_build/smoke/smoke.c` 是最小的驗證程式，以定案旗標編譯、連結成 DOS/4G 執行檔並在 DOSBox-X 裡實際跑起來。它逐項確認的是：
 
@@ -74,7 +74,7 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 | struct 對齊 | `{char, int, char, short, double}` 的欄位偏移 0/1/5/6/8、大小 16，即編譯器預設的 `-zp1` |
 | `-fpi` 的浮點路徑 | 內嵌 x87 運算連結後結果正確 |
 | 光碟掛載 | 從 `E:\PACK.VFS` 位移 `0x0B` 讀出 24 byte 簽章 `Dynasty Information Co.,` |
-| 保護模式下的 MSCDEX | DPMI `INT 31h` AX=0300h 攜 `INT 2Fh` AX=1500h 回報 1 台光碟機、代號 4（`E:`），與原版 `main` 走的是同一條路徑 |
+| 保護模式下的 MSCDEX | DPMI `INT 31h` AX=0300h 攜 `INT 2Fh` AX=1500h 回報 1 台光碟機、代號 4（`E:`）。這是原版 CD 命令發送 `fdps_cd_device_request`（`0x3bb7d`）的路徑；原版的安裝檢查 `fdps_cdrom_detect`（`0x3c636`，由 `main` 呼叫）不經 DPMI，直接以 `int386(0x2f, ...)` 發出，靠 DOS/4GW 把保護模式的 `INT 2Fh` 反射到真實模式 |
 
 最後一項是遊戲能不能啟動的前提：原版三道光碟檢查的第三道就是它，不過就 `exit(1)`。
 
@@ -90,7 +90,7 @@ Watcom 10.0a 同時附了 DOS 版與 NT 版的 `wcc386` / `wlink`，兩者在定
 | --- | --- | --- |
 | 編譯的原始碼 | 只有 `src/` 的 `.c` 與 `.asm` | `src/` 加 `tests/`，外加產生的 `TESTMAIN.C` |
 | `main` | 保持原名，是遊戲的進入點 | 以 `-dmain=fdps_game_main` 改名讓給測試進入點 |
-| 連結 | 一次；任何未解符號都是錯誤 | 兩次，第一次的未解符號是清單（[`emit_pipeline.md`](emit_pipeline.md)） |
+| 連結 | 一次；任何未解符號都是錯誤 | 最多兩次：第一次的未解符號是清單，有未解符號才加上 stub 模組再連一次（[`emit_pipeline.md`](emit_pipeline.md)） |
 | 輸出 | `FDE.EXE` 與 `FDE.MAP` | `EMITTEST.EXE` 與 `EMITTEST.MAP` |
 
 連結指令檔照 [`build_flags.md`](build_flags.md) 的連結指令：`system dos4g`、`option stack=8k`、輸出命名為 `FDE.EXE`、含 `main` 的目的檔排在第一個，三個 CRT 程式庫明列在 AIL 程式庫之後。map 一律寫出，它是實機偏差定位的依據（[`playtest.md`](playtest.md)），也是回歸閘證明對齊空隙的依據（[`build_gate.md`](build_gate.md)）；`ailsmoke` 的連結同樣寫出 `AILSMOK.MAP`，理由是後者。map 不改變映像的任何一個 byte。

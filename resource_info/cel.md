@@ -2,7 +2,7 @@
 
 `.CEL` 是 FDPS 的 sprite 圖表容器：一個檔裝固定尺寸的一批 sprite，全部共用檔頭宣告的寬高，各自以 RLE 壓縮的像素串排在偏移表後面。
 
-硬碟安裝後有 99 個：`FACE.CEL`（人物頭像）與 `ICON.CEL`（棋子圖示）在根目錄，另外 97 個在 `.VFS` 容器內（`FIELD1.VFS` 69 個、`MISC.VFS` 28 個介面圖）。光碟上的 `FACE.CEL` 與 `ICON.CEL` 包在 `PACK.VFS` 裡，見 [`disc_images.md`](disc_images.md)。
+硬碟安裝後有 99 個：`FACE.CEL`（人物頭像）與 `ICON.CEL`（棋子圖示）在根目錄，另外 97 個在 `.VFS` 容器內（`FIELD1.VFS` 69 個、`MISC.VFS` 28 個介面圖）。`FACE.CEL` 與 `ICON.CEL` 是光碟 1 資料軌上的散檔，由安裝程式複製到硬碟；兩片光碟的 `PACK.VFS` 內另各有一份，見 [`disc_images.md`](disc_images.md)。
 
 `FIELD1.VFS` 那 69 個裡只有 68 個是取得到的地圖圖磚表：程式的檔名是 `m%02d%d.cel`（地圖編號兩位加圖層一位），對到 64 個地圖的第 0 層與其中 4 個的第 1 層。剩下的 `M09.CEL` 只有兩位數字，這個格式產不出來，`FDPS.LE` 裡也沒有別的字串指向它，是一個開不到的殘留檔——數 `FIELD1.VFS` 的圖磚表時不能把它算進去。它與 `M090.CEL` 的逐格比對見 [`cut_content/story.md`](../cut_content/story.md)。
 
@@ -43,7 +43,7 @@ stretch 寫的是每一對的**後面**那個像素：繪製器是 `INC EDI` 再
 
 繪製器逐列處理：每列開始把剩餘 column 數設成檔頭的寬，每個 op 減掉自己蓋到的 column 數，減到剛好 0 才換列。**一個 op 若超出列尾，剩餘 column 數會繞回成極大值，繪製器就會寫穿記憶體**——所以編碼端必須讓每一列的指令剛好填滿寬度，這也讓「每列剛好用完、每個串流剛好用完」成為解碼時可以驗證的硬條件。
 
-繪製器共有 13 種 mode，差別只在調色盤重映與翻轉，讀的都是同一種串流；沒有第二種像素格式的解碼路徑。
+繪製器共有 13 種 mode，差別都在輸出端——調色盤重映、換色、縮放、旋轉、鏡像、半透明與著色（逐一的對照見 [`program_info/architecture.md`](../program_info/architecture.md)）——讀的都是同一種串流；沒有第二種像素格式的解碼路徑。
 
 ## `0x0D` 為 1 的第二種編碼
 
@@ -58,7 +58,7 @@ stretch 寫的是每一對的**後面**那個像素：繪製器是 `INC EDI` 再
 
 192 個 sprite 全部在剛好 24 個列尾 byte 後串流用盡，解出來是一組室內場景的圖磚，所以這是一種真的格式而不是壞檔。
 
-`FDPS.LE` 裡沒有讀這種編碼的程式碼：`0x0D` 從來不被讀取，13 個 blit mode 讀的都是同一種串流。這不構成矛盾，因為原版從不載入 `M310.CEL`：它是地圖編號 31 的第 0 層，而地圖 31 沒有 `DSC31.DAT`，載入常式在讀圖磚表之前就先讀 `DSC`、讀不到就結束程式（見 [`terrain.md`](terrain.md)）；也沒有任何過場腳本切到地圖 31（見 [`cutscene_script.md`](cutscene_script.md)）。`M%02d%d.cel` 只有這一個載入點，所以這個檔在出貨的遊戲裡構不到。地圖 31 本身見 [`cut_content/story.md`](../cut_content/story.md)。
+`FDPS.LE` 裡沒有讀這種編碼的程式碼：`0x0D` 從來不被讀取，13 個 blit mode 讀的都是同一種串流。這不構成矛盾，因為原版從不載入 `M310.CEL`：它是地圖編號 31 的第 0 層，而地圖 31 沒有 `DSC31.DAT`，載入常式在讀圖磚表之前就先讀 `DSC`、讀不到就結束程式（見 [`terrain.md`](terrain.md)）；也沒有任何過場腳本切到地圖 31（見 [`cutscene_script.md`](cutscene_script.md)）。`m%02d%d.cel` 只有這一個載入點（`fdps_field_load_chapter_resources`），所以這個檔在出貨的遊戲裡構不到。地圖 31 本身見 [`cut_content/story.md`](../cut_content/story.md)。
 
 ## 自洽性
 

@@ -213,6 +213,33 @@ class ConsistTest(unittest.TestCase):
         self.assertEqual([(i["docs"], len(i["notes"])) for i in items],
                          [(["program_info/a.md", "resource_info/b.md"], 2)])
 
+    def test_a_refused_edit_whose_new_text_is_in_the_page_is_covered_the_rest_are_items(self):
+        import kbrefused
+        page = "# A\n\n共有 4 個，由 `fdps_x` 決定。\n\n另一句已被別人改寫。\n"
+        with TempRepo({"program_info/a.md": page}) as root:
+            consist = root / "workspace" / "kb_consist"
+            (consist / "verdicts").mkdir(parents=True)
+            (consist / "items.json").write_text(json.dumps([{"id": "X1", "kind": "conflict"}]),
+                                                encoding="utf-8")
+            edits = [{"doc": "program_info/a.md", "old": "共有 3 個", "new": "共有 4 個", "why": "w"},
+                     {"doc": "program_info/a.md", "old": "另一句原文", "new": "另一句新文", "why": "w"}]
+            (consist / "verdicts" / "X1.json").write_text(json.dumps(
+                {"conclusion": "c", "edits": edits, "confidence": "high", "outside": "",
+                 "verdict": "fixed", "_reread": {"decision": "confirm", "why": "checked"},
+                 "_refused": [{"id": "X1", "doc": "program_info/a.md", "why": "old occurs 0 times now"}]}),
+                encoding="utf-8")
+            saved = (kbrefused.REPO, kbrefused.CONSIST_ITEMS, kbrefused.CONSIST_VERDICTS, kbrefused.TRIAGE)
+            kbrefused.REPO, kbrefused.CONSIST_ITEMS = root, consist / "items.json"
+            kbrefused.CONSIST_VERDICTS = consist / "verdicts"
+            kbrefused.TRIAGE = root / "workspace" / "kb_refused" / "triage.json"
+            try:
+                items, covered = kbrefused.triage()
+            finally:
+                (kbrefused.REPO, kbrefused.CONSIST_ITEMS, kbrefused.CONSIST_VERDICTS,
+                 kbrefused.TRIAGE) = saved
+        self.assertEqual([c["new"] for c in covered], ["共有 4 個"])
+        self.assertEqual([(i["id"], i["new"]) for i in items], [("F1", "另一句新文")])
+
     def test_chapter_pages_restating_their_own_flow_are_not_duplicates(self):
         same = "把戰場上的隊員寫回名冊，掉落物隨擊殺者的背包進名冊，這一步在勝利處理的最後面才執行完畢。"
         files = {"chapters/ch12.md": "# 12\n\n%s\n" % same, "chapters/ch13.md": "# 13\n\n%s\n" % same}

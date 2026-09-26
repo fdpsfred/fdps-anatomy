@@ -12,7 +12,7 @@
 
 每支腳本在什麼條件下播放見 [`resource_info/cutscene_script.md`](../resource_info/cutscene_script.md#66-支腳本與播放時機)；章節生命週期中 init／end 處理函式本身的呼叫時機見 [`chapter.md`](chapter.md)。檔名的 `nn` 是章節索引而不是章號，這條陷阱已在 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md) 列出。
 
-直譯器同步執行：呼叫端要等整支腳本跑完才拿回控制權，腳本裡的每一幀都由各 opcode 自己呼叫 `fdps_render_view_frame`（`0x2beb0`）畫出並以 timer tick 節拍，所以過場的速度是遊戲的幀率而不是 CPU 速度。
+直譯器同步執行：呼叫端要等整支腳本跑完才拿回控制權，會畫場景的 opcode 都由自己呼叫 `fdps_render_view_frame`（`0x2beb0`）畫出每一幀並以 timer tick 節拍，`0x06` 的動畫自己以 tick 節拍，淡出淡入以垂直回掃加 `delay` 毫秒節拍，所以過場的速度不隨 CPU 速度改變。
 
 ## 直譯迴圈
 
@@ -29,7 +29,7 @@
 
 收尾時原版把目前章節索引與進入時的副本比較一次，但沒有任何分支使用結果，也沒有回傳值，不構成可觀察行為。
 
-步驟 1 的清除是在**進入**時做，不是在離開時：腳本自己的 `0x62` 讓單位行動後會重新設上 bit 7，而直譯器不再清它。`fdps_chapter_15_init`（`0x21240`）在播完 `ICON14` 之後自己再呼叫一次清除，就是因為 `ICON14` 用 `0x62` 讓光束砲座行動過；少了那一次，砲座第一個玩家回合會停擺。
+步驟 1 的清除是在**進入**時做，不是在離開時：腳本自己的 `0x62` 讓單位行動後會重新設上 bit 7，而直譯器不再清它。`fdps_chapter_15_init`（`0x21240`）在播完 `ICON14` 之後自己再呼叫一次清除，清掉 `ICON14` 以 `0x62` 讓光束砲座（陣營 0）行動時設上的 bit 7。少了那一次，第 1 回合我方階段一開始系統選單的「存檔」就是灰的——`fdps_battle_system_submenu`（`0x14ea0`）只要有任何未退場的單位帶 bit 7 就停用存檔，不分陣營——砲座在我方與友軍階段也以「已行動」的影格畫出；它在敵方階段仍照常行動，因為 `fdps_battle_advance_turn`（`0x1e3f0`）在「敵方回合」字卡後本來就會再清一次。
 
 ## Opcode 的執行期效果
 
@@ -77,7 +77,7 @@ cursor_x = tx + 24, cursor_y = ty + 24
 
 **`0x0D` 直接設定視野**（在 `fdps_icon_script_run`（`0x21650`）內）：`ox = X * 24`、`oy = Y * 24`，游標 `= (ox + 24, oy + 24)`，不畫任何幀、不夾值。
 
-**`0x10` 震動**，`fdps_icon_script_animate_view_offset`（`0x224f0`）。運算元：每步停 H 幀、S 步，接著 S 組 (dx, dy)。每個 byte 以無號讀入、大於 `0x7F` 時減 `0x100`，所以範圍是 −128..127。進入時存下原點 `(ox0, oy0)` 與資訊欄旗標，旗標設 0；每一步把原點設成 `(ox0 + dx, oy0 + dy)`——**相對進入時的原點**，不是相對上一步——然後畫 H 幀；結束時原點還原成 `(ox0, oy0)`、資訊欄旗標還原成進入時的值。這條不碰游標繪製模式，也是視野類 opcode 裡唯一「還原」而非「設成 1」的。`H = 0` 時原點被改寫又還原，中間沒有任何一幀。
+**`0x10` 震動**，`fdps_icon_script_animate_view_offset`（`0x224f0`）。運算元：每步停 H 幀、S 步，接著 S 組 (dx, dy)。每個 byte 以無號讀入、大於 `0x7F` 時減 `0x100`，所以範圍是 −128..127。進入時存下原點 `(ox0, oy0)` 與資訊欄旗標，旗標設 0；每一步把原點設成 `(ox0 + dx, oy0 + dy)`——**相對進入時的原點**，不是相對上一步——然後畫 H 幀；結束時原點還原成 `(ox0, oy0)`、資訊欄旗標還原成進入時的值。這條不碰游標繪製模式，也是會動資訊欄旗標的 opcode 裡唯一「還原」而非「設成 1」的（`0x01`、`0x02`、`0x09` 都設成 1，`0x05`、`0x0D` 不碰它）。`H = 0` 時原點被改寫又還原，中間沒有任何一幀。
 
 ### 淡入淡出與調色盤
 
@@ -112,7 +112,7 @@ branch = 3
 
 **`0x04` 部署波次**：呼叫 `fdps_deploy_wave`（`0x23830`），參數是（目前章節索引, 波次, 放置方式）；波次運算元為 `0xFF` 時改用 `0x63` 存下的答案。部署規則見 [`chapter.md`](chapter.md)。
 
-**`0x13` 觸發格子事件**：`data_fdps_map_cell_event_triggered_flags[e] = v`（`e` 為 0..255，不檢查表長 `0x20`），接著呼叫 `fdps_map_apply_triggered_cell_changes`（`0x2e910`）把所有「旗標非 0 的事件碼」所在、且屬性為可搜尋類的格子圖磚編號加 1、事件碼清 0。圖層格式見 [`resource_info/terrain.md`](../resource_info/terrain.md)。
+**`0x13` 觸發格子事件**：`data_fdps_map_cell_event_triggered_flags[e] = v`（`e` 為 0..255，不檢查表長 `0x20`），接著呼叫 `fdps_map_apply_triggered_cell_changes`（`0x2e910`）把所有「旗標非 0 的事件碼」所在、且屬性類別為寶箱（`0x20`）或重繪格（`0x60`）的格子圖磚編號加 1、事件碼清 0。圖層格式見 [`resource_info/terrain.md`](../resource_info/terrain.md)。
 
 **`0x14` 改寫圖磚**：地形層 0 的格 `(x, y)` 位於 `層 + 0x0B + (x + stride * y) * 2`，`stride` 是層頭 `+7` 的有號 word；把運算元的兩個 byte 以一次 16-bit 寫入。座標不檢查。
 
@@ -191,7 +191,7 @@ step == 8 ？ 整張圖 memmove 到畫面
 
 **隨機方塊** `fdps_transition_random_blocks`（`0x2fb80`）：存檔與讀檔畫面的進出場（`fdps_save_game_screen`（`0x241e0`）、`fdps_load_game_screen`（`0x24490`）），參數固定為 320×200、方塊 4×3、16×16 的相位格、每格停 1 毫秒。
 
-- 相位格表以列優先填入後洗牌：對 `i = 0..255` 依序抽 `r = rand() % rows`、`c = rand() % cols`，交換第 `i` 項與第 `c + cols * r` 項。一次轉場呼叫 **512 次** `rand()`；遊戲共用同一個從不 `srand` 的 CRT 亂數，所以每開關一次存讀檔畫面，之後戰鬥中的亂數序列就位移 512 步（亂數在戰鬥中的用途見 [`battle.md`](battle.md)）。
+- 相位格表以列優先填入後洗牌：對 `i = 0..255` 依序抽 `r = rand() % rows`、`c = rand() % cols`，交換第 `i` 項與第 `c + cols * r` 項。一次轉場呼叫 **512 次** `rand()`；遊戲共用同一個從不 `srand` 的 CRT 亂數，存讀檔畫面進場與離場各做一次轉場，所以每開關一次存讀檔畫面，轉場本身就讓之後戰鬥中的亂數序列多位移 1024 步（亂數在戰鬥中的用途見 [`battle.md`](battle.md)）。
 - 每一相位格畫出它在整張畫面上的所有方塊：`blocks_x = ceil(80 / 16) = 5`、`blocks_y = ceil(66 / 16) = 5`；方塊列的像素列是 `3 * (row_band * 16 + cell_row)`，行是 `cell_col + col_band * 16`；列超過 200 的方塊不畫，行的測試拿方塊索引和像素寬比較而幾乎不生效。最後一條方塊列從第 198 列起畫 3 列，多寫一列到可見畫面之下的 VGA 記憶體，看不出來。
 - 每畫完一個相位格 `delay(1)`。
 

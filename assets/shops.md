@@ -4,7 +4,7 @@
 
 ## 來源
 
-- **貨品**：`FIELD.VFS` 的 `SHOPnn.DAT` 實際 byte，`0xFF` 空位略去，其餘照檔案裡的順序。20 家村莊的每一件貨都出現在攻略站該章的商店清單裡；攻略站第 10–12 章把 `77` 白銀鍊甲寫成「白銀鏈甲」。
+- **貨品**：`FIELD.VFS` 的 `SHOPnn.DAT` 實際 byte，`0xFF` 空位略去，其餘照檔案裡的順序。21 家村莊的每一件貨都出現在攻略站該章的商店清單裡；攻略站第 10–12 章把 `77` 白銀鍊甲寫成「白銀鏈甲」。
 - **物品名稱**：`FDETXT00.TXT` 第 `0xC9` + 物品編號條（[`text/global_text.md`](text/global_text.md)）；與攻略站裝備列表不同的三件見 [`items.md`](items.md)。
 - **村莊的時機**：`fdps_run_village_phase`（`0x31210`，`src/village.c`）與 `fdps_load_field_chapter_resources`（`0x31540`，`src/rsrc.c`）。
 

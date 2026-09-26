@@ -4,13 +4,13 @@
 
 ## 工作清單就是連結器的抱怨
 
-單元測試映像連結兩次（[`emit_pipeline.md`](emit_pipeline.md)「資料還沒 emit 之前怎麼連結」），第一次不帶 stub，報出來的未定義符號裡每一個遊戲全域都是還沒有定義的。定義落地之後下一次建置就不會再報它，所以清單自己縮短，「做完」的判準是清單空掉，不是某個計數到達某個數字——計數會與程式碼漂移，連結器的抱怨不會。
+單元測試映像最多連結兩次（[`emit_pipeline.md`](emit_pipeline.md)「資料還沒 emit 之前怎麼連結」），第一次不帶 stub，報出來的未定義符號裡每一個遊戲全域都是還沒有定義的。定義落地之後下一次建置就不會再報它，所以清單自己縮短，「做完」的判準是清單空掉，不是某個計數到達某個數字——計數會與程式碼漂移，連結器的抱怨不會。
 
 清單是空的：232 個遊戲全域全部有定義，第一次連結報不出任何未定義符號。這個機制留著當回歸檢查——任何新出現的未定義全域都會在下一次建置的第一次連結被報出來。
 
 ## 內容：原版映像的初始 byte，沒有選擇
 
-定義存的必須是原版映像在該位址的初始 byte。映像的初值就是遊戲啟動那一刻的狀態，任何其他值都會讓重建版從不同的狀態出發：`data_fdps_ui_palette_cycle_phase` 的 15 若寫成 0，介面的調色盤波形從此永遠差半個週期，而且沒有任何程式路徑會把它拉回來。
+定義存的必須是原版映像在該位址的初始 byte。映像的初值就是遊戲啟動那一刻的狀態，任何其他值都會讓重建版從不同的狀態出發：`data_fdps_ui_palette_cycle_phase` 的 15 若寫成 0，介面的調色盤波形從此永遠落後原版一步（相位是 16 步的遞減循環，0 的下一步才是 15），而且沒有任何程式路徑會把它拉回來。
 
 | 映像內容 | 定義 |
 | --- | --- |
@@ -53,7 +53,7 @@
 | --- | --- | --- |
 | `follows: X` | 這個符號必須從 X 結束的地方開始（X 帶 `zero_pad_after` 時，從 X 的尾端填充結束處開始） | 兩者都帶初值、同一個 `.c`，`land.py` 依位址把 X 排在它正前方 |
 | `zero_guard_before` | 這個符號前面 4 byte 必須是重建版自己擁有、初值 0、沒有人寫的儲存 | 定義本身以一個帶初值的 `static` 0 dword 開頭，緊接在符號前。兩種用途：擋 `-1` 索引的讀取，或把一段相鄰序列的開頭墊到 4 的倍數 |
-| `zero_pad_after: N` | 原版在這個符號尾端之後有 N byte 沒有引用的 0：讀取越過尾端（byte 旗標被當 dword 讀），或一段相鄰序列在那裡有空隙而越界寫入會穿過它 | 定義本身以一個 N byte、帶初值的 `static` 0 陣列結尾 |
+| `zero_pad_after: N` | 原版在這個符號尾端之後有 N byte 沒有引用的 0：讀取越過尾端（byte 旗標被當 dword 讀），或一段相鄰序列在那裡有空隙而越界讀取會經過它 | 定義本身以一個 N byte、帶初值的 `static` 0 陣列結尾 |
 
 現有的約束是兩段相鄰序列與一個前置守衛，全部 32 個符號：
 
@@ -65,13 +65,13 @@
 | `data_fdps_battle_indicator_queue_unit_idx`（`0x641e8`） | `follows: data_fdps_indicator_queue_cell_x_offset` | 浮動指示佇列的游標沒有上界，四個生產端 `fdps_show_number_indicator`（`0001f510`）、`fdps_show_miss_indicator`（`0001f690`）、`fdps_show_cure_indicator`（`0001f7d0`）、`fdps_show_sprite_indicator`（`0001fc00`）以 `[cursor + i + 0x64120]` 存入，第 201 格起落進下一個陣列 |
 | `data_fdps_indicator_queue_glyph_ids`（`0x642b0`） | `follows: data_fdps_battle_indicator_queue_unit_idx` | 同上，`unit_idx` 的溢位落在這個陣列上 |
 | `data_fdps_indicator_queue_count`（`0x64378`） | `follows: data_fdps_indicator_queue_glyph_ids` | 游標本身：`glyph_ids[200]` 與 `unit_idx[400]` 就是它。生產端每一次存入之前都重讀游標，游標恰為 200 時開頭的空白字形 `0xFF`（`0001f669`）寫在它的低 byte 上，游標跳成 255，之後的存入就從那裡繼續 |
-| 從 `data_fdps_battle_teleport_dest_tile_x`（`0x6437c`）到 `data_fdps_inverse_palette_cube`（`0x643f0`，4096 byte）的 25 個符號 | 每一個都 `follows` 它的前一個 | 游標跳過 200 之後，字形存入 `[cursor + i + 0x642b0]`（`0001f653`、`0001f669`、`0001f7b2`、`0001f8f2`、`0001fd30`）一路寫到 `0x644b2`，經過傳送目標座標、法術視窗的 tick、隊伍金錢、十八個資源指標（sprite sheet、調色盤、音效庫、動畫、全遊戲文字）、光碟路徑、離開旗標，落進反向調色盤立方的開頭；`fdps_play_indicator_queue`（`0001f340`）以 `i < cursor` 把它們當字形讀回來 |
-| `data_fdps_teleport_destination_tile_y`（`0x64380`）、`data_fdps_spell_list_window_last_tick`（`0x64390`） | 另帶 `zero_pad_after: 12` | 原版在兩者後面各有 12 byte 沒有引用的 0，溢寫會穿過這兩段空隙，後面的成員要留在原版偏移 |
+| 從 `data_fdps_battle_teleport_dest_tile_x`（`0x6437c`）到 `data_fdps_inverse_palette_cube`（`0x643f0`，4096 byte）的 25 個符號 | 每一個都 `follows` 它的前一個 | 游標跳過 200 之後，字形存入 `[cursor + i + 0x642b0]`（`0001f653`、`0001f669`、`0001f7b2`、`0001f8f2`、`0001fd30`）從 `0x643b0` 起寫；格號（游標加 `i`）到 400 的那一格，`unit_idx[400]` 的存入先把游標的低 byte 換成單位編號（游標變成 `0x100` 加單位編號），出貨地圖每張最多 92 個單位、編號都小於 141，所以字形最遠寫到 `0x6443f`，蓋過十五個資源指標（sprite sheet、調色盤、全遊戲文字、動畫 entry）、光碟路徑、離開旗標與反向調色盤立方的前 80 byte。`fdps_play_indicator_queue`（`0001f340`）以 `i < cursor` 把 `0x642b0` 起的 byte 全當字形讀回來，沒有被寫到的傳送目標座標、法術視窗的 tick、兩段 12 byte 空隙、隊伍金錢與前三個指標也一起讀 |
+| `data_fdps_teleport_destination_tile_y`（`0x64380`）、`data_fdps_spell_list_window_last_tick`（`0x64390`） | 另帶 `zero_pad_after: 12` | 原版在兩者後面各有 12 byte 沒有引用的 0；溢寫從 `0x643b0` 起、碰不到這兩段空隙，但佇列回放會把它們當字形讀，後面被溢寫的成員也要靠它們留在原版偏移 |
 | `data_fdps_audio_sample_handle_table`（`0x69d30`） | `zero_guard_before` | 音效索引 `-1` 是活的輸入值，等待迴圈不檢查就讀 `table[-1]`，原版讀到表前面一塊沒有引用、恆為 0 的填充 |
 
 兩段序列都在 `gamedata.c`，每個成員都帶初值、照位址順序排：第一段是 AP 表→DEF 表→旗標；第二段是 `0x64120..0x653ef` 的 29 個符號，從三個 200 byte 陣列、游標一直到反向調色盤立方，重建版照原版偏移逐一擺放，連兩段 12 byte 空隙一起。溢寫在原版會把字形編號寫進那些資源指標，重建版照樣發生，這一點由 code 那一側照原樣不檢查、資料這一側照原樣相鄰共同保證。
 
-旗標的 `zero_pad_after: 3` 補的是第一段鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用）。在重建版裡，照位址順序緊接在旗標後面的帶初值物件是 `data_fdps_ui_terrain_hud_user_enabled` 與 `data_fdps_ui_play_active_flag`，兩個都是 1 byte、初值 `0x01`；沒有這段 3 byte 的 `static` 0 陣列，它們會落在旗標後的 `+1`、`+2`，地形類別 6 的 DEF 讀取就讀出 `0x00010100` 而不是 0，防禦修正變成約 65536%。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己、恆為 0，閘門也驗得到。**這段尾端不能拿掉**，也不能因為「量過模組之間的對齊」而拿掉——擋住的是同一個檔裡後面的物件。
+旗標的 `zero_pad_after: 3` 補的是第一段鏈尾的缺口：DEF 表 `[6]` 的 dword 讀取還包含旗標上方三個 byte（原版 `0x60071..73`，為 0 且沒有引用）。在重建版裡，照位址順序緊接在旗標後面的帶初值物件是 `data_fdps_ui_terrain_hud_user_enabled` 與 `data_fdps_ui_play_active_flag`，兩個都是 1 byte、初值 `0x01`；沒有這段 3 byte 的 `static` 0 陣列，它們會落在旗標後的 `+1`、`+2`，地形類別 6 的 DEF 讀取就讀出 `0x00010100` 而不是 0，防禦修正變成 65792%（`0x10100`）。以 3 byte 的 `static` 0 陣列結尾，那三個 byte 就屬於 `gamedata.c` 自己、恆為 0，閘門也驗得到。**這段尾端不能拿掉**，也不能因為「量過模組之間的對齊」而拿掉——擋住的是同一個檔裡後面的物件。
 
 **零值符號帶初值的代價是映像變大。** 31 個內容全 0 的符號因為約束而落進 `_DATA`，其中第二段序列（4816 byte，加開頭的對齊守衛 4 byte）與音效 handle 表加守衛（36 byte）在原版是 BSS，執行檔裡連內容都沒有（[`pitfalls.md`](pitfalls.md)），重建版把這 4856 byte 實際寫進映像。這不能省：tentative 定義進 `_BSS`、順序由工具鏈決定，相鄰關係就斷了。映像大小不在等價判準內（[ADR-0001](../docs/adr/0001-only-functional-equivalence.md)）。
 
@@ -85,7 +85,7 @@
 | --- | --- | --- |
 | 章節事件表 `data_fdps_chapter_event_handler_table`（`0x601c4`，50 格）→ post-action 表（`0x6028c`）→ end 表（`0x60304`） | 事件派發（`00012a33` 等五處）只擋 `!= 0xFF`；同表另有回合事件、可搜尋格、死亡腳本三條索引來源 | 四個來源的聯集是 0..49（去掉 2），最大 49，剛好用到最後一格。值全來自 `MAPnn.DAT` 的事件表與部署記錄，執行期只會清除不會新增 |
 | post-action 表（`0x6028c`，30 格）→ end 表（`0x60304`） | 派發點（`00012a48` 等五處）以章節編號 `0x69cf4` 直接索引 | 只看得到 0..29：過場腳本的 `SWITCH_MAP` 會把章節編號改成 30 以上，但每支 `ICONnn.DAT` 最後一個 `SWITCH_MAP` 都回到 nn、戰鬥中跑的 `ICON7-x` 沒有這個 opcode，回合迴圈從不在那段期間執行；兩個停在 30 以上的壞結局分支之後程式直接結束 |
-| sprite 快取群組表 `data_fdps_cel_sprite_cache_group_ids`（`0x64060`，30 格）→ `data_fdps_map_cell_event_triggered_flags`（`0x640d8`） | `fdps_cache_cel_sprite_group`（`000231ef`）寫 `ids[count]` 不比 30 | 兩次歸零之間最多 23 個群組（`MAP25`：我方 12 格 + 11 種角色編號）；以名冊重建的路徑最多 12 |
+| sprite 快取群組表 `data_fdps_cel_sprite_cache_group_ids`（`0x64060`，30 格）→ `data_fdps_map_cell_event_triggered_flags`（`0x640d8`） | `fdps_cache_cel_sprite_group`（`00023050`）內的 `000231ef`寫 `ids[count]` 不比 30 | 兩次歸零之間最多 23 個群組（`MAP25`：我方 12 格 + 11 種角色編號）；以名冊重建的路徑最多 12 |
 | 移動網格前緣 `data_fdps_battle_move_frontier_y`（`0x63930`，800）→ `..._x`（`0x63c50`） | `fdps_move_grid_flood_fill_range`（`00010de0`）雙緩衝、每個 bank 400 格，不比上界 | 一波最多 89 筆（全部 64 張圖、所有地形消耗列、隨機擺敵方控制區模擬）；無控制區時上限是 2 × 地圖短邊 = 66 |
 
 ## 已落地的判定可以重判
@@ -94,7 +94,7 @@
 
 ## 閘門：與原版逐 byte 比對
 
-build gate 的 `emittest` 目標帶一個測試套件 `data_emit.check`（`tools/data_emit/check_data.py`）。它不讀 C 原始碼，讀的是連結結果：從 wlink map 取每個已落地符號在 `EMITTEST.EXE` 的位址，讀出 byte，與原版 `FDPS.LE` 在 Ghidra 位址的 byte 比對。
+build gate 的 `emittest` 目標帶測試套件 `data_emit.check`、`game` 目標帶 `data_emit.check_game`，兩者都是 `tools/data_emit/check_data.py`，分別對單元測試映像 `EMITTEST.EXE` 與遊戲本體 `FDE.EXE`（兩者由不同的 object 集合連結，全域位置不同）。它不讀 C 原始碼，讀的是連結結果：從 wlink map 取每個已落地符號在該映像的位址，讀出 byte，與原版 `FDPS.LE` 在 Ghidra 位址的 byte 比對。
 
 | 比對項 | 判定 |
 | --- | --- |

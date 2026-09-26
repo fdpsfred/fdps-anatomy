@@ -9,7 +9,7 @@
 
 兩條路徑都是「整檔讀進來、改自己那一區、重算檢查碼、整檔加密寫回」，所以寫一區會原樣保留另一區。
 
-欄位的 C 定義：slot 是 `struct fdps_save_slot`，roster 與地圖單位的記錄是 `struct fdps_unit_record`（`src/fdpstype.h`，欄位語意見 [`program_info/data_structures.md`](../program_info/data_structures.md)）。讀寫工具見 [`tools/save_format/`](../tools/save_format/_index.md)。
+欄位的 C 定義：slot 是 `struct fdps_save_slot`，roster 與地圖單位的記錄是 `struct fdps_unit_record`（`src/fdpstype.h`；記錄的大小與指標所在見 [`program_info/data_structures.md`](../program_info/data_structures.md)，逐欄的意義見 Ghidra 快照 [`ghidra_snapshot/data_types.txt`](../ghidra_snapshot/data_types.txt) 的 `fdps_unit_record`）。讀寫工具見 [`tools/save_format/`](../tools/save_format/_index.md)。
 
 ## 碰這個檔的 function
 
@@ -63,11 +63,11 @@
 
 **地圖單位陣列**只寫「單位數 × `0x50`」byte，單位數以外到 `0x1e00` 為止的部分保留檔案原有的內容。讀檔時配置整塊 `0x1e00`、搬回單位數 × `0x50` byte，然後替每個單位重新載入圖示並把新的快取槽號寫進記錄的 `+0x02`，檔案裡的槽號因此不會被使用。單位數沒有上限檢查，標頭寫超過 96 會讓讀檔越界寫入。
 
-**格子事件已觸發旗標**以格子事件碼為索引，每格一個 byte；章節處理函式借用其中幾格當一次性事件的閂鎖，所以存讀檔後已觸發的事件不會再觸發。
+**格子事件已觸發旗標**以格子事件碼為索引，每個事件碼一個 byte；意義與寫入者見 [`map.md`](map.md)，章節處理函式借它當一次性事件閂鎖的用法見 [`../program_info/chapter.md`](../program_info/chapter.md)。
 
 ### 戰鬥狀態標頭（`+0x30c3`，`0x12` byte）
 
-寫入者一律是 `fdps_battle_system_submenu`（`000151c8`–`000152a1`），讀取者一律是 `fdps_load_savegame`（另註明者除外）。
+寫入者一律是 `fdps_battle_system_submenu` 內的 `000151c8`–`000152a1`，讀取者一律是 `fdps_load_savegame`（另註明者除外）。
 
 | 標頭偏移 | 檔案偏移 | 型別 | 內容 | 對應的全域 |
 | ---: | ---: | --- | --- | --- |

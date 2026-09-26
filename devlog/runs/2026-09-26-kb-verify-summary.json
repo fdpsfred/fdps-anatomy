@@ -1,0 +1,2505 @@
+{
+ "units": 110,
+ "complete": 110,
+ "unfinished": [],
+ "claims_checked": 7410,
+ "findings": 450,
+ "by_kind": {
+  "wrong_fact": 130,
+  "imprecise": 194,
+  "other": 27,
+  "stale_count": 31,
+  "narrative": 36,
+  "owner_violation": 6,
+  "broken_reference": 19,
+  "unverifiable": 3,
+  "duplicate": 2,
+  "forbidden_reference": 2
+ },
+ "edits_confirmed": 424,
+ "rejected": 0,
+ "unverifiable": [
+  {
+   "unit": "program_info__cd_audio",
+   "n": 15,
+   "problem": "這段描述的是 DOSBox-X 原始碼的行為，repo 與本機都沒有 DOSBox-X 原始碼，無法從靜態證據驗證；與遊戲端相關的部分（各請求留下未初始化的 header／control block 位元組、`0x3bce2` 宣告 0x1e 長度）與 src/ 一致。另外這段 `src/dos/...` 指的是 DOSBox-X 的原始碼樹，不是本 repo 的 `src/`，容易誤讀。"
+  },
+  {
+   "unit": "program_info__code_pools__1",
+   "n": 16,
+   "problem": "AIL 的 FID 報告是在 442 個 ail 的時候跑的：當時 `000447a6` 只有 14 byte（不可雜湊）、`000447b4` 是另一支 273 byte 的 function。兩者現在合併成 287 byte 的 `AIL_internal_timer_isr`，遠超過 4 個 code unit 的門檻，再加上新入 ail 的 `0003f6c9`（3 條指令，不可雜湊）。照現在的 function 邊界，不可雜湊的應是 7 個（`0003d177`、`0003da44`、`0003da49`、`0003dcb0`、`0003de38`、`0003f6c3`、`0003f6c9`），可雜湊 39 個——前提是合併後的 `000447a6` 仍未命中；8／38 是沿用舊邊界的分類。要定案需在目前的 Ghidra 狀態上重跑 FidQuery／FidHashDump。"
+  },
+  {
+   "unit": "program_info__known_bugs__1",
+   "n": 4,
+   "problem": "現象的界線「第 7 回合之前」取自攻略站，但成因段落推得的範圍更大：挑戰者只有在五個回合波次（第 5、7、10、13、15 回合）全部出場、陣列正好 82 筆時才落在 `0x52`（MAP23：11 個我方 slot + 波次 0 的 1 + 波次 1、2、3 各 9 + 波次 4 的 27 + 波次 5 的 15 + 波次 6 的 1 = 82），第 15 回合之前清場都會讓判定讀到陣列之外。第 7–14 回合之間清場時，陣列之外那一筆的 bit 0 是否同樣讀成「已退場」取決於堆積內容，靜態看不出來；現象與成因兩段目前各說各的範圍。"
+  }
+ ],
+ "outside_fixes": [
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/build_flags.md「個別 function 的 calling convention」一段的「`__cdecl` 503 個、`__watcall` 11 個，而 11 個全部是遊戲自己寫的組合語言」改為：Ghidra 標 `__cdecl` 505、`__watcall` 9；9 個都是無參數 function，兩種慣例 byte 相同、標記不代表量測；其中 fdps_install_keyboard_isr、fdps_keyboard_isr 屬 00056799 起的原版組語模組，其餘 7 支是 wcc386 產物。「wcc386 產出的遊戲程式碼全部走堆疊慣例」一句保留。",
+   "problem": "Ghidra 快照裡 pool_fdps 是 `__cdecl` 505 個、`__watcall` 9 個。那 9 個（fdps_free_global_resource_buffers、fdps_map_apply_triggered_cell_changes、fdps_cd_music_repeat_poll、fdps_cd_alloc_dos_buffers、fdps_cd_device_request、fdps_cd_stop_audio、fdps_cd_audio_is_idle、fdps_install_keyboard_isr、fdps_keyboard_isr）都是不收參數的 C function，不是手寫組語：8 支在 src 以 `parm caller []` 宣告，鍵盤 ISR 是 `__interrupt`。真正的原版手寫組語是 RLE 繪製（rledisp.asm 等），它們在 Ghidra 標 `__cdecl`。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "n": 2,
+   "kind": "wrong_fact",
+   "outside": "program_info/code_pools.md 第 193 行「語意化的參數名稱……沒有預設命名殘留。子系統分佈見 architecture.md」要改：分佈改指 rebuild_info/code_layout.md，參數名稱一句要等 Ghidra 修正後才成立。Ghidra：fdps_audio_init（0x304e0）的 param1 改名 tick_rate_hz、fdps_blit_dispatch（0x568db）的 arg6 改名 mode_operand，與 src 一致。",
+   "problem": "子系統分佈表無法重現：各列加總約 421，不是 514；Ghidra 的 subsys_* 標籤只有 95 個 function 帶（graphics 23、battle 21、menu 16、file_io 12、cd 9、audio 6、startup 3、main_loop 2、input 2、memory 1），也沒有 script 這一類。同一段還重述了 code_pools.md 擁有的「514 個已定案、沒有預設命名殘留」，而且那句「每個參數的語意名稱」不成立：Ghidra 裡 fdps_audio_init 的參數仍叫 `param1`、fdps_blit_dispatch 有 `arg6`。修法是把整段縮成一句並連到 pool 與 src 分組的擁有者。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "n": 7,
+   "kind": "wrong_fact",
+   "outside": "program_info/chapter.md 第 3 行把 0x22750 稱作「章節進入的共用尾巴」，同樣不對（它在進入處理函式中段被呼叫，之後還有過場腳本與標題卡），應改成「章節狀態重置」。",
+   "problem": "三十支進入處理函式（fdps_chapter_01_init…30_init）在 `00020e90`–`0002164f`，`00021650` 已是 fdps_icon_script_run；間距不等（第 1 章 0x60、第 9、15 章 0x50，其餘 0x40）。它們不是以 `00022750` 結束：`00022750` 在中間被呼叫，之後還有 fdps_icon_script_run、標題卡 `00020c60` 與游標移動。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "n": 18,
+   "kind": "narrative",
+   "outside": "同一句後半「dispatcher 與 kernel 兩端一起寫成 C 即為功能等價」建議改成「重建版照原樣組入原版組語，C 譯本保留在 `#if 0`，交接封閉在分派者之內所以兩端一起換成 C 也功能等價，見 rebuild_info/code_layout.md 的 RLE 一節」；本條 edit 只處理進度用語。",
+   "problem": "「已定」是進度用語；而且讀起來像重建版把兩端寫成 C，實際上重建版預設照原樣組入原版組語（`src/rledisp.asm` 與 rlebase／rlepal／rleturn／rlemix 四檔），C 譯本保留在 `#if 0` 裡，兩種實作都能建置並通過同一套經分派者的測試。13 種模式與 kernel 對得上，不用改。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "n": 24,
+   "kind": "wrong_fact",
+   "outside": "章節末的標題「## 尚未確定的事」與「**仍未定的**：」在以上各條改正後已沒有未定事項，應改成如「## 其他定論」並拿掉「仍未定的」小標；這兩處沒有納入本條 edit。",
+   "problem": "兩者操作的欄位都已定案且已歸檔到 src/unit.c：fdps_set_flag_bit 設單位已學法術位元圖（記錄 +0x1a，spells_known_bitmap）的一個 bit；fdps_object_set_field34_low_nibble_range 對一段單位索引範圍改寫 AI 行為 byte（+0x34）的低四位、保留高四位的 AI 旗標。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "n": 1,
+   "kind": "imprecise",
+   "outside": "`0x19250`–`0x194df` 的三支血條繪製函式（src/gauge.c）目前沒有任何 program_info 頁面涵蓋，應由負責畫面／UI 繪製的頁面收下。",
+   "problem": "這段位址範圍裡還夾著三支畫血條的函式：`fdps_draw_gauge_fill`（`0x19250`）、`fdps_draw_stat_gauge`（`0x192c0`）、`fdps_draw_unit_hp_mp_gauges`（`0x19310`），它們在 `src/gauge.c`，不在括號列的兩個檔裡，本頁也沒有寫它們的任何規則。用連續範圍會讓讀者以為這三支歸本頁、放在 combat.c／cmbblow.c。本頁實際涵蓋的是 `0x18d60` 與 `0x194e0`–`0x1a4bf`。",
+   "unit": "program_info__battle__1"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/pitfalls.md 第 99 行「CD 命令的 INT 2Fh 不是指令」要同步改：安裝檢查走 int386(0x2f)（CRT stub 表裡的真 INT 2Fh），只有 AX=1510h 走 DPMI 0300h。",
+   "problem": "執行檔內其實有 `INT 2Fh` 指令：Watcom CRT 的 `int386x` 以 `0x4e326 + n*3` 跳進一張 256 筆「`INT n`; `RET`」的 stub 表，`0x4e3b3` 就是 `CD 2F C3`。MSCDEX 安裝檢查（AX=1500h）由 `fdps_cdrom_detect`（`0x3c636`）以 `int386(0x2f, ...)` 在保護模式直接發出，走的就是這個 stub；只有 device request（AX=1510h，需要 ES:BX 指向真實模式記憶體）才由 `0x3bb7d` 經 DPMI 0300h、以 BL=2Fh 模擬。兩條路徑的中斷編號都是執行期資料，所以用指令特徵搜不到呼叫點。",
+   "unit": "program_info__cd_audio"
+  },
+  {
+   "n": 7,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/pitfalls.md 第 283 行「只負責 spawnv」同步改為 spawnlp。",
+   "problem": "呼叫的是 `spawnlp`（`0x435a2`），參數逐一列出：`spawnlp(P_WAIT, exe, exe, vid, aud, NULL)`，不是傳 argv 陣列的 `spawnv`。",
+   "unit": "program_info__cd_audio"
+  },
+  {
+   "n": 1,
+   "kind": "stale_count",
+   "outside": "同頁第 11 行 `fdps` 列的 181,661 與第 15 行合計 282,043 同樣過時，應為 181,778 與 282,160（佔比四捨五入後不變）；屬於本頁另一個 unit。",
+   "problem": "181,661 是 RLE 15 支的 body 改成「入口到下一支入口」之前的總數。之後 13 支 RLE function 的 body 把前向短 JMP 後面的 NOP 填充收了進去（例如 `fdps_blit_dispatch` 由 285 byte 變 306 byte），pool_fdps 的 514 個 function body 合計現在是 181,778 byte。ail 57,508 與 crt 42,874 不變，因此第 11 行與第 15 行的合計 282,043 也應為 282,160（屬於另一段）。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "n": 5,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/pitfalls.md「原版手寫組語每個前向短跳後面都有 `NOP` 填充」那一列應限定為 RLE 繪製的 15 支；同一 object 尾段的鍵盤與存檔組語（`00056799`–`000568da`）前向短跳後沒有 NOP（例 `000567cd`、`0005685d`）。同檔「RLE 繪製的 15 支…重建保留原版組語」那一列的「kernel … 透過分派者的 EBP frame 讀第六個參數」應改為 10 支 kernel 這樣做，`fdps_rle_blit_passthrough`、`fdps_rle_skip_row`、`fdps_rle_blit_mirrored_horizontal`、`fdps_rle_blit_mirrored_vertical` 不讀寫分派者的 frame。",
+   "problem": "這段把只屬於 RLE kernel 的特徵套到全部 24 支。分派者 `fdps_blit_dispatch` 與存檔兩支都有 `PUSH EBP`／`MOV EBP,ESP` prologue、以堆疊收參數；鍵盤 7 支沒有參數也不碰呼叫端的 frame；蓋掉參數槽的只有四支 kernel。鍵盤與存檔 9 支的前向短跳後面沒有 NOP（例：`000567cd` 的 `JZ` 緊接下一道指令），build_flags.md 的 NOP 指紋也只在 RLE 15 支上量過。Ghidra 的簽章也已不是 `__watcall` 自動分析：24 支全是 USER_DEFINED，22 支 `__cdecl`（kernel 是名義上的 `void __cdecl (void)`），`__watcall` 只剩兩支 ISR 相關；分派者與存檔兩支的 `__cdecl` 正是真的慣例。鍵盤與存檔 9 支被認出是組語，靠的是 wcc386 不會產生的形狀：checksum 以 EBX 當累加器卻不保存、ISR 以寫死的 selector `2` 載入 DS 並以 `IRETD` 返回、安裝常式 `PUSH CS`／`POP DS` 後把 DS:EDX 交給 DOS。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "chapters/ch15.md〈要塞砲的射擊〉段末「`fdps_chapter_15_init`（`0x21240`）因此要再清一次「已行動」位元，否則砲座第一回合不會動」與〈進入〉第 5 步「讓在過場裡行動過的砲座第一回合照常行動」都錯：砲座是陣營 0，敵方階段前 fdps_battle_advance_turn（0x1e3f0）會再清一次 bit 7，它照常行動。應改為：這次清除去掉 ICON14 的 0x62 在砲座身上設的 bit 7；少了它，第 1 回合我方階段系統選單的「存檔」一開始就反灰（fdps_battle_system_submenu（0x14ea0）見到任何未退場且帶 bit 7 的單位就停用存檔，不分陣營），砲座在我方與友軍階段也畫成已行動的影格。",
+   "problem": "光束砲座是陣營 0（敵方），在我方回合本來就不行動，談不上「第一個玩家回合停擺」。ICON14 的 0x62 確實讓它設上 bit 7，但戰鬥從我方階段開始，第 1 回合敵方階段之前 fdps_battle_advance_turn 在「敵方回合」字卡後本來就會清一次 bit 7，所以少了 fdps_chapter_15_init 那次清除，砲座在敵方階段照常行動。唯一可見的差別是第 1 回合我方與友軍階段期間砲座以「已行動」的影格畫出（fdps_draw_map_unit 對任何陣營都看 bit 7）；我方階段的可選判定、全員行動完畢判定與休息判定都只看陣營 2。",
+   "unit": "program_info__cutscene"
+  },
+  {
+   "n": 5,
+   "kind": "other",
+   "outside": "src/text.c 的 fdps_draw_text 註解（text.c:355-358）把「reads six bytes in front of the font sheet」改為「reads 0x60 bytes (three 32-byte glyphs) in front of the font sheet」。",
+   "problem": "本頁正確（字模跨距 32 byte，−3 × 32 = −0x60，且 rebuild_info/pitfalls.md 也寫 0x60 byte），但 src/text.c 的 fdps_draw_text 註解寫成「reads six bytes in front of the font sheet」，與本頁及 pitfalls 不一致。",
+   "unit": "program_info__dialog"
+  },
+  {
+   "n": 4,
+   "kind": "unverifiable",
+   "outside": "chapters/ch24.md 第 50 行寫「在那之前（第 15 回合波次 5 出場前）過關…攻略站記載的『狂戰士自動認輸』即此」，範圍同樣與攻略站的第 7 回合不一致；確認後兩頁一起改。",
+   "problem": "現象的界線「第 7 回合之前」取自攻略站，但成因段落推得的範圍更大：挑戰者只有在五個回合波次（第 5、7、10、13、15 回合）全部出場、陣列正好 82 筆時才落在 `0x52`（MAP23：11 個我方 slot + 波次 0 的 1 + 波次 1、2、3 各 9 + 波次 4 的 27 + 波次 5 的 15 + 波次 6 的 1 = 82），第 15 回合之前清場都會讓判定讀到陣列之外。第 7–14 回合之間清場時，陣列之外那一筆的 bit 0 是否同樣讀成「已退場」取決於堆積內容，靜態看不出來；現象與成因兩段目前各說各的範圍。",
+   "unit": "program_info__known_bugs__1"
+  },
+  {
+   "n": 3,
+   "kind": "other",
+   "outside": "chapters/ch12.md 裡的「流浪鐵匠」也應改為「流浪工匠」（該頁不在本單位）。",
+   "problem": "擁有這個事件的第 16 章頁一律稱「流浪工匠」（fdps_chapter_16_event_wandering_smith_forge），知識庫其他頁也用「流浪工匠」；本頁與 ch12.md 用「流浪鐵匠」，同一個角色兩種叫法，搜尋會漏。改成「流浪工匠」。",
+   "unit": "program_info__known_bugs__2"
+  },
+  {
+   "n": 4,
+   "kind": "imprecise",
+   "outside": "program_info/known_bugs.md 第 5 條「現象」寫「只要敵人沒有打得死人的攻擊、也沒有更高分的法術」，同樣漏了同分法術的情形，應改成「也沒有分數不低於它的法術」。",
+   "problem": "fdps_map_actor_take_best_action 選道具只有兩條：P == I 且 I > S，或 I > P 且 I > S，兩條都要求法術分數嚴格低於道具分數；法術分數與道具分數相等（例如都是 8）時，P 較低就走「S > P 且 S >= I」施法，P 也相等則三者同分什麼都不做。所以擋住神聖之水的不只是更高分的法術，同分的法術也會擋住。",
+   "unit": "program_info__map_ai__1"
+  },
+  {
+   "n": 5,
+   "kind": "wrong_fact",
+   "outside": "src/aitarget.c 的 fdps_collect_targets_in_range 註解「an impassable cell (flag bit 0x40) cuts it short」要改為：呼叫時網格已 reset、不帶 0x40，第 0 列也沒有 FF 地形，擴散形射程實際是地圖內的曼哈頓菱形。program_info/spell.md 法術流程第 1 步的「帶不可通行旗標的格會擋住擴散」與第 3 步的「這次同樣是洪水填充，所以半徑內隔著不可通行地形的單位不會被打到，即使確認時的菱形把它算進去」都要改為：範圍就是地圖內 |Δx|+|Δy| <= 值的菱形，不會被地形或單位擋住。",
+   "problem": "目標範圍擴散時網格上從來沒有 `0x40`：`fdps_collect_targets_in_range` 自己不標控制區，所有 15 個呼叫點之前網格都已 reset（`flags &= 0x3f` 清掉 `0x40`／`0x80`），呼叫端也不標控制區。會標控制區的只有玩家移動、朝目標移動、AI 攻擊評分與部署找空格，它們結束前都會 reset。再加上第 0 列八個地形都是 1，所以擴散形射程（`range_code < 0x10`）就是地圖邊界內的曼哈頓菱形，不會被單位或地形擋住。另外 AI 法術評分 `fdps_map_actor_score_best_spell`（`0x13420`）也用第 0 列直接呼叫擴散，傳進去的是法術射程 byte 原值。",
+   "unit": "program_info__movement"
+  },
+  {
+   "n": 2,
+   "kind": "wrong_fact",
+   "outside": "program_info/cd_audio.md 第 11 行「`FDPS.LE` 只負責 `spawnv` 呼叫它」改為 `spawnlp`；第 99 行「以 `spawnv(P_WAIT, path, argv)` 執行」改為「以 `spawnlp(P_WAIT, path, path, vid, aud, NULL)`（`0x435a2`，播放器路徑同時當檔名與 argv[0]）執行」；rebuild_info/pitfalls.md「影片播放不在重建範圍」一列的「`FDPS.LE` 只負責 `spawnv`」改為 `spawnlp`。",
+   "problem": "FDPS.LE 呼叫的是 `spawnlp`（`0x435a2`），不是 `spawnv`；唯一呼叫端是 `fdps_play_movie`（`0x30f40`）內的 `0x30fea`，以 P_WAIT、播放器路徑兩次（檔名與 argv[0]）、.Vid 與 .Aud 路徑、NULL 為引數。",
+   "unit": "resource_info__disc_images"
+  },
+  {
+   "n": 1,
+   "kind": "imprecise",
+   "outside": "rebuild_info/pitfalls.md 的 `fdetxt%02d.txt` 那一列同樣寫「也就是玩家看到的章號」，應同步限定為 FDETXT01–30。",
+   "problem": "「章節索引加 1」對全部 65 個區塊成立，但「也就是玩家看到的章號」只對 `FDETXT01`–`FDETXT30` 成立：遊戲只有 30 章，`FDETXT31`–`FDETXT65` 是過場腳本 `SWITCH_MAP` 把章節索引寫成 30 以上時載入的額外場景區塊（本頁下一段也這樣說），它們的編號不是任何章號。",
+   "unit": "resource_info__text"
+  },
+  {
+   "n": 1,
+   "kind": "imprecise",
+   "outside": "rebuild_info/pitfalls.md 第 93 列（`.VFS` 的 entry 筆數以 8-bit 讀入…）改為：從硬碟開啟的容器，成員查找 `fdps_vfs_find_entry` 只取 handle 內 32-bit 筆數的低 byte，N 筆的容器只查得到前 N mod 256 筆（恰好 256 筆一筆也查不到）；`fdps_vfs_open` 把 table 偏移讀成帶號 16-bit 再 seek，上限 `0x7FFF`。記憶體內的巢狀容器由 `fdps_vfs_image_get_entry` 查找，以 32-bit 無號比較筆數、以無號 16-bit 讀偏移，沒有這兩項限制。照直覺的寫法欄維持「用 `u32` 讀筆數、用 `long` seek」，並補上「或把兩條查找路徑併成一支」。",
+   "problem": "兩處不精確。(1) 查找只取筆數的低 byte，效果是筆數取 mod 256：一個 300 筆的容器只查得到前 44 筆、256 筆的容器一筆也查不到，而不是「第 256 筆以後走不到」。(2) 兩項限制只屬於從硬碟開啟的路徑（fdps_vfs_open＋fdps_vfs_find_entry）；MISC.VFS 裡的 BASEANI.VFS、BASEWAV.VFS 是先整個讀進記憶體，再由 fdps_vfs_image_get_entry（0x39cf0）就地查找，它以 32-bit 無號讀筆數、以 16-bit 無號讀 table 偏移，兩項限制都不存在。本頁完全沒提到這第二個讀取端。",
+   "unit": "resource_info__vfs__1"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "tools/ail_link/ailsmoke/ailsmoke.c 開頭註解第 16–18 行 \"the timer ISR is what the game-side DPMI locking exists to protect, and nothing else in the API reaches it\" 同樣錯誤：AIL_install_DIG_INI 經 AIL_internal_dig_driver_setup_full（000469f0）已以 AIL_register_timer 掛上並啟動 AIL_internal_audio_mix_isr，播放取樣就會走計時器 ISR。應改寫成：註冊 timer callback 是為了驗證應用程式自己註冊的 callback（遊戲時鐘 fdps_audio_timer_install 的那條路）真的在 ISR 裡被呼叫。",
+   "problem": "計時器 ISR 不是只有使用者註冊的 timer 會走到。DIG 驅動安裝時 `AIL_internal_dig_driver_setup_full`（`0x469f0`）自己呼叫 `AIL_register_timer(AIL_internal_audio_mix_isr)`、設頻率並 `AIL_start_timer`，混音就是在計時器 ISR 裡跑的，所以方波播完那一項本身已經走過 ISR 路徑。另外加計時器一項的真正理由是：遊戲自己的時鐘就是 `fdps_audio_timer_install` 以 `AIL_register_timer` 掛上的 callback，要證明應用程式註冊的 callback 真的在 ISR 裡被呼叫。",
+   "unit": "rebuild_info__ail_link"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "program_info/architecture.md 第 19 行同樣寫「`__cdecl` 503 個、`__watcall` 11 個，11 個全部是遊戲自己寫的組合語言」，要改成同樣的計數與理由（或縮成一句連回本檔）。",
+   "problem": "快照與 Ghidra 的現狀是 pool_fdps 514 個中 `__cdecl` 505 個、`__watcall` 9 個。那 9 個不是組合語言：它們全是沒有參數的 C function（`fdps_free_global_resource_buffers`、`fdps_map_apply_triggered_cell_changes`、`fdps_cd_music_repeat_poll`、`fdps_cd_alloc_dos_buffers`、`fdps_cd_device_request`、`fdps_cd_stop_audio`、`fdps_cd_audio_is_idle`、`fdps_install_keyboard_isr`、`fdps_keyboard_isr`），`src/` 以 `#pragma aux ... parm caller []` 宣告成堆疊慣例（ISR 是 `__interrupt`）；無參數時兩種慣例 byte 相同，Ghidra 的標記不是量測。手寫組語的 RLE 15 支在 Ghidra 反而標 `__cdecl`。「wcc386 產出的遊戲程式碼沒有例外走堆疊慣例」的結論仍成立，只是計數與理由要改；另外 Ghidra 並不是對整個 binary 都標 `__watcall`（遊戲本體 505 個是 `__cdecl`）。",
+   "unit": "rebuild_info__build_flags__2"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "tools/fdps_build/smoke/smoke.c 開頭註解第 24–28 行寫 \"The MSCDEX probe repeats what the original main() does at 0x3c636: a DPMI simulate-real-mode-interrupt (INT 31h AX=0300h) carrying INT 2Fh AX=1500h\"，同樣錯：0x3c636 是 fdps_cdrom_detect 不是 main，且它直接呼叫 int386(0x2f)；應改寫為 smoke 以 DPMI 0300h 問同一個安裝檢查問題，原版則以 int386 直接發 INT 2Fh。",
+   "problem": "原版的 MSCDEX 安裝檢查不在 main 裡，而在 main 呼叫的 fdps_cdrom_detect（0x3c636）；它也不經 DPMI 0300h，而是直接 int386(0x2f, ...)（0x43268 的 CRT int386），靠 DOS/4GW 把保護模式的 INT 2Fh 反射到真實模式。smoke 探測走的 DPMI INT 31h AX=0300h 是原版 CD 命令發送 fdps_cd_device_request（0x3bb7d）用的路徑，不是安裝檢查的路徑。smoke 證明的是 AX=1500h 這個問題在 guest 裡答得出來，不是原版同一條呼叫路徑。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "n": 2,
+   "kind": "imprecise",
+   "outside": "rebuild_info/emit_pipeline.md 第 68–77 行寫「建置連結兩次」「這份清單現在是空的，stub 模組跟著是空的」，與 build_emit.py stub_pass 的實作（清單空時根本不跑第二次連結、不產生 stub 模組）不符，應由該頁擁有者改正。",
+   "problem": "單元測試映像不是固定連結兩次：第一次連結沒有未解符號時，stub_pass 直接回傳成功，不產生 stub 模組也不跑第二次連結。正確是「最多兩次」，第一次有未解符號才以 stub 模組再連一次。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "n": 2,
+   "kind": "wrong_fact",
+   "outside": "src/gamedata.c 的 data_fdps_inverse_palette_cube 註解（\"stores glyph bytes into its first 84 bytes\"）改為前 80 byte（0x643f0..0x6443f）；rebuild_info/pitfalls.md 浮動指示佇列那一列「之後的字形一路寫過游標後面的 25 個全域（傳送座標、隊伍金錢、十八個資源指標、光碟路徑、離開旗標），落進反向調色盤立方的開頭」改為字形寫入從 0x643b0 起、最遠 0x6443f（十五個資源指標、光碟路徑、離開旗標、立方前 80 byte），傳送座標、金錢與前三個指標只被佇列回放當字形讀。",
+   "problem": "游標在 200 被空白字形 0xFF 換成 255 之後，下一個字形存入是 cursor+i ≥ 256，即 0x643b0 起。三種存入的順序是 cell_x、unit_idx、glyph，每次都重讀游標；游標走到 400 時 unit_idx[400] 的存入先把游標低 byte 換成單位編號（游標變成 0x100 + 單位編號），所以一般路徑的字形最遠只到 glyph[399] = 0x6443f（立方前 80 byte）；重設後的存入落在 0x643b0 + 單位編號 + i，出貨地圖單位數最多 92（我方 12 + 部署 80），到不了 0x6443f 之外。0x644b2 只有單位編號 255 才會到。傳送座標（0x6437c..83）、法術視窗 tick（0x64390）、隊伍金錢（0x643a4）與 sfx bank／baseani archive／command sprite 三個指標都在 0x643b0 之前，不會被寫到；被寫到的資源指標是 0x643b0..0x643e4 的十四個加 0x643ec 的動畫 entry 指標，共十五個（其中沒有音效庫）。前面那些成員仍要照原版偏移，是因為 fdps_play_indicator_queue 以 i < cursor 從 0x642b0 起把它們當字形讀回來，而且後面被寫的成員要落在原版偏移。",
+   "unit": "rebuild_info__data_emit"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "tools/code_emit/next_batch.py 的 docstring 與 --stats 說明仍列 emitted／reviewed，應改成實際會出現的狀態（pending／in_flight／interrupted／failed／skip／committed）。",
+   "problem": "狀態檔從來不經過 `emitted`／`reviewed`：workflow 在 emitter 動手前寫 `in_flight`，通過後由 bookkeeper 直接寫 `committed`，未通過的寫 `failed` 或 `skip`，中斷留下的 `in_flight` 由復原段改寫成 `interrupted`（本段沒提）。`failed` 也不是終態——`next_batch.py` 的 TERMINAL 只有 `committed` 與 `skip`，`failed` 會重發；同一段自己的後半句也這麼說，前後矛盾。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "n": 4,
+   "kind": "wrong_fact",
+   "outside": "tests/menu.c:352 的註解也寫 fdps_deploy_map_units，應改成 fdps_build_map_unit_array。",
+   "problem": "`fdps_deploy_map_units` 不存在（lint unknown-symbol）；在 `deploy.c` 裡釋放 `data_fdps_cel_sprite_cache_ptr` 與 `data_fdps_map_unit_array_ptr` 的是 `fdps_build_map_unit_array`（`0x22be0`）。守門條件也只對兩支載入器成立：`fdps_shutdown_free_resources`（`0x29440`）對 cel cache 與 map unit array 看的是指標不為 NULL，`data_fdps_command_sprite_sheet_ptr` 完全不守。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "n": 1,
+   "kind": "imprecise",
+   "outside": "tools/code_emit/emit_ticket22.js 開頭註解（約 83-85 行）同樣寫 \"stops for three reasons only\"，應補上工作區不乾淨（recovery out_of_bounds／cleanup_failed）這一類。",
+   "problem": "emit workflow 另外還有兩條會讓整批停下的路：開跑收拾段發現界線外的髒路徑或收拾後工作區仍不乾淨時直接結束（本頁同一節「界線外的路徑髒了就停下來報告」也這麼說），以及放棄一支 function 後清理沒有把工作區清乾淨時以 cleanup_failed 停下。說「只有三種」與本頁自己的中斷復原一節矛盾；這一節要講的重點是「沒有一種是預算」，應把工作區不乾淨這一類列進去。",
+   "unit": "rebuild_info__emit_pipeline__2"
+  },
+  {
+   "n": 7,
+   "kind": "wrong_fact",
+   "outside": "Ghidra 的 /fdps/ail_xmidi_timb_chunk 是 AIL 側、ailv3.h 沒有對應名稱的結構卻用了 `ail_` 前綴，不合本頁「程式庫原名，否則 L$N_」的規則；/fdps/long_double_80（data_structures.md 說與 FD2 同名）也沒有任何前綴。兩者要嘛改名，要嘛本頁在 struct 表補上這兩類的例外。",
+   "problem": "與同頁〈struct 型別名稱〉那張表矛盾：那張表說程式庫（CRT 與 AIL）的結構用程式庫原名、不加前綴。`ail_sample_state` 不存在，AIL 的取樣記錄在 Ghidra 與 data_structures.md 都叫 `SAMPLE`。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "n": 14,
+   "kind": "imprecise",
+   "outside": "Ghidra 的 0x3dcb0／0x44dc0 這一對不合本條形式：thunk 叫 `thunk_AIL_internal_isr_eflags_save_cli`（帶 Ghidra 自動 thunk 的 `thunk_` 前綴），body 叫 `AIL_internal_isr_eflags_save_cli`、不帶後綴。ailv3.lib 對這一對只有外部參照 `crt_equivalent_get_eflags_thunk`，那是被推翻的前作 CRT 讀法，不能沿用；body 名稱是 src/ailflags.asm 的公開符號、也是 rebuild_info/ail_link.md alias 表的目標，依『Ghidra 名稱與 C 名稱逐字相同』不能動。thunk 沒有原始碼、不 emit，名字只存在 Ghidra。處置二選一：本條補一句這一對是例外並說明理由，或只替 thunk 另取一個不帶 `thunk_` 自動前綴的名字；兩者都不動 body。",
+   "problem": "「body 加位址後綴」會被讀成加本專案的位址，但實際照抄的是 ailv3.lib 發佈的名字，後綴是前作映像的位址：本專案的 body 在 `0x4478c`，名字仍是 `AIL_internal_log_lock_acquire_3e724`（`0x44799` 的也仍是 `_3e731`）。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "n": 15,
+   "kind": "imprecise",
+   "outside": "tools/pool_triage/fid/_index.md 第 32 行同樣寫「四個程式庫」，應一併改。",
+   "problem": "腳本讀的是三個程式庫（`CLIB3S.LIB`、`MATH387S.LIB`、`emu387.lib`）加一個鬆散的啟動 object `CSTRTX3S.OBJ`（先包成暫時程式庫），不是四個程式庫。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "n": 7,
+   "kind": "other",
+   "outside": "src/text.c 在 fdps_draw_text 前面的註解（357 行）：把 reads six bytes in front of the font sheet 改成 reads the 0x20-byte glyph that starts 0x60 bytes in front of the font sheet (index -3 times the 0x20-byte glyph stride)。",
+   "problem": "本頁的說法正確，不用改：字形索引 -3 乘上字形間距 `0x20`（`FONT_GLYPH_STRIDE_BYTES`）是字型表前 `0x60` byte。錯的是 `src/text.c` 裡 fdps_draw_text 的註解，它寫 reads six bytes in front of the font sheet。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "n": 8,
+   "kind": "other",
+   "outside": "src/mapai.c 兩處註解一起修：(1) AI_BEHAVIOR_PHYSICAL_TIE_BIT 前面（601–609 行）把 Nothing in the shipped game can raise it ... so both ties always take their clear-bit arm 限縮成：沒有任何寫入會設起這個 bit、部署記錄的來源 byte 也從不超過低 4 bit，所以部署記錄產生的單位永遠走 bit 清除那一支；但標題示範戰的單位是整筆抄自名冊記錄，而 fdps_roster_add_character 不寫 +0x34、名冊區塊配置後不清零，它們的高 4 bit 是堆積殘值（見 src/roster.c）。(2) MAP_AI_SPELL_POWER_TIE_LIMIT 前面（617 行）的 decided by a flag that is always clear and the physical attack never wins it 同樣改成「對部署記錄產生的單位恆為清除」。",
+   "problem": "本頁的說法與 src/roster.c 一致，不用改：fdps_roster_add_character 不寫 +0x34，示範戰的 fdps_object_set_field34_low_nibble_range 只合併低 4 bit，高 4 bit 留著堆積原有的內容。但 `src/mapai.c` 在 AI_BEHAVIOR_PHYSICAL_TIE_BIT 前面的註解說 Nothing in the shipped game can raise it……so both ties always take their clear-bit arm，這句只對部署記錄產生的單位成立，示範戰的名冊單位不在此限，和本頁、roster.c 矛盾。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "n": 9,
+   "kind": "other",
+   "outside": "src/chpost1.c 在 fdps_chapter_01_post_action 前面的註解：改寫 Unlike chapters 2 and 5 那一句，改成第 1 章索爾的部署記錄同樣帶 opcode 5 的死亡腳本（文字 0x0f），這裡的檢查是它以外的第二道，毒死時只有這一道成立，而且兩道都會畫遺言。",
+   "problem": "本頁的說法正確，不用改：MAP00.DAT 第 21 筆（角色 `0C`）的死亡腳本是 opcode 5、運算元 `0x0f`（畫文字並判定敗北）。但 `src/chpost1.c` 在 fdps_chapter_01_post_action 前面的註解說第 2、5 章把索爾的條件放在部署記錄的死亡腳本上、而第 1 章 enforces it here in code，暗示第 1 章沒有死亡腳本，這與資料不符。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "n": 3,
+   "kind": "imprecise",
+   "outside": "resource_info/vfs.md 的「成員數上限 255」「entry table 偏移上限 0x7FFF」兩條同樣只寫了 handle 路徑（見 cross_doc），由該頁的驗證者處理。",
+   "problem": "只對以 handle 開啟與查找的路徑成立（`fdps_vfs_open` 以 `MOVSX` seek、`fdps_vfs_find_entry`／`fdps_vfs_find_entry_size` 以 byte 讀筆數）。整個容器讀進記憶體後查找的 `fdps_vfs_image_get_entry`（`0x39cf0`，`anim.c`、`audio.c`、`death.c` 都用它查 `BaseAni.vfs`／`BaseWav.vfs`）把筆數當 32-bit 無號比較（`JC` at `0x39d1f`）、偏移以 16-bit 零延伸讀入（`0x39d34`），兩個上限都不存在。寫成一律 8-bit／帶號，那條路徑就與原版不同；反過來統一成那條路徑的寬度，handle 路徑又不同。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "n": 4,
+   "kind": "imprecise",
+   "outside": "program_info/cd_audio.md 第 9 行「執行檔內找不到 INT 2Fh 指令，是因為…透過 DPMI INT 31h AX=0300h…中斷編號 0x2F 是寫進暫存器結構的資料位元組」沒有區分安裝檢查：fdps_cdrom_detect（0x3c636）以 int386(0x2f, …)（CALL 0x43268）在保護模式直接發 AX=1500h，只有經 0x3bb7d 的 device request 走 DPMI 0300h（BL=2Fh）。",
+   "problem": "只對 device request（AX=1510h，全部經 `fdps_cd_device_request`（`0x3bb7d`））成立。MSCDEX 安裝檢查 `fdps_cdrom_detect`（`0x3c636`）的 AX=1500h 不帶 real-mode 指標，原版就是在保護模式下以 `int386(0x2f, …)`（`CALL 0x43268`）直接發出，而且能用。照這列的寫法，讀者會以為所有 CD 的 `INT 2Fh` 都必須走 DPMI。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "n": 5,
+   "kind": "wrong_fact",
+   "outside": "src/gamedata.c 在 0x60008 定義上的註解「Starts at 1, so CD background music is on by default before any save or the options menu touches it」會讓人以為初值可見；應改成：初值 1 永遠讀不到，fdps_title_screen 在任何讀取端執行前（0x2a56b）就寫入 1。",
+   "problem": "`0x60008` 不是「程式在第一次讀取前從不寫入」的例子。它的讀取端只有 `fdps_battle_system_submenu`、`fdps_options_menu`、`fdps_cd_set_music_track`、`fdps_cd_music_repeat_poll`、`fdps_cd_verify_disc_and_play_track`、`fdps_save_game_screen`，全部要進了標題畫面之後才跑得到；而 `main` 先呼叫 `fdps_title_screen`，後者在第一段片頭動畫與影片之後、選單之前無條件寫入 1（`0x2a56b`）。所以映像檔裡的初值 1 在任何路徑上都讀不到，寫成 0 也沒有差別。`0x60010` 沒有這種寫入，作為例子成立；`0x60014` = 15、`0x6016c` = `0x19` 也都對。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "n": 2,
+   "kind": "wrong_fact",
+   "outside": "src/movegrid.c 的 fdps_battle_move_unit_toward 註解「THE GRID IS REBUILT FOUR TIMES」漏了放寬重試成功後、改目的地前的那次重建（00011af4–00011b15，reset＋標控制區＋以真實移動力擴散），應改為最多五次並註明該次設定與第 4 輪相同；program_info/movement.md 正文「它把網格重建四次，四輪各有不同」與同頁表格的 2b 輪矛盾，應改為最多重建五次、2b 輪與第 4 輪設定相同。",
+   "problem": "`0x119e0` 呼叫擴散 `fdps_move_grid_flood_fill_range`（`0x10de0`）最多五次：第 1 輪、放寬重試、放寬重試找到路時改目的地前再以真實移動力 reset＋標控制區＋擴散一次、列出能停的格、最後算路徑。改目的地前那次與最後算路徑那次的設定完全相同，所以「四次都不同」不成立；program_info/movement.md 的表也列了第 2b 輪。重點應是各次設定不能收成同一套。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "n": 4,
+   "kind": "wrong_fact",
+   "outside": "src/transit.c 的 fdps_transition_zoom 註解寫「writing the obvious >> 3 moves that step's centre by a quarter pixel」，同樣錯，應改為 one whole pixel（four quarter-pixel units），因為除法在乘 4 之前。",
+   "problem": "除以 8 是在像素單位上做、之後才乘 4 換成四分之一像素單位，所以 `>> 3` 與向零截斷差 1 的時候，中心差的是一整個像素（四分之一像素單位差 4），不是四分之一像素。例：招牌 x=138、step=1 時 (138-159)/8 = -2，而 >>3 得 -3，中心 140 對 141。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "src/chpost2.c 的 fdps_chapter_22_post_action 註解（\"Adding the forward here would let the chapter clear itself the moment the last minion fell, with the boss still standing.\"）同樣錯：巫湯婆婆是 side 0，共用判定在她站著時不會寫 2；應改寫成只有她未經死亡腳本退場（毒死）時才有差別。",
+   "problem": "巫湯婆婆本身是陣營 0 的敵方單位（MAP21.DAT 第 7 筆陣營 byte 為 0、波次 0、死亡腳本 opcode 2 operand 32）。共用判定的全滅掃描只要有一個陣營 0 的未退場單位就把結束碼設回 0，所以她還站著時，轉呼共用判定也不會寫過關，「援軍全倒就提前過關」不會發生。轉呼共用判定真正會改變的情況是她沒經過死亡腳本就退場：中毒致死由 fdps_battle_tick_status_effects 標成退場後直接呼叫行動後處理、不跑死亡腳本，原版這一局因此再也不會過關，改寫版則在陣營 0 全數退場時由共用判定寫過關。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "n": 2,
+   "kind": "imprecise",
+   "outside": "src/chend2.c 的 fdps_chapter_19_end 與 fdps_chapter_24_end 註解（\"carries the whole party into chapter 20/25 recorded as dead ... bills the player for reviving all of them / for every one\"）同樣沒有扣掉被寫回跳過的蘭迪斯。",
+   "problem": "接受決鬥時蘭迪斯也被寫成退場，但 fdps_roster_write_back_battle_units 對「角色編號 0 而且已退場」的單位整個跳過不寫回，所以恢復挪到寫回之後時，以陣亡狀態進名冊、被收復活費的是蘭迪斯以外被寫成退場的隊員；蘭迪斯的名冊記錄停在開戰前、本章的成長與物品全數遺失。「整隊人馬」與「全隊的復活費」把他算了進去。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "src/chpost1.c:575 fdps_chapter_10_post_action 的註解「The only handler in this file that does not call the shared test」不正確：同檔的 fdps_chapter_03_post_action（0003a4b0，chpost1.c:193）與 fdps_chapter_08_post_action（0003a710，chpost1.c:480）也都不呼叫 fdps_battle_check_default_end_conditions；改成「one of the three handlers in this file (chapters 03, 08, 10) that do not call the shared test」之類的寫法。",
+   "problem": "不是唯一。`fdps_battle_check_default_end_conditions`（`0x3a2e0`）的呼叫端只有 21 支行動後處理；30 支裡第 3、8、10、22、23、25、26、27、30 章共 9 支都不呼叫它——同一頁下一列就寫著第 10 章不呼叫共用判定。「唯一」要拿掉。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "n": 4,
+   "kind": "imprecise",
+   "outside": "assets/tables/characters.md:41「各 *_max 是『最大成長值加 1』：攻略站列的每個成長範圍上限，一律等於這個 byte 減 1」與 assets/characters.md:166「每級實際的成長上限是後一個值減 1」都要限定為上下限不同的對；上下限相同時（175 對裡 26 對）升級固定加 min、不取亂數，攻略站列的也就是那個原值（例：亞克 DX 02 02 → 攻略站 02、蓋亞 DX 00 00 → 00、蘭斯洛特 MP 00 00 → 00）。",
+   "problem": "只在上下限不同時成立：`fdps_level_up_apply_stat_gain` 取 `min + rand() % (max - min)`，上限不含；上下限相同時直接加 `min`（等於 `max`），那時 `*_max` 就是實際成長值。`FRILEVUP.DAT` 有內容的 175 對裡 26 對相同。照直覺寫成含上限的區間也不是「每一級都多 1 點」，而是上下限不同的項目可能多 1 點。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/build_flags.md 的 cc 判定小節（「`__CHK` 的 34 個呼叫端是 32 支 `fdps_cd*` 與 CRT 的 `spawnvpe`（`0x54dcc`）、`spawnve`（`0x556ae`）」）有同樣的錯，應改為 `0x54dc7`、`0x556a9`。",
+   "problem": "`0x54dcc` 與 `0x556ae` 是兩支 function 內呼叫 `__CHK` 的 CALL 位址，不是入口。`spawnvpe` 的入口是 `0x54dc7`，`spawnve` 的入口是 `0x556a9`；依本頁寫法「`name`（`0xaddr`）」必須是入口。",
+   "unit": "rebuild_info__pitfalls__7"
+  },
+  {
+   "n": 2,
+   "kind": "narrative",
+   "outside": "rebuild_info/build_flags.md 的同一段與「inline 展開」節也寫了「由票 22.2 處理／屬於票 22.2」，同屬進度敘事，應由負責該頁的驗證處理。",
+   "problem": "括號內是票號與專案進度描述（「目前還沒跟上」「由票 22.2 對齊」），不是結論。這一列要說的是「遊戲模組必須 -s、原版哪些地方帶 probe」，重建版建置目前用哪組旗標由 build_flags.md 擁有，這裡刪掉括號即可。",
+   "unit": "rebuild_info__pitfalls__7"
+  },
+  {
+   "n": 1,
+   "kind": "stale_count",
+   "outside": "assets/shops.md 來源段「20 家村莊的每一件貨都出現在攻略站該章的商店清單裡」改為「21 家村莊的每一件貨都出現在攻略站該章的商店清單裡」；攻略站第 2–16、19–21、24–26 章的商店清單涵蓋全部 21 家（含 SHOP25 那家進不去的神秘商店）。",
+   "problem": "有村莊的章節索引是 1–15、18–20、23–25，共 21 個；shops.md 全表也列 21 個 SHOPnn.DAT（SHOP01–15、18–20、23–25），data_tables 產生的 shops 表同樣是 21 列。寫 20 個是錯的。",
+   "unit": "assets___index"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "tools/guide_offsets/crosscheck.py 的 ACCEPTED：(appearance.spells, 0x00/0x02/0x0A/0x0B) 四條理由改為「攻略站列的是玩家實際拿到的記錄：0x0A 珊為 MAP23 部署記錄的遮罩 05 06 07 0C 20、0x0B 蘭斯洛特為 MAP18 LV2 部署記錄的空遮罩、0x02 費塔加為 MAP07 LV15 部署記錄的 08 09（戰鬥結束寫回名冊時整筆蓋過），0x00 蘭迪斯的業火由 fdps_chapter_01_end 在寫回前授予」，並把該 dict 上方註解「the data file wins in every case」改成不再宣稱這四條是資料檔勝出；tools/data_skill/build.py 的 DISCREPANCIES 中 character 0x00、0x02、0x0A、0x0B 四條的 note 同步改寫（兩處是同一份副本，須一起改）。assets/characters.md 的 spell_schedule 表由 tools/data_tables 產生，其「出場時已會」欄是 FRIAPRDA 遮罩，表前說明（本頁第 170 行那段，已在單元內）可補一句「不一定是玩家拿到的遮罩，見出場屬性一節」。",
+   "problem": "四項差異都不是攻略站寫錯，而是攻略站列的是玩家實際拿到的那筆記錄，不是入隊時的 FRIAPRDA 列。珊：MAP23 第 10 筆（LV15、陣營 2）的遮罩正好是 05、06、07、0C、20，與攻略站五個完全相同；蘭斯洛特：MAP18 第 42 筆（LV2）遮罩是空的；費塔加：MAP07 第 19 筆（LV15）遮罩是 08、09，沒有 00 業火，與攻略站「冰爆術、Lv15 絕殺冰封」一致。這三人的部署單位出場後，戰鬥結束的名冊寫回整筆蓋過名冊記錄（含法術遮罩）。蘭迪斯的業火由 fdps_chapter_01_end（0x3a410）在寫回前以 fdps_set_flag_bit 授予。「以資料檔為準」把攻略站判成錯是錯的結論。",
+   "unit": "assets__characters"
+  },
+  {
+   "n": 5,
+   "kind": "owner_violation",
+   "outside": "把 rebuild_info/pitfalls.md「擊殺經驗的三條發放路徑各算各的」那一列的來源改成 program_info/battle.md#經驗值 與 program_info/spell.md#施法與使用道具的經驗值。之後本頁「擊殺經驗」一節縮成：EXP 欄是倍率，物理攻擊以「目標 LV × EXP ÷ 攻擊者 LV」、法術以「EXP × 目標 LV」代入，道具不給經驗，公式與門檻見上面兩節。跨文件一致性那一輪一起處理。",
+   "problem": "「擊殺經驗」一節的行動表與底下四條要點，幾乎整段重述 program_info 擁有的機制：物理攻擊的公式、肖像編號 > 10 的 +30、× 15 ÷ 10、收款人、比例計算、上限 99，擁有者是 program_info/battle.md#經驗值；法術除以施法者 LV 與 > 8 的門檻，擁有者是 program_info/spell.md#施法與使用道具的經驗值。本頁第 44 行自己也說這屬於戰鬥機制。內容目前與擁有者一致（已逐條對過 src/combat.c、src/unitatk.c、src/unitstat.c、src/spellmnu.c、src/item.c、src/btlact.c、src/aiact.c），但兩份各自維護遲早會分岔，本頁應該只留「EXP 欄是倍率、在哪幾條路徑乘進經驗」一句並連到兩個擁有者。修改要先處理 rebuild_info/pitfalls.md「擊殺經驗的三條發放路徑」那一列：它的來源欄指向本頁，所以不在本頁直接刪。",
+   "unit": "assets__enemies"
+  },
+  {
+   "n": 1,
+   "kind": "stale_count",
+   "outside": "assets/_index.md 的 shops.md 列寫「20 個村莊的道具店、武器店、秘密商店的貨」，同樣要改為 21 個（tools/data_tables/_index.md 已寫「有村莊的 21 個 SHOPnn.DAT」）。",
+   "problem": "有村莊的章節索引是 1–15、18–20、23–25，共 21 個，全表也是 21 列（SHOP01–15、18–20、23–25），攻略站同樣有 21 份商店清單（第 2–16、19–21、24–26 章）。逐件比對後 21 家的每一件貨都出現在攻略站該章清單裡，唯一例外就是第 10–12 章把 77 寫成「白銀鏈甲」。數字應為 21。",
+   "unit": "assets__shops"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/pitfalls.md 的「成長範圍的 `*_max` 是『最大成長值加 1』」那一列與 program_info/village.md 的「比攻略站印的最大成長值多 1」都要補上「上下限相等時例外」；assets/characters.md「升級成長 FRILEVUP.DAT」一節的「每級實際的成長上限是後一個值減 1」同樣要改。",
+   "problem": "`*_max` 只在大於 `*_min` 時是不含的上界（成長 = min + rand() % (max − min)，最大 max − 1）。上下限相等時 `fdps_level_up_apply_stat_gain` 跳過 rand()，固定成長 min，也就是這個 byte 本身；攻略站此時印的也是這個 byte，不是減 1。例：亞克（`04`）DX 為 2-2，攻略站印「02」；布蘭多（`08`）DX 3-3 印「03」；蓋亞（`09`）DX 0-0 印「00」。所以「一律減 1」是錯的。",
+   "unit": "assets__tables__characters"
+  },
+  {
+   "n": 1,
+   "kind": "imprecise",
+   "outside": "src 註解的呼叫端描述要改正為「11 個呼叫點：7 個傳職業碼 +1、3 個傳 0（0x11e90、0x13056、0x13436）、1 個（0x126f6，fdps_map_actor_move_toward_nearest_reachable_opponent）傳原值」：src/table.c 的 fdps_get_class_record 註解（「the eleven callers form as the unit's class code PLUS ONE」與「The two callers that want that default row」）、src/table.h 的 fdps_get_class_equip_record 註解（「the INC that every caller of fdps_get_class_record applies」）、src/spell.c 的 CLASS_RECORD_BIAS 註解（「Every caller of fdps_get_class_record in the image applies this bias」）、src/unititem.c 的 fdps_unit_can_equip_item 註解（「the INC that every caller of fdps_get_class_record applies」）與 src/unititem.h（「the +1 that callers of fdps_get_class_record apply」），把「每個呼叫端」改成「除了傳 0 取預設列的三個與漏 INC 的 0x126b0 以外的呼叫端」。",
+   "problem": "`0x18b70` 共 11 個呼叫點，不是全部傳「職業代碼 + 1」：7 個是 MOV AL,[+0x20]／INC EAX／PUSH；3 個直接 PUSH 0 取預設列——除了 `0x11e50`、`0x13040` 還有 `fdps_map_actor_score_best_spell`（`0x13420`，PUSH 0x0 在 `0x13436`）；另有 `fdps_map_actor_move_toward_nearest_reachable_opponent`（`0x126b0`）載入職業碼後沒有 INC 就 PUSH，拿到的是前一個職業的列（原版 bug）。rebuild_info/pitfalls.md 與 known_bugs.md 都把這個例外連回本頁，本頁卻完全沒寫。",
+   "unit": "assets__tables__classes"
+  },
+  {
+   "n": 2,
+   "kind": "wrong_fact",
+   "outside": "rebuild_info/pitfalls.md 第 79 行（PROEQU.DAT 變長集合那一列）的「用 `0x00` 當終止值會提早收手——`0x00` 本身就是一個活的物品類型碼」與資料不符：ITEM.DAT 的類型 0x00 只出現在 0xE2–0xFA 25 筆全零 record，PROEQU.DAT 36 筆也沒有任何一格是 0x00，以 0x00 終止對這 36 筆不會提早收手。應刪去這個理由，改寫為真正的偏差：因為空位全在尾端、且沒有物品類型是 0xFF 或出現在空位之後，任何終止判斷（0x00 或 0xFF）對職業 0x00–0x23 的 36 筆與全掃結果相同；只有越界的職業碼 0x24–0x27 讀到檔案後面的 byte 時，終止判斷才會與原版的六格全掃結果不同。",
+   "problem": "`ITEM.DAT` 251 筆裡類型 `0x00` 只出現在 `0xE2`–`0xFA` 這 25 筆整筆為零、沒有內容的 record；226 個有內容的物品類型都在 `0x01`–`0x2C`（assets/tables/items.md 亦如此寫）。所以 `0x00` 不是活的物品類型。能說的事實是：`0xFF` 不是任何物品 record 的類型值，而以 `0x00` 填空位會讓每個職業都准許那 25 筆全零 record。",
+   "unit": "assets__tables__classes"
+  },
+  {
+   "n": 2,
+   "kind": "imprecise",
+   "outside": "修正併入第 1 條改寫後的 edit（同一段相鄰表列），不另出 edit。",
+   "problem": "漏了 `00` 這個值的特殊意義：距離為 0 的法術（`0A` 裂地術、`0B` 封神裂震）不是「射程 0」，而是不讓玩家瞄準，直接以施法者所在格為中心、半徑取 `area` 掃一次，而且命中清單一律只留 side 0，不管 record 的 `target_side`。修正已併入第 1 條的 edit。",
+   "unit": "assets__tables__spells"
+  },
+  {
+   "n": 3,
+   "kind": "imprecise",
+   "outside": "修正併入第 1 條改寫後的 edit（同一段相鄰表列），不另出 edit。",
+   "problem": "`03` 的意義程式碼是確定的，不應只說「另有一個」：兩支目標收集函式與游標確認都把 select_mode 3 當成「只收 side 2」，也就是只限我方隊伍、不含 side 1 的友軍 NPC；`01` 則收所有非 0 的 side（我方隊伍與友軍 NPC）。全表只有 `16` 神行術用 `03`。修正已併入第 1 條的 edit。",
+   "unit": "assets__tables__spells"
+  },
+  {
+   "n": 2,
+   "kind": "other",
+   "outside": "src/chevt1.c 在 fdps_chapter_04_event_for_turn 前的註解（約第 670–675 行 \"Nothing bounds the five indices ... unless play has moved one of those units off mode 0.\"）應改為：這五個索引在 map03 的部署順序下落在波次 1 的 #3、#6、#7、#8、#9，出貨資料把它們寫成行為 2（原地），所以這次合併在出貨資料上確實把它們從 2 改成 0，不是空操作。",
+   "problem": "本頁這句是對的：MAP03.DAT 的記錄 #3、#6、#7、#8、#9 的 AI 行為 byte（+0x11）都是 2，第 5 回合事件改寫的單位索引 13、15–18 正是這五人。錯的是 src/chevt1.c 裡 `fdps_chapter_04_event_for_turn` 的註解，它說 map03.dat 把這五個單位都寫成行為 0、對出貨資料改寫不生效，與資料相反；rebuild_info/pitfalls.md 已警告這個註解會誘使人把這段當無效碼刪掉。本頁不需修改。",
+   "unit": "chapters__ch04"
+  },
+  {
+   "n": 3,
+   "kind": "imprecise",
+   "outside": "chapters/ch06.md 的 chapter_docs:dialogue 生成區塊在 `0x0c` 寫「畫的是 `FDETXT47` 的 0x0a 副本」，同樣把只差說話者的版本稱為副本；若要修正應改 tools/chapter_docs/ 產生該句的地方，不是本段手寫文字。",
+   "problem": "只有 `0x0b` 與 `FDETXT47` 的 `0x09` 逐字相同；`0x0c` 把「每個人的一生中……」那段的說話者寫成角色 1（法蓮娜），`FDETXT47` 的 `0x0a`（實際顯示的版本）寫成角色 6（尤利安），不是複本。`cut_content/story.md` 的總表也記為「只差控制碼（換行、換頁或說話者）」。",
+   "unit": "chapters__ch06"
+  },
+  {
+   "n": 2,
+   "kind": "broken_reference",
+   "outside": "program_info/known_bugs.md 第 23 條「現象」段：「已知會影響遊戲的有三處」改為四處，補一項「第 8 章牢籠下方留下的守衛（第 18 筆、單位 `0x0e`）若是毒死，`fdps_chapter_08_event_send_guest_mage_to_cells`（`0x37440`）不會被呼叫，費塔加不會自己走去開牢門，要由我方單位走上牢門格」，並在該段結尾的連結列加上 [`../chapters/ch08.md`](../chapters/ch08.md)。",
+   "problem": "「中毒致死不執行死亡腳本」的擁有者是 `program_info/known_bugs.md` 第 23 條（成因、流程與重建規則都在那裡）；第 6 章只是另一個受影響的章節，連到它等於引用轉述。應改連擁有者。",
+   "unit": "chapters__ch08"
+  },
+  {
+   "n": 3,
+   "kind": "other",
+   "outside": "src/chpost1.c 的 CH08_GUEST_MAGE_UNIT_INDEX 註解把「fdps_chapter_08_event_send_guest_mage_to_cells (chevt2.h) is what deploys him」改為由第 3 回合 fdps_chapter_08_event_for_turn（0x372d0）播放的 Icon7-1.dat 以 DEPLOY_WAVE 部署波次 1；src/chinit1.c 的 fdps_chapter_08_init 註解把「the plate comment at 00037440 is the chapter's own scripted event that brings him on later」改指 0x372d0 第 3 回合的 Icon7-1.dat（Ghidra 0x21070 的 plate 說法正確，不需修改）。CH08_TURN_PLACE_EXACT 不改名。",
+   "problem": "頁面這句是對的（部署費塔加的是第 3 回合 `ICON7-1.DAT` 的 DEPLOY_WAVE），但 src 註解有兩處把部署者寫成 `fdps_chapter_08_event_send_guest_mage_to_cells`（`0x37440`），那支其實只改 AI 行為；另外 `src/chevt2.c` 的 `CH08_TURN_PLACE_EXACT` 值為 0，實際意義是「找最近空格」，名字與本頁第 247–248 行（正確）的說法相反。",
+   "unit": "chapters__ch08"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "src/chinit1.c 的 fdps_chapter_09_init 註解段「CHAPTER 9 IS THE FIRST CHAPTER WHERE THE ADD-BEFORE-REBUILD ORDER IS OBSERVABLE」說在 rebuild 之前加入才看得見，應改為：本章可觀察的約束是加入須在 fdps_icon_script_run 之前，因為 ICON08.DAT 偏移 0x1a5 的 SWITCH_MAP 0x08 會再呼叫 fdps_chapter_state_reset 依名冊重建地圖 8，第三個呼叫建出的陣列在第一個 SWITCH_MAP（0x36）就被丟棄。",
+   "problem": "本章的開場過場 ICON08.DAT 第一個 SWITCH_MAP（→54）就把這一步建出的單位陣列丟掉，最後的 SWITCH_MAP 0x08（腳本偏移 0x1a5）又呼叫 fdps_chapter_state_reset 依名冊重建地圖 8；戰場上真正使用的是那一次重建。所以兩次加入即使移到第 3 步之後、第 4 步之前，slot 6、7 仍是布蘭多與蓋亞；只有移到開場過場之後才會變成退場的空位。正確的約束是「加入必須在開場過場之前」，這一步建出的陣列在本章不留到戰場。",
+   "unit": "chapters__ch09"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "同頁「加入與離隊」段：「她的起始格 (11, 5) 只在開場過場的前半有意義，過場結束時她被重新放到 (11, 9)。」改成「她的起始格 (11, 5) 只在開場過場的前半有意義：過場後半她被重新放到 (11, 9)，再往下走 2 格，戰鬥開始時站在 (11, 11)。」",
+   "problem": "開場過場 `ICON10.DAT` 在 `0x021` 與 `0x037` 各讓 u0–u7 往上走 4 格，共 8 格，所以玩家接手時隊伍不在最下方，而在 (10–12, 13–15)；琴琴在 `0x06a` 被放到 (11, 9) 後，`0x074` 又往下走 2 格，戰鬥開始時站在 (11, 11)，就在隊伍正上方。WALK_UNITS 會真的改單位座標。",
+   "unit": "chapters__ch11"
+  },
+  {
+   "n": 3,
+   "kind": "wrong_fact",
+   "outside": "同一行後半「第 7 回合結束時的波次 4 是 16 隻狼人」也要改成「第 7 回合敵方階段開始前出場的波次 4 是 16 隻狼人」（一條 finding 只能帶一個 edit，請落地時一併處理）。",
+   "problem": "同第 2 條：波次 5、4 分別在第 4、7 回合敵方階段開始前出場，不是回合結束時。",
+   "unit": "chapters__ch11"
+  },
+  {
+   "n": 1,
+   "kind": "wrong_fact",
+   "outside": "同樣的錯也在：program_info/cutscene.md 第 32 行「少了那一次，砲座第一個玩家回合會停擺」；rebuild_info/pitfalls.md 第 47 行「刪掉第 15 章那次會讓腳本裡行動過的單位在第一個玩家回合停擺」；src/chinit1b.c 的 fdps_chapter_15_init 註解「the fortress cannon would sit out the first player phase」。都應改成：第一個玩家階段砲座畫成已行動、存檔反灰，敵方階段照常行動。",
+   "problem": "少了 fdps_chapter_15_init 的那次清除，砲座並不會「第一回合不會動」：敵方階段開始前 fdps_battle_advance_turn（0x1e3f0）一定先呼叫 fdps_units_clear_status_bit7，再進 fdps_battle_enemy_turn_phase，這是敵方階段唯一的入口，所以砲座照樣在第一個敵方階段開火。真正的差別只在第一個玩家階段：砲座帶著 bit 7，地圖上畫成已行動的影格，戰鬥選單的存檔也會反灰（任何未退場且已行動的單位都讓存檔反灰）。第 202 行的「讓在過場裡行動過的砲座第一回合照常行動」是同一個錯。",
+   "unit": "chapters__ch15"
+  },
+  {
+   "n": 4,
+   "kind": "other",
+   "outside": "只改 src/chevt3.c 第 633–635 行 fdps_chapter_16_event_enemies_advance_for_turn 的註解（Ghidra 0x38020 的 plate 已是正確的逐波次說法，不需更動）：map15.dat 的敵兵不是依記錄順序排在 0x0a..0x22，而是 fdps_build_map_unit_array 先部署波次 0 的 13 筆（記錄 0–8、15–18）在 0x0a..0x16，再由 ICON15.DAT 依序部署的波次 1（記錄 9–10）在 0x17..0x18、波次 2（記錄 11–14）在 0x19..0x1c、波次 3（記錄 19–22）在 0x1d..0x20、波次 4（記錄 23–24）在 0x21..0x22；所以第 5 回合那段是波次 2、3、4 全部，另一段是波次 0 全部、波次 1 與波次 2 的第一名（索引 0x19 兩段重疊）。把「unit index = deployment record index + 10 and the two ranges are records 15..24 and 0..15」整句換成上述排列。",
+   "problem": "頁面正確：fdps_deploy_unit 每次把單位接在陣列尾端，進場時 fdps_deploy_wave 只部署波次 0（記錄 0–8、15–18 → 單位 10–22），其餘波次依 ICON15 的 DEPLOY_WAVE 順序接在 23–34，所以 0x19–0x22 是波次 2、3、4，0x0a–0x19 是波次 0 全部、波次 1 與波次 2 第一名。但 src/chevt3.c 的 fdps_chapter_16_event_enemies_advance_for_turn 註解寫「unit index = deployment record index + 10 and the two ranges are records 15..24 and 0..15」，與實際排列矛盾。",
+   "unit": "chapters__ch16"
+  },
+  {
+   "n": 2,
+   "kind": "imprecise",
+   "outside": "同一句不完整的差異說明也在生成區塊 chapters/ch20.md 的「對話」0x0c 條目，來源是 tools/chapter_docs/judgements/ch20.json 第 29 行的 why：應改為列出「做抉擇／作抉擇」「怎麼做／怎麼作」「我不想／我已經不想」三處用字差異與斷行換頁差異，再重生區塊。",
+   "problem": "差異不只「做抉擇／作抉擇」與斷行換頁：蘭迪斯最後那段的字句也不同。FDETXT20 的 0x0c 是「告訴我怎麼做，好嗎？{br}我不想再失去，{br}身邊最親愛的人了！{page}」，實際顯示的 FDETXT59 0x0c 是「告訴我怎麼作，{br}好嗎？{page}我已經不想再失去，{br}身邊最親愛的人了！{br}」——另有「怎麼做／怎麼作」「我不想／我已經不想」兩處用字差異。0x09–0x0b、0x0d 兩區塊逐字相同。",
+   "unit": "chapters__ch20"
+  },
+  {
+   "n": 4,
+   "kind": "imprecise",
+   "outside": "program_info/known_bugs.md 第 23 條「已知會影響遊戲的有三處」要改寫並補上兩處：第 22 章巫湯婆婆與第 23 章死神若是毒死，fdps_chapter_22_event_boss_defeat（0x388b0）／fdps_chapter_23_event_boss_defeat（0x38950）不執行，而這兩章的行動後處理只判敗北、過關只由這兩個死亡腳本寫入，這一局就無法過關（連回 chapters/ch22.md、chapters/ch23.md）。chapters/ch22.md 的「勝利只來自巫湯婆婆的死亡事件」一條也應補上同樣的例外。",
+   "problem": "死亡腳本只在攻擊交戰與施法之後收集執行；陣營階段開始時的中毒扣血（每次扣最大 HP 的 1/10）把單位打死時不收集死亡腳本。死神是職業 `20` 妖魔、肖像 `48`，不在異常免疫之列，可以被腐毒術毒死；毒死時結束碼 2 不會寫入，本章又沒有其他過關路徑，這一局就無法過關。頁面只寫「被擊倒時」，漏了這個會讓本章卡死的例外（原版 bug 第 23 條的成因）。",
+   "unit": "chapters__ch23"
+  },
+  {
+   "n": 5,
+   "kind": "other",
+   "outside": "src/chevt6.c:673-689 的註解改成 0x55 是白骨戰士、0x6a 是死靈；巨集改名為 CH30_REVIVE_SKELETON_CHAR_ID 0x55、CH30_REVIVE_WRAITH_CHAR_ID 0x6a，錨點巨集 CH30_REVIVE_SKELETON_ANCHOR_X/Y 為 (5, 12)、CH30_REVIVE_WRAITH_ANCHOR_X/Y 為 (15, 13)，並同步改 chevt6.c:817-842 的使用處（行為不變）；src/chevt6.h:288 與 302 改成 白骨戰士 (0x55)、(5, 12) 屬白骨戰士、(15, 13) 屬死靈；src/chevt6.c:348-350 改成 LV20 白骨戰士 x2（0x55）與 LV20 死靈 x2（0x6a）的順序。",
+   "problem": "頁面正確（全域文字 0x056 是白骨戰士、0x06b 是死靈，enemies.md 同）；但 src/chevt6.c 與 src/chevt6.h 的註解與巨集名把兩者寫反（把 0x55 叫 死靈／WRAITH、0x6a 叫 白骨戰士／SKELETON），與本頁及 chinit2b.c 的註解（死靈 106、白骨戰士 85）矛盾。",
+   "unit": "chapters__ch30"
+  }
+ ],
+ "cross_doc": [
+  {
+   "other_doc": "resource_info/text.md",
+   "anchor": "FDETXTnn.TXT 的檔名編號",
+   "note": "text.md:22 寫「檔名的編號是章節索引加 1，也就是玩家看到的章號」；實際加 1 的對象是 data_fdps_chapter_current_chapter_id，過場切到地圖 31 以上時它是地圖編號，所以精確說法是「地圖編號加 1」（scene_text.md:3 與 chapters/_index.md:190 這樣寫）。text.md 只講章節那段不算錯，但少了過場地圖的情形。",
+   "unit": "CONTEXT"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "pool 的適用對象",
+   "note": "code_pools.md 以 function 為對象、表列 binary_artifact 0 個 function；rebuild_info/naming.md:63 寫「每個符號」歸四個 pool。CONTEXT 原寫「每個 function」，與 naming.md 不一致，已在 finding 4 改為符號。",
+   "unit": "CONTEXT"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdetxt%02d.txt 加 1 的位址",
+   "note": "pitfalls.md:213 把 INC EAX 記在 `fdps_load_field_chapter_resources` 的 `00031563`..`00031568`，那是村莊載入端；戰場載入端 `fdps_field_load_chapter_resources`（`0x227e0`）的 INC 在 `0x2286e`（src/rsrc.c:267）。兩個函式名只差語序，建議該列兩處都寫出，免得讀者找錯函式。",
+   "unit": "CONTEXT"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "覆核推翻的 pool 歸屬數",
+   "note": "同一頁「三種會判錯 pool 的判準」寫覆核推翻了 22 個，「要還原成 C 的清單」寫「覆核推翻的 21 筆」，兩處不一致，需由該頁的驗證者查明。",
+   "unit": "program_info___index"
+  },
+  {
+   "other_doc": "program_info/data_structures.md",
+   "anchor": "初始化資料與 BSS 的分界（_edata 0x63930）",
+   "note": "索引把此分界歸給 memory_layout.md（該頁也宣稱初始化邊界為唯一正典），但 data_structures.md 另有「資料段與未初始化段的分界」一節；內容一致（最後非零 byte 0x6392a 在 _edata 0x63930 之下），只是兩頁都在講，擁有權可再收斂。",
+   "unit": "program_info___index"
+  },
+  {
+   "other_doc": "program_info/village.md",
+   "anchor": "0x39e70 陣亡者復活",
+   "note": "village.md 明說教會沒有復活指令、復活屬 chapter.md；本索引村莊列原寫「教會的轉職與復活」，與之矛盾，village.md 正確。",
+   "unit": "program_info___index"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "pool_fdps 的 calling convention 統計",
+   "note": "build_flags.md 同樣寫 __cdecl 503、__watcall 11 且 11 個是手寫組語；Ghidra 快照是 505／9，9 個全是無參數的 C function。兩頁都錯，build_flags.md 是擁有者。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "514 個 fdps function 的定案狀態與子系統分佈",
+   "note": "code_pools.md 第 193 行說參數全部語意化、子系統分佈見 architecture.md；但 Ghidra 仍有 param1（0x304e0）、arg6（0x568db），architecture.md 的分佈表也無法重現。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "other_doc": "program_info/chapter.md",
+   "anchor": "0x22750",
+   "note": "chapter.md 第 3 行稱 0x22750 為「章節進入的共用尾巴」；它在進入處理函式中段被呼叫，另有展示關與過場腳本兩個呼叫端，應稱章節狀態重置。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "00043310／_cstart_",
+   "note": "code_pools.md 說「00043310 的 body 一路吃到 _cstart_ 之後的收尾段」，Ghidra 的 _cstart_ 在 00043298（JMP），00043310 是 L$1_cstrt386_start_body；architecture.md 原本把 _cstart_ 放在 00043310，已在本頁修正。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "other_doc": "program_info/movement.md",
+   "anchor": "移動網格旗標 0x40",
+   "note": "movement.md：對立單位站在這格、不能進入；architecture.md：有單位佔據。movement.md 較精確，本頁改為連結。",
+   "unit": "program_info__architecture"
+  },
+  {
+   "other_doc": "src/unitatk.c",
+   "anchor": "肖像編號 > 10 的經驗除數 +30（LAST_PERMANENT_ROSTER_PORTRAIT_ID）",
+   "note": "unitatk.c 的註解說肖像編號 0..10 是「十一名常駐角色」、>10 是蘭斯洛特與所有客串／NPC 單位；combat.c 與本頁說 >10 涵蓋 0x0b 蘭斯洛特與所有轉職形態（0x0f 起），並指出 10 這條界線不是名冊與其他人的分界（assets/characters.md 的 12 名角色是 00..0b）。兩者對數值的判定一致，但 unitatk.c 對界線意義的說法與 combat.c、本頁不同，較可信的是 combat.c 的說法。",
+   "unit": "program_info__battle__1"
+  },
+  {
+   "other_doc": "program_info/map_ai.md",
+   "anchor": "fdps_unit_mark_retired 0x138f0",
+   "note": "map_ai.md 的行為 7 表列寫「退場（`fdps_unit_mark_retired`（`0x138f0`）把旗標 byte 整個寫成 1）」，讀起來像原版有呼叫；battle.md 說原版沒有任何呼叫者。Ghidra get_xrefs_to 0x138f0 無引用，原版是 0x1049b..0x104b8 內嵌，battle.md 對；map_ai.md 應改為「以與 fdps_unit_mark_retired 相同的整 byte 指派內嵌」。",
+   "unit": "program_info__battle__2"
+  },
+  {
+   "other_doc": "program_info/cutscene.md",
+   "anchor": "過場 opcode 0x0B / 0x0C 對 +5 的寫法",
+   "note": "cutscene.md 寫 0x0B 為 `|= 1`、0x0C 為 `&= 0xFE`（正確，0x21b11）；battle.md 326 行原本說過場腳本以整 byte 指派讓單位離場，已在 finding 1 修正。",
+   "unit": "program_info__battle__2"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "INT 2Fh",
+   "note": "pitfalls 第 99 行說 CD 命令的 INT 2Fh 不是指令、全是 DPMI 0300h 的資料；實際上安裝檢查 0x3c636 走 int386(0x2f)，CRT stub 表 0x4e3b3 有真的 INT 2Fh，只有 AX=1510h 走 DPMI 0300h。pitfalls 錯。",
+   "unit": "program_info__cd_audio"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "spawnv",
+   "note": "pitfalls 第 283 行寫 spawnv；Ghidra 0x435a2 與 src/title.c 是 spawnlp。pitfalls 錯。",
+   "unit": "program_info__cd_audio"
+  },
+  {
+   "other_doc": "program_info/cutscene.md",
+   "anchor": "fdps_cd_set_music_track 0x30bf0",
+   "note": "cutscene.md 說腳本 0x07 把 0xFF 改成 -1 後交給 0x30bf0，與本頁（修正後）0-based 音樂索引、+1 為音軌的說法一致。",
+   "unit": "program_info__cd_audio"
+  },
+  {
+   "other_doc": "program_info/memory_layout.md",
+   "anchor": "0x601c4 的呼叫點",
+   "note": "memory_layout.md 的函式指標表只列 `0x188d8`、`0x1dcae`、`0x2e140` 三個呼叫端；本頁列 8 個並說明其餘 5 個（`0x12a33`、`0x12aea`、`0x12bd6`、`0x14d28`、`0x15839`）沒有資料參照。Ghidra search_instructions 找到 8 個 `CALL dword ptr [reg + 0x601c4]`，本頁對、memory_layout.md 漏了 5 個。",
+   "unit": "program_info__chapter__1"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "0x60074 進入處理函式與 0x22750",
+   "note": "architecture.md 說 entry stub「每一個都以同一條重置尾巴 `00022750` 結束」；實際上 `fdps_chapter_state_reset` 是在第 1 或第 2 步呼叫（第 24 章是第 1 步），之後還有過場、標題卡與游標，本頁的五步骨架才對。architecture.md 的 `0x60074`、`0x6028c`、`0x60304` 呼叫點與本頁一致。",
+   "unit": "program_info__chapter__1"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "main 頂層迴圈與結束碼 0x69da0",
+   "note": "本頁「一章的流程」以表格重述 main 迴圈與結束碼 0／1／2 的分派，architecture.md「頂層迴圈的形狀」以程式碼區塊重述同一件事；兩邊內容一致（src/main.c:665–679 驗過），但本頁第 3 行自稱迴圈形狀由 architecture.md 擁有，同一事實有兩份。另 architecture.md 說 main「沒有 return 敘述」，src/main.c:688 寫的是 `return printf(...)`，效果相同（EAX 是 printf 的回傳值）。",
+   "unit": "program_info__chapter__1"
+  },
+  {
+   "other_doc": "program_info/memory_layout.md",
+   "anchor": "0x5285c–0x54823 混音模組鎖頁",
+   "note": "兩邊一致；memory_layout.md 第 123 行與本頁第 85 行都說整段 0x5285c–0x54823 被鎖頁，與 0x54823 的兩次 lock_region 呼叫相符。另一次呼叫鎖的是資料區 0x614f8–0x61518，本頁第 75 行寫成 0x61500–0x61518（已提修正）。",
+   "unit": "program_info__code_pools__1"
+  },
+  {
+   "other_doc": "rebuild_info/ail_link.md",
+   "anchor": "0003cb6e／0003cb93／0003cbaa",
+   "note": "ail_link.md 把這三支列為 src/dpmi.c 的 fdps_dpmi_*（遊戲側）；本頁第 133 行仍說它們「留在 ail」，第 131 行的 16 個／3,894 byte 也把它們算進 ail。ail_link.md 與 Ghidra 標籤正確。",
+   "unit": "program_info__code_pools__1"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "fdps 181,661 byte / 合計 282,043",
+   "note": "同頁第 11、15 行（另一個 unit）仍是 181,661 與 282,043；快照現值 181,778 與 282,160。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "遊戲本體 514 個的 calling convention",
+   "note": "build_flags.md 說 `__cdecl` 503、`__watcall` 11 且 11 個全是組語；ghidra_snapshot/functions.txt 現在是 `__cdecl` 505、`__watcall` 9，RLE kernel 已改記成 `__cdecl`。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "前向短跳後的 NOP 填充",
+   "note": "pitfalls 說「原版手寫組語每個前向短跳後面都有 NOP 填充」；鍵盤與存檔組語（例 `000567cd`、`0005685d`）沒有，只有 RLE 15 支有。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "fdps_blit_dispatch 000568db 與 13 個 kernel",
+   "note": "architecture.md「尚未確定的事」寫 dispatcher 與 kernel 兩端一起寫成 C 即為功能等價，未提重建保留原版組語；本頁說功能等價但為了速度保留組語。兩者不矛盾，但 architecture.md 容易被讀成重建採 C。",
+   "unit": "program_info__code_pools__2"
+  },
+  {
+   "other_doc": "chapters/ch15.md",
+   "anchor": "fdps_chapter_15_init（0x21240）的 fdps_units_clear_status_bit7",
+   "note": "ch15.md 第 58 行說少了這次清除「砲座第一回合不會動」、第 202 行說它讓砲座「第一回合照常行動」；兩處與本頁原文同樣錯。砲座是陣營 0，敵方階段前 fdps_battle_advance_turn 本來就會清 bit 7，少了這次只影響第 1 回合我方／友軍階段的畫法。",
+   "unit": "program_info__cutscene"
+  },
+  {
+   "other_doc": "tools/global_data/_index.md",
+   "anchor": "字串字面值數",
+   "note": "本頁說 346 個字串字面值不在清單上（與匯出 globals.json 的 strings=346 相符）；工具索引說 415 個字串帶 s_ 標籤，快照 data.txt 目前是 348 個 s_ 資料項。工具索引的 415 應改正。",
+   "unit": "program_info__data_structures"
+  },
+  {
+   "other_doc": "tools/global_data/_index.md",
+   "anchor": "anchor 總數",
+   "note": "工具索引說「1,100 多個 anchor」，本頁與判定檔都是 1,040 個（另有 346 個字串，合計匯出 1,386 項）。",
+   "unit": "program_info__data_structures"
+  },
+  {
+   "other_doc": "program_info/memory_layout.md",
+   "anchor": "0x70000–0x70021",
+   "note": "memory_layout 把鍵盤 ISR 狀態寫成 0x70000–0x70021、RLE scratch 從 0x70022 起，正確；本頁原寫 0x70024。",
+   "unit": "program_info__data_structures"
+  },
+  {
+   "other_doc": "resource_info/save.md",
+   "anchor": "fdps_unit_record 欄位語意",
+   "note": "save.md 說欄位語意見 program_info/data_structures.md，但本頁只列記錄大小與位址，欄位語意在 Ghidra 的欄位註解（ghidra_snapshot/data_types.txt）；save.md 的連結指向不到它要的東西。",
+   "unit": "program_info__data_structures"
+  },
+  {
+   "other_doc": "src/text.c",
+   "anchor": "-6 數字碼的 '-' → 字模索引 -3",
+   "note": "本頁與 rebuild_info/pitfalls.md 都說讀到字模表前 0x60 byte（正確，跨距 32）；src/text.c 註解寫 six bytes（錯）。",
+   "unit": "program_info__dialog"
+  },
+  {
+   "other_doc": "chapters/ch24.md",
+   "anchor": "0x52 / 第 24 章決鬥自動認輸的回合界線",
+   "note": "ch24.md 說第 15 回合波次 5 出場之前過關都讀到陣列之外、即攻略站的自動認輸；known_bugs.md 第 13 條現象用攻略站的「第 7 回合之前」。兩者範圍不同，需實機確認第 7–14 回合的結果。",
+   "unit": "program_info__known_bugs__1"
+  },
+  {
+   "other_doc": "program_info/map_ai.md",
+   "anchor": "神聖之水 26 名敵人／4 名 NPC",
+   "note": "map_ai.md 與本頁第 5 條一致：MAP23 波次 4 的 26 名敵人、MAP25 波次 3 的 4 名 NPC（以 ITEM.DAT C2 掃部署記錄 +5..+0xc 重算相符）。",
+   "unit": "program_info__known_bugs__1"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdps_check_secret_code_key 表外那一列",
+   "note": "本頁第 19 條以 0 起算寫「章節索引 25 取到第 24 列」（與「第『章節索引 − 1』列」一致）；pitfalls.md 村莊暗號表那一列以 1 起算寫「取到的第 25 列」。兩邊指的是同一列 codes[24]，只是起算不同，建議統一寫成 codes[24] 或註明起算。",
+   "unit": "program_info__known_bugs__2"
+  },
+  {
+   "other_doc": "chapters/ch12.md",
+   "anchor": "第 16 章流浪工匠／流浪鐵匠",
+   "note": "ch12.md 與本頁寫「流浪鐵匠」，ch16.md、chapters/_index.md、cut_content 與 pitfalls.md 寫「流浪工匠」。",
+   "unit": "program_info__known_bugs__2"
+  },
+  {
+   "other_doc": "cut_content/_index.md",
+   "anchor": "U09 FIGHT.VFS 缺的 STAND",
+   "note": "U09 列的缺檔含 STAND014、036–039（正是本頁第 21 條的當機單位），本頁說「另外缺的 STAND」才歸 U09；兩邊內容一致（U09 也寫明 0E 與 24–27 是潛在當機並連回第 21 條），只是 U09 的清單包含第 21 條的那幾個。FIGHT.VFS 實際缺 13、14、34、36–58、117、120–127 與 128 以上；34、40–58 等沒有部署，不影響結論。",
+   "unit": "program_info__known_bugs__2"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 5 條神聖之水：「沒有更高分的法術」",
+   "note": "known_bugs 第 5 條與本頁同樣寫「更高分的法術」才擋住神聖之水；實際上同分法術（S >= I）也會擋住，兩邊都要改。其餘（26 名敵人、4 名 NPC、對象 byte 反轉）一致。",
+   "unit": "program_info__map_ai__1"
+  },
+  {
+   "other_doc": "program_info/chapter.md",
+   "anchor": "fdps_chapter_30_revive_wave_4_undead（0x10760）",
+   "note": "chapter.md 只有一句提及；復活規則的擁有者是 chapters/ch30.md，本頁連結指錯頁。",
+   "unit": "program_info__map_ai__1"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 9 條 光束道具軌跡夾限（0x27180）",
+   "note": "兩頁都完整寫了夾限讀 MPL magic、網格寫入越界的機制，內容一致；known_bugs 是成因正典，本頁應縮成一句與連結（finding 1）。",
+   "unit": "program_info__map_ai__2"
+  },
+  {
+   "other_doc": "program_info/battle.md",
+   "anchor": "fdps_collect_death_script_events（0x274e0）只收 opcode 2..5",
+   "note": "battle.md 的死亡腳本表寫 AI 施法只收 opcode 2..5、不付款、擊殺者是 AI 攻擊評分留下的目標索引；本頁與之一致但沒提 opcode 過濾（finding 2）。",
+   "unit": "program_info__map_ai__2"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "_BSS 歸零（0x434cc）",
+   "note": "architecture.md 說 DPMI 路徑下 BSS 歸零只清 0x1000 byte、其餘由載入器補零；本頁原寫整段由 CRT 歸零。Ghidra 0x434da–0x434eb 支持 architecture.md。",
+   "unit": "program_info__memory_layout"
+  },
+  {
+   "other_doc": "program_info/data_structures.md",
+   "anchor": "鍵盤 ISR 狀態區範圍",
+   "note": "data_structures.md 寫 0x70000–0x70024，本頁寫 0x70000–0x70021；0x70022 是 data_fdps_graphics_rle_blit_remaining_rows，本頁的 0x70021 正確，data_structures.md 的上界錯。",
+   "unit": "program_info__memory_layout"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "0x43298 / 0x43310 的名稱",
+   "note": "architecture.md 把 00043298 叫 `_entry`、00043310 叫 `_cstart_`；ghidra_snapshot/functions.txt 與 rebuild_info/build_flags.md 把 00043298 叫 `_cstart_`、00043310 叫 `L$1_cstrt386_start_body`。",
+   "unit": "program_info__memory_layout"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "具名 const 物件與區域陣列初值影像放在 object 1",
+   "note": "build_flags.md 的 -mf 列與本頁第 15 行說法一致（字串字面值與浮點常數在 object 2），兩處都有，擁有者應只一處。",
+   "unit": "program_info__memory_layout"
+  },
+  {
+   "other_doc": "program_info/spell.md",
+   "anchor": "fdps_collect_targets_in_range 0x11e50",
+   "note": "spell.md 說擴散形射程「帶不可通行旗標的格會擋住擴散」；實際呼叫時網格已 reset、不帶 0x40，第 0 列也沒有不可通行的地形，射程是地圖邊界內的曼哈頓菱形，spell.md 不對。",
+   "unit": "program_info__movement"
+  },
+  {
+   "other_doc": "resource_info/map.md",
+   "anchor": "地圖尺寸 33×39（M15）/ 26×56（M32）",
+   "note": "map.md 的統計表列出 M15 33×39、M32 26×56；movement.md 寫「最大 33 × 25／825 格」與它矛盾，map.md 對（map_decode report 重跑相符）。",
+   "unit": "program_info__movement"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdps_chapter_01_end / 業火",
+   "note": "pitfalls 第 177 行記載第 1 章結束給蘭迪斯業火是唯一途徑；spell.md 的學會途徑未提，兩邊不一致，以 pitfalls（與 src/chend1.c）為準。",
+   "unit": "program_info__spell__1"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "`00` 蘭迪斯的法術遮罩",
+   "note": "characters.md 說蘭迪斯出場遮罩是空的、攻略站把業火列為初始法術；實際的來源是第 1 章結束處理，spell.md 應提及。",
+   "unit": "program_info__spell__1"
+  },
+  {
+   "other_doc": "program_info/battle.md",
+   "anchor": "fdps_unit_recompute_combat_stats (0x24d70)",
+   "note": "spell.md 第 3 行宣告自己是 0x24d70 的唯一正典，並在「裝備」一節寫出完整公式；battle.md「狀態計時器：效果、持續與解除」又寫了一份同樣的偽碼與三條說明（16-bit 截斷、0x3FF2666666666666、乘在總和上）。兩邊內容一致、查過都對，但 battle.md 那段是重複，應縮成一句並連到 spell.md。",
+   "unit": "program_info__spell__2"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "1.15 double 乘法那一列",
+   "note": "該列的正典連結指向 program_info/battle.md，但依 spell.md 的擁有宣告，fdps_unit_recompute_combat_stats 的正典是 program_info/spell.md，連結應改指 spell.md。",
+   "unit": "program_info__spell__2"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdps_check_secret_code_key 0x357a0 章節索引 25 的表外落點",
+   "note": "pitfalls 第 41 行說前 4 byte 是還沒寫入的回傳值槽、後 4 byte 是存起來的 EBP、兩半都是看板框架位址，與本頁一致；Ghidra 0x357a0 的 [EAX*8+EBP-0xcc] 與 _nfree／fdps_vfs_load_entry 的 push ebp 深度核對成立。",
+   "unit": "program_info__village__1"
+  },
+  {
+   "other_doc": "src/savepnl.c",
+   "anchor": "sprite 快取重建 fdps_saveload_screen_build 0x24830",
+   "note": "src 註解明說存讀檔畫面結尾依名冊重建快取；本頁第 33 行說轉職後同一次村莊階段不會重建，與 src 衝突，src 對。",
+   "unit": "program_info__village__1"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "fdps_church_promote_loop（0x345a0）的候選、路線選擇、徽章消耗與轉職加值",
+   "note": "assets/characters.md「轉職路線 RANKUP.DAT」節末四個條列（誰能轉職、走哪一條、徽章何時用掉、轉職的加值）重述了本頁擁有的教會程式行為；內容與本頁一致（查過 src/church.c），但那邊應縮成一句連到 program_info/village.md 的「教會：轉職」。",
+   "unit": "program_info__village__2"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "FRILEVUP.DAT 成長範圍的上限（例：0F 劍聖 AP）",
+   "note": "本頁與 assets/tables/characters.md 說 *_max byte 比攻略站印的上限多 1（FRILEVUP.DAT 0F 列 AP 為 06 09，攻略站 list 頁印 06-08，相符）；assets/characters.md 的成長表印 6-9，是直接列原始 byte，表頭沒說明是 byte 還是實際範圍，讀者容易當成攻略站的範圍。",
+   "unit": "program_info__village__2"
+  },
+  {
+   "other_doc": "chapters/ch30.md",
+   "anchor": "ICON29.DAT 0xB78 SWITCH_MAP",
+   "note": "ch30.md 寫 ICON29 在 0xB78 以 SWITCH_MAP 切到同一張地圖 29、重設戰場；本頁對照表 ICON29 的切換欄寫「—」。ch30.md 與解碼器輸出一致，本頁錯。",
+   "unit": "resource_info__cutscene_script"
+  },
+  {
+   "other_doc": "src/btlend.c",
+   "anchor": "fdps_load_data_tables (0x18930)",
+   "note": "本頁說 0x18930 一次把九張表讀進記憶體（屬實，main.c 的啟動流程呼叫一次）；btlend.c 的 fdps_battle_show_win_fail_window 每次開啟勝敗面板也會再呼叫一次並洩漏舊的九塊，本頁未提但不構成錯誤，事實由 src 與 pitfalls 擁有。",
+   "unit": "resource_info__data_tables"
+  },
+  {
+   "other_doc": "program_info/cd_audio.md",
+   "anchor": "spawnlp 0x435a2 / fdps_play_movie 0x30f40",
+   "note": "cd_audio.md 第 11 行說只負責 `spawnv` 呼叫、第 99 行寫 `spawnv(P_WAIT, path, argv)`；src/title.c:145 與 Ghidra 都是 spawnlp（0x435a2），唯一呼叫點 0x30fea。cd_audio.md 錯。",
+   "unit": "resource_info__disc_images"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "影片播放不在重建範圍（spawnv）",
+   "note": "pitfalls 那一列寫 `FDPS.LE` 只負責 `spawnv`，實際是 spawnlp；應改正。",
+   "unit": "resource_info__disc_images"
+  },
+  {
+   "other_doc": "src/gamedata.h",
+   "anchor": "data_fdps_map_cell_event_triggered_flags（0x640d8）的寫入者",
+   "note": "gamedata.h 的註解說寫入者「each set one entry to 1」並列入過場腳本（00021c8f），但 src/icon.c:1072 的 SCRIPT_OP_TRIGGER_CELL_EVENT 寫的是腳本運算元 script[offset+2]，不一定是 1；本頁寫「寫任意值」才對。gamedata.h 同一段也漏列各章借用 0x10／0x11 的一次性旗標寫入者（只提第 30 章第 4 波）。",
+   "unit": "resource_info__map"
+  },
+  {
+   "other_doc": "tools/saf_decode/saf_decode.py",
+   "anchor": "frame +0x04 的讀取者",
+   "note": "工具 docstring 說 0x04／0x05 的讀取者只有 0x196d0 與 0x18d60，漏了法術演出 0x1a4c0（兩者都讀）與片尾名單 0x1ba40（讀 0x04 不用）；以 src 與 Ghidra xref 為準。",
+   "unit": "resource_info__saf__1"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "格子繪製的四邊界全部嚴格，不合格的格子整塊丟掉",
+   "note": "pitfalls 第 72 列說格子整塊丟掉、不裁切，與 src/sprite.c 一致；saf.md 原本寫「由繪製器裁掉」，已在 finding 5 修正。",
+   "unit": "resource_info__saf__1"
+  },
+  {
+   "other_doc": "program_info/save.md",
+   "anchor": "標題選單讀檔／繼續的解鎖條件、兩條寫入路徑的初始映像、slot 戳記蓋在 roster 尾端",
+   "note": "兩邊說法一致（program_info/save.md 講流程，本頁講格式），未發現矛盾。本頁「由此而來的外顯行為」兩條與 program_info/save.md、known_bugs.md 重疊但篇幅短並指向格式事實，未列為違規。",
+   "unit": "resource_info__save"
+  },
+  {
+   "other_doc": "cut_content/code.md",
+   "anchor": "第 4 個 slot（+0x4FA3）",
+   "note": "C8 條目說第 4 格是 FD2 佈局遺留、只有 0x1514b 以欄位定址它，與本頁一致。",
+   "unit": "resource_info__save"
+  },
+  {
+   "other_doc": "resource_info/map.md",
+   "anchor": "MAPnn.DAT 最大 0x8a3",
+   "note": "map.md 說最大檔是 0x83 + 0x1a × 80 = 0x8a3；實測 workspace/vfs_dump 內 MAP28.DAT 等 5 份為 2211 byte，最小 MAP41.DAT 157 byte，一致。",
+   "unit": "resource_info__save"
+  },
+  {
+   "other_doc": "program_info/movement.md",
+   "anchor": "地形類別 5 的名稱",
+   "note": "movement.md 引用攻略站把類別 5 稱作「無法行走但可飛行的區域」並說與表相符；本頁說除草地外其他類別名稱沒有可靠來源。攻略站確有 M1、M2、M6、M7 的名稱且與資料相符，movement.md 對。",
+   "unit": "resource_info__terrain"
+  },
+  {
+   "other_doc": "cut_content/story.md",
+   "anchor": "地圖 33 的載入失敗點",
+   "note": "story.md S2 說地圖 33 在讀 map33.dat 時就結束；本頁說兩者都在讀 DSC 時結束。依 src/rsrc.c 的載入順序 story.md 對。",
+   "unit": "resource_info__terrain"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdetxt%02d.txt 的編號",
+   "note": "pitfalls.md 也寫「章節索引加 1，也就是玩家看到的章號」，同樣只對 FDETXT01–30 成立；FDETXT31–65 是額外場景區塊（assets/text/scene_text.md）。",
+   "unit": "resource_info__text"
+  },
+  {
+   "other_doc": "assets/races.md",
+   "anchor": "種族代碼 0–6",
+   "note": "races.md 說出貨兩張表只用 0–6，與本頁一致且為擁有者；本頁那句應刪。",
+   "unit": "resource_info__text"
+  },
+  {
+   "other_doc": "assets/tables/classes.md",
+   "anchor": "職業代碼上限 0x26",
+   "note": "classes.md 分檔寫出 FRIAPRDA 0x19、ENEMYDAT 0x26、RANKUP 0x18，與資料一致；本頁只寫合併後的 0x26。",
+   "unit": "resource_info__text"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "VFS entry 筆數 8-bit、table 偏移帶號 16-bit（第 93 列）",
+   "note": "pitfalls 說「第 256 筆以後走不到」且未區分讀取端；src/vfs.c 顯示實際是筆數取 mod 256，且只有 fdps_vfs_open／fdps_vfs_find_entry 路徑受限，fdps_vfs_image_get_entry（0x39cf0）讀 32-bit 無號筆數與無號偏移。",
+   "unit": "resource_info__vfs__1"
+  },
+  {
+   "other_doc": "program_info/data_structures.md",
+   "anchor": "fdps_vfs_image_header",
+   "note": "data_structures 列出 11 byte 的 fdps_vfs_image_header（0x643a0、0x643a8），對應記憶體內巢狀容器的讀取端；vfs.md 的「程式端只讀其中一部分」段原本只寫硬碟路徑，未提這個讀取端。",
+   "unit": "resource_info__vfs__1"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "0003cb6e / 0003cb93 / 0003cbaa",
+   "note": "code_pools.md 說這三支 DPMI 服務常式「留在 `ail`」（同段稍後又說已改判成 `fdps`），本頁表列六支都是 `fdps_dpmi_*`；快照 functions.txt 六支都帶 pool_fdps 標籤，本頁正確，code_pools.md 那句「留在 ail」應寫成原先判在 ail、現已改判 fdps 或直接刪除。",
+   "unit": "rebuild_info__ail_link"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "要補的 DPMI 常式數",
+   "note": "pitfalls.md 說 16 個無對應 function 裡要補的是 `00044dc0` 與三支 DPMI 常式，本頁說遊戲要給六支 DPMI 常式加一支 EFLAGS 常式。兩者範圍不同（前者只算前作庫沒對應的那 16 個，另三支 `0003ca49`／`0003cad2`／`0003cb01` 本來就在遊戲側），不矛盾，但讀者容易誤會成只需補三支。",
+   "unit": "rebuild_info__ail_link"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "#pragma pack(1) 那一列（80x87 模擬器 10-byte scratch operand）",
+   "note": "pitfalls 寫「不能用編譯器預設對齊……10-byte scratch operand 在預設對齊下會變成 12 byte」。build_flags.md 與 build_pipeline.md 則寫實測 wcc386 10.0a 的預設就是 -zp1（{char,int,char,short,double} 偏移是 0/1/5/6/8），src/fdpstype.h 的檔頭也這樣寫。預設是 byte packing 的話，10-byte 記錄不會變成 12 byte；pitfalls 該寫的是「換成 -zp4 之類的旗標或別的編譯器時」，而不是「預設對齊」。",
+   "unit": "rebuild_info__build_flags__1"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "遊戲模組用 -s 關掉堆疊檢查（重建版的建置目前還沒跟上，由票 22.2 對齊）",
+   "note": "同樣帶有票 22.2 與「目前還沒跟上」的進度敘述，應改成「重建版對每個 unit 用 -s -ot -od，CD 模組沒有 probe」的結論。",
+   "unit": "rebuild_info__build_flags__1"
+  },
+  {
+   "other_doc": ".scratch/fdps-rebuild/issues/22.2-align-compile-flags.md",
+   "anchor": "票 22.2 的狀態",
+   "note": "票面是 needs-triage「使用者已決定要做」，專案記憶記的卻是使用者決定不做、成果已刪除。兩者不一致，需要開發者確認票面。",
+   "unit": "rebuild_info__build_flags__1"
+  },
+  {
+   "other_doc": "program_info/architecture.md",
+   "anchor": "__cdecl 503／__watcall 11",
+   "note": "architecture.md 第 19 行照抄本檔舊計數並說 11 個 __watcall 全是組語；快照與 Ghidra 是 505／9，而那 9 個是無參數的 C function。兩處都錯，應以 505／9 為準。",
+   "unit": "rebuild_info__build_flags__2"
+  },
+  {
+   "other_doc": "program_info/memory_layout.md",
+   "anchor": "object 3 0x70000",
+   "note": "memory_layout.md 說 object 3 是遊戲自己的手寫組語模組（鍵盤 ISR＋RLE 繪製）的狀態區；本檔說它是 vendor 模組自帶的。memory_layout.md 對（Ghidra 顯示讀寫者都是 pool_fdps）。",
+   "unit": "rebuild_info__build_flags__2"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "CD 模組以外的遊戲段旗標組（編譯旗標一節）",
+   "note": "本檔前半說 CD 模組以外遊戲段都是 -s -ot -oe=25 -d2 的四推框架，但 dpmi.c 的 6 支（如 0x3ca49 開頭 56 83 ec 38、無 EBP 框架）、鍵盤常式與 0x30790 fdps_timer_tick_handler（56 57 55 89 e5）不是那個形狀，可能是另一組旗標或手寫組語；需由負責前半的驗證者查。",
+   "unit": "rebuild_info__build_flags__2"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "字串字面值中間帶 NUL",
+   "note": "pitfalls 那一列標題寫「會讓 `game` 閘門失敗」；本檔與 gate.py 是每個有 map 的目標（`game` 與 `ailsmoke`）都算空隙，`ailsmoke` 的原始碼若帶這種字面值同樣會讓 pad 檢查失敗。本檔的說法較完整。",
+   "unit": "rebuild_info__build_gate"
+  },
+  {
+   "other_doc": "tools/build_gate/_index.md",
+   "anchor": "gate.check(...)／workspace/build_gate/result.json／離開碼",
+   "note": "兩邊同一段話幾乎逐字重複；跑法歸工具索引，本檔應只留連結（見 finding 6）。",
+   "unit": "rebuild_info__build_gate"
+  },
+  {
+   "other_doc": "rebuild_info/emit_pipeline.md",
+   "anchor": "emittest 的通過條件",
+   "note": "emit_pipeline 寫「零錯誤、零未解析符號、沒有基準值未記錄過的警告、全部測試通過」，同樣沒提到警告數量與 redefinition 行；以 gate.py 為準，細節歸本檔。",
+   "unit": "rebuild_info__build_gate"
+  },
+  {
+   "other_doc": "rebuild_info/emit_pipeline.md",
+   "anchor": "單元測試映像的兩次連結／stub 模組",
+   "note": "emit_pipeline.md 說建置固定連結兩次、清單空時 stub 模組是空的；build_emit.py 的 stub_pass 在第一次連結無未解符號時直接返回，不產生 stub 模組、不跑第二次連結。程式碼為準。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "other_doc": "program_info/cd_audio.md",
+   "anchor": "0x3c636 fdps_cdrom_detect 的 INT 2Fh AX=1500h",
+   "note": "cd_audio.md 第 9 行把「執行檔內找不到 INT 2Fh」一律歸因於 DPMI INT 31h AX=0300h，但安裝檢查 0x3c636 是直接呼叫 CRT int386(0x2f, ...)（0x43268），並未經 DPMI 0300h；只有 CD 命令發送 0x3bb7d 走 DPMI。第 43 行對 0x3c636 的描述本身沒錯。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "CD 命令的 INT 2Fh（第 99 行）",
+   "note": "pitfalls 說直接發 int 0x2f 在 DOS/4G 保護模式下走不通；這只對帶真實模式指標的 AX=1510h 裝置請求成立，原版的 AX=1500h 安裝檢查正是以 int386(0x2f) 直接發出而可運作。該列應限定在 AX=1510h 的 CD 命令。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "other_doc": "tools/fdps_build/smoke/smoke.c",
+   "anchor": "0x3c636",
+   "note": "smoke.c 註解稱 0x3c636 是原版 main() 並以 DPMI 0300h 發 INT 2Fh；實際 0x3c636 是 fdps_cdrom_detect，以 int386(0x2f) 直接發。",
+   "unit": "rebuild_info__build_pipeline"
+  },
+  {
+   "other_doc": "rebuild_info/data_emit.md",
+   "anchor": "未初始化全域的擺放順序",
+   "note": "data_emit.md 說不帶初值的全域即使同檔也不照原始碼順序、相鄰只能靠同檔帶初值緊接；code_layout.md 說集中在同一 translation unit 就讓順序成為可讀清單並連到 pitfalls.md 不存在的「B 類」。data_emit.md 為正確且為擁有者。",
+   "unit": "rebuild_info__code_layout"
+  },
+  {
+   "other_doc": "tools/code_emit/data/routing.json",
+   "anchor": "functions[*].status",
+   "note": "routing.json 的 514 支 function 與 232 個全域 status 仍全為 pending，而 src/ 已全部定義；code_layout.md 稱它是逐項對照表並不涉及 status，但該欄位已過時（由 build_routing.py 產生）。",
+   "unit": "rebuild_info__code_layout"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "0x64378 浮動指示佇列溢寫範圍",
+   "note": "pitfalls 說字形一路寫過游標後面的 25 個全域（含傳送座標、隊伍金錢）；依 0001f60a..0001f678 的存入順序，字形寫入從 0x643b0 起、最遠 0x6443f，傳送座標、金錢與前三個指標只被回放讀取。兩頁同錯，應一起改。",
+   "unit": "rebuild_info__data_emit"
+  },
+  {
+   "other_doc": "src/gamedata.c",
+   "anchor": "data_fdps_inverse_palette_cube 0x643f0",
+   "note": "註解說溢寫蓋到立方前 84 byte（到 0x64443），本頁說寫到 0x644b2；推導結果是前 80 byte（到 0x6443f）。",
+   "unit": "rebuild_info__data_emit"
+  },
+  {
+   "other_doc": "src/indicat.c",
+   "anchor": "data_fdps_indicator_queue_glyph_ids",
+   "note": "檔頭註解說 indicat.c 擁有 glyph ids，但 manifest、DATA_OVERRIDES 與 gamedata.c 都把它定義在 gamedata.c，indicat.c 的資料區塊是空的；indicat.c 的註解過時。",
+   "unit": "rebuild_info__data_emit"
+  },
+  {
+   "other_doc": "rebuild_info/data_emit.md",
+   "anchor": "tentative 定義的擺放順序",
+   "note": "本檔 B 類寫「實測甚至反序」（沿用 FD2 playbook 的量測）；data_emit.md 記的 FDPS 實測是四個 tentative 排成 1、2、4、3，不是反序。兩者結論（順序不保證）一致，但數據來源不同，本檔可改連 data_emit.md 的實測。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "建置產出的 .OBJ 與原版逐 byte 對照",
+   "note": "build_flags.md 說 emit 建置用 -s -ot -od、不能拿建置產出的 .OBJ 直接比；本檔第 30 行原本說拿本輪 .OBJ 與原版 byte 對照。build_flags.md 對（見 finding 2）。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "other_doc": "tools/code_emit/_index.md",
+   "anchor": "undefined.json 是票 23 的權威工作清單",
+   "note": "工具索引以票號指稱資料 emit，與本檔同類敘事問題。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "other_doc": "tests/menu.c",
+   "anchor": "fdps_deploy_map_units",
+   "note": "tests/menu.c:352 註解與本檔同樣寫了不存在的 fdps_deploy_map_units，實際是 fdps_build_map_unit_array（0x22be0）。",
+   "unit": "rebuild_info__emit_pipeline__1"
+  },
+  {
+   "other_doc": "tools/code_emit/_index.md",
+   "anchor": "中斷復原的清理界線",
+   "note": "_index.md 說 Recover 段丟掉 `src/`／`tests/` 的殘骸、「`src/`／`tests/` 以外的地方髒了它會停下來報告」；本頁與 emit_ticket22.js 的實際界線是六個路徑（另含 tools/code_emit/data/、ghidra_snapshot/、build_routing.py、rebuild_info/code_layout.md）。本頁正確，_index.md 的說法過窄。",
+   "unit": "rebuild_info__emit_pipeline__2"
+  },
+  {
+   "other_doc": "tools/pool_triage/fid/_index.md",
+   "anchor": "extract_watcom_symbols.py",
+   "note": "兩邊都說「四個程式庫」；腳本實際是三個程式庫加 CSTRTX3S.OBJ 一個 object。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "binary_artifact_string_literal_*",
+   "note": "pitfalls 承認字串字面值有 binary_artifact_string_literal_ 名稱並列為不 emit；本頁原寫「s_ 留著、不替它們取名」，與之不一致，以 Ghidra 現況（108 個已命名）為準。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "other_doc": "tools/global_data/_index.md",
+   "anchor": "s_ 標籤數量",
+   "note": "該頁說 415 個字串帶 s_ 標籤，快照 data.txt 以 '| s_' 開頭的主名稱只有 348 筆（另有 108 個 binary_artifact_string_literal_），數字未進一步查證。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "other_doc": "program_info/data_structures.md",
+   "anchor": "fdps_unit_record / runtime_char",
+   "note": "該頁是前作型別對應的實際擁有者；本頁原說對應寫在 Ghidra description，錯。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "binary_artifact pool",
+   "note": "該頁說 function 的 binary_artifact pool 為空；本頁以不存在的 function 名 binary_artifact_align_nop_3d370 當例子。",
+   "unit": "rebuild_info__naming"
+  },
+  {
+   "other_doc": "rebuild_info/data_emit.md",
+   "anchor": "data_fdps_inverse_palette_cube（0x643f0）被溢寫的長度",
+   "note": "data_emit.md 的約束表說字形存入一路寫到 0x644b2（進立方 0xc2 = 194 byte），src/gamedata.c 在立方定義前的註解說 stores glyph bytes into its first 84 bytes。兩邊不一致，本單位沒有判定哪邊對；另外 data_emit.md 的「25 個符號」含立方本身，本頁同一件事要寫 24 個全域加上立方。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "other_doc": "src/mapai.c",
+   "anchor": "名冊記錄 +0x34 的 0x40 bit",
+   "note": "mapai.c 說出貨遊戲裡沒有東西能設起 0x40；本頁與 src/roster.c 說示範戰的名冊單位高 4 bit 是堆積殘值。本頁對，mapai.c 的註解要限縮（見 finding 8）。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "other_doc": "src/chpost1.c",
+   "anchor": "第 1 章索爾的死亡腳本（MAP00.DAT #21，opcode 5／0x0f）",
+   "note": "chpost1.c 暗示第 1 章沒有死亡腳本；本頁、chapters/ch01.md 與 MAP00.DAT 都說有。本頁對。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "other_doc": "src/text.c",
+   "anchor": "fdps_draw_text 的 '-' 字形越界量",
+   "note": "text.c 說讀字型表前 6 byte，本頁說 0x60 byte；字形間距是 0x20，本頁對。",
+   "unit": "rebuild_info__pitfalls__1"
+  },
+  {
+   "other_doc": "chapters/ch05.md",
+   "anchor": "fdps_chapter_05_event_enemies_advance",
+   "note": "ch05.md 說總攻擊把「波次 1 的全部敵兵」改成主動；本頁寫「全軍同樣從原地改成主動」，範圍說法較寬，未逐一核對處理函式改寫的單位範圍。",
+   "unit": "rebuild_info__pitfalls__2"
+  },
+  {
+   "other_doc": "chapters/ch27.md",
+   "anchor": "反禁制器／fdps_chapter_27_end",
+   "note": "ch27.md 說反禁制器「必須在她離隊前就已在她身上」；本頁寫「必須早在第 23 章就放在她身上」，較強；兩者都承認第 23 章是它進背包的唯一來源。",
+   "unit": "rebuild_info__pitfalls__2"
+  },
+  {
+   "other_doc": "resource_info/vfs.md",
+   "anchor": "成員數上限 255／entry table 偏移上限 0x7FFF",
+   "note": "vfs.md 第 35–36 行與本頁一樣把 8-bit 筆數與帶號 16-bit 偏移寫成 .VFS 的普遍上限；src/vfs.c 的 fdps_vfs_image_get_entry（0x39cf0）以 32-bit 無號比較筆數、零延伸讀偏移，兩個上限只適用 handle 路徑。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "other_doc": "program_info/cd_audio.md",
+   "anchor": "INT 2Fh",
+   "note": "cd_audio.md 第 9 行說執行檔內找不到 INT 2Fh 是因為全部走 DPMI 0300h；實際上安裝檢查 fdps_cdrom_detect（0x3c636）以 int386(0x2f) 直接發 AX=1500h，只有 device request 走 DPMI。第 43 行對 0x3c636 的描述本身沒錯。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "other_doc": "program_info/code_pools.md",
+   "anchor": "RLE kernel 的暫存器交接",
+   "note": "code_pools.md 第 205 行說參數由呼叫端放在 ESI／EDI／ECX／EDX；本頁第 106 行說以 ESI／EDI／EDX 交接。src/rledisp.asm 的交接是 ESI、EDI、EDX（row advance）與 BH=mode，ECX、EAX 只是清零；兩邊不算矛盾但詳略不同，ECX 不是參數。",
+   "unit": "rebuild_info__pitfalls__3"
+  },
+  {
+   "other_doc": "program_info/movement.md",
+   "anchor": "fdps_battle_move_unit_toward 0x119e0",
+   "note": "正文寫「把網格重建四次，四輪各有不同」，但同頁表格列了 1、2、2b、3、4 共五輪且 2b 與 4 設定相同；Ghidra 有五個 flood fill 呼叫，表格對、正文錯。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "other_doc": "src/movegrid.c",
+   "anchor": "fdps_battle_move_unit_toward 註解",
+   "note": "註解寫 REBUILT FOUR TIMES，實際最多五次（00011b15 那次未計）。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "other_doc": "src/transit.c",
+   "anchor": "fdps_transition_zoom 註解",
+   "note": "註解說 >> 3 會讓中心差四分之一像素；因除法在乘 4 之前，實際差一個像素。program_info/cutscene.md 的虛擬碼（先 /8 後 *4）是對的。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "other_doc": "src/anim.c",
+   "anchor": "fdps_play_vfs_animation_over_units 註解",
+   "note": "註解把它與 fdps_saf_play_over_background 對比（後者照時長），與本頁「只有 fdps_saf_play_over_scene 照時長」不一致；src 對。",
+   "unit": "rebuild_info__pitfalls__4"
+  },
+  {
+   "other_doc": "src/chend2.c",
+   "anchor": "CH18_PROMOTION_SWEEP_UNITS",
+   "note": "註解說單位 0–8（蘭迪斯到琴琴）「exactly the set the church will promote」，並引 PROMOTABLE_PORTRAIT_COUNT 9；但教會的條件是肖像編號 < 9（src/church.c），角色編號 5 的瑪麗安可轉職、角色編號 9 的蓋亞不可。本頁第 181 列（範圍內的蓋亞不能轉職、範圍外的瑪麗安能）與 chapters/ch18.md 是對的，src 註解錯。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "other_doc": "src/chevt4.c",
+   "anchor": "fdps_chapter_22_event_boss_defeat / fdps_chapter_23_event_boss_defeat 的 flags 清 0",
+   "note": "src 註解說不先清 flags 遺言就「no speaker」；text.c 與 program_info/dialog.md 表明只剩退場記錄時頭像照畫、只是改以滑入動畫開窗。本頁第 185 列與 dialog.md 對，src 註解誇大。另外這兩段註解引用的 fdps_collect_defeated_unit_events 不存在，實際函式是 fdps_collect_death_scripts（src/death.c）。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "other_doc": "src/chevt6.c",
+   "anchor": "CH30_REVIVE_WRAITH_CHAR_ID 0x55 / CH30_REVIVE_SKELETON_CHAR_ID 0x6a",
+   "note": "src 註解把 0x55 叫死靈、0x6a 叫白骨戰士，常數名也照這樣取；assets/enemies.md、global_text.md 與 chapters/ch30.md 是 0x55 白骨戰士、0x6a 死靈。本頁第 192 列（兩隻死靈錨點不同）與資料一致（MAP29 第 5、6 筆 6A 死靈錨點 (15, 13)、(16, 13)），src 名稱反了。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "other_doc": "src/chpost2.c",
+   "anchor": "fdps_chapter_22_post_action 不轉呼共用判定",
+   "note": "src 註解說轉呼共用判定會在最後一名援軍倒下、魔王還站著時提前過關；巫湯婆婆是 side 0，這不會發生。chapters/ch22.md 第 44 行只描述原版行為，沒有這個錯。",
+   "unit": "rebuild_info__pitfalls__5"
+  },
+  {
+   "other_doc": "src/chpost1.c",
+   "anchor": "fdps_chapter_10_post_action（0x3a8c0）",
+   "note": "註解說它是本檔唯一不呼叫共用判定的處理函式，但同檔 fdps_chapter_08_post_action（0x3a710）也不呼叫；Ghidra xref 證實。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "other_doc": "src/church.c",
+   "anchor": "fdps_church_promote_loop 的 clazz < 9 說明",
+   "note": "註解說 `clazz < 9` 會放行蓋亞、珊、蘭斯洛特；FRIAPRDA 的職業代碼蓋亞 0x19、珊 0x0E，只有蘭斯洛特 0x08 在範圍內（本頁第 234 行寫法正確）。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "other_doc": "src/unitstat.c",
+   "anchor": "fdps_level_up_apply_stat_gain 註解「Half the pairs in FRILEVUP.DAT are equal」",
+   "note": "有內容的 175 對裡相同的是 26 對，不是一半。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "other_doc": "assets/tables/characters.md",
+   "anchor": "*_max 是最大成長值加 1",
+   "note": "該頁說一律等於 byte 減 1，沒有排除上下限相同的 26 對（那時 max 就是實際成長）。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "other_doc": "CONTEXT.md",
+   "anchor": "地圖編號 → FDETXT%02d.TXT",
+   "note": "CONTEXT.md 第 50 行把 FDETXT%02d.TXT 列為由地圖編號決定的檔名組，但實際是地圖編號加 1（本頁第 213、215 行、fdps_load_field_chapter_resources 在 0x31568 INC EAX）。",
+   "unit": "rebuild_info__pitfalls__6"
+  },
+  {
+   "other_doc": "src/chevt3.c",
+   "anchor": "fdps_chapter_16_event_enemies_advance_for_turn (0x38020) 的 plate 註解",
+   "note": "src 註解說「unit index = deployment record index + 10，兩段範圍是記錄 15..24 與 0..15」；本頁與 chapters/ch16.md 說這個換算在第 16 章不成立。以 map_decode show 15 查證：MAP15.DAT 記錄 9–14 是波次 1、2，15–18 回到波次 0，19–24 是波次 3、4；fdps_build_map_unit_array 只以 fdps_deploy_wave 部署波次 0（src/deploy.c 的 fdps_deploy_wave 逐筆比對 wave_no），其餘由過場 DEPLOY_WAVE 依序附加。本頁與 ch16.md 對，src/chevt3.c 的註解錯，應改為依波次的排列。",
+   "unit": "rebuild_info__pitfalls__7"
+  },
+  {
+   "other_doc": "rebuild_info/build_flags.md",
+   "anchor": "`spawnvpe`（`0x54dcc`）、`spawnve`（`0x556ae`）",
+   "note": "build_flags.md 的 cc 判定小節用的也是 CALL 位址而非入口，正確入口是 0x54dc7、0x556a9。",
+   "unit": "rebuild_info__pitfalls__7"
+  },
+  {
+   "other_doc": ".scratch/fdps-rebuild/issues/22.2-align-compile-flags.md",
+   "anchor": "票 22.2",
+   "note": "工作票狀態是 needs-triage（未開工），build_flags.md 仍以「由票 22.2 處理」描述重建版旗標差距；本頁已不應引用票號。",
+   "unit": "rebuild_info__pitfalls__7"
+  },
+  {
+   "other_doc": "rebuild_info/emit_pipeline.md",
+   "anchor": "票 23／24",
+   "note": "emit_pipeline.md 第 44、46、50、52 行也以票號描述交接對象（票 23／票 24），同樣是進度用語，應由該頁的驗證者處理。",
+   "unit": "rebuild_info__playtest"
+  },
+  {
+   "other_doc": "assets/shops.md",
+   "anchor": "村莊數",
+   "note": "shops.md 來源段寫「20 家村莊」，但同頁全表列 21 個 SHOPnn.DAT，tools/data_tables/_index.md 也寫 21 個；依 src/village.c 的 CHAPTER_HAS_NO_VILLAGE，21 才對。",
+   "unit": "assets___index"
+  },
+  {
+   "other_doc": "program_info/spell.md",
+   "anchor": "fdps_apply_item_effect_to_targets（0x262a0）的 use_effect 分派表",
+   "note": "spell.md「道具的使用」一節有一張完整的分派表（01–23 各碼的效果與是否消耗），與 assets/items.md「使用效果代碼」的產生表幾乎逐列重複；內容一致（包括 05／06／0D／1B 不消耗但回合照樣用掉），但同一事實有兩個擁有者，應擇一保留，另一邊縮成一句加連結。",
+   "unit": "assets__items__2"
+  },
+  {
+   "other_doc": "program_info/spell.md",
+   "anchor": "use_effect 0x21／0x22 判斷的 +0x07 欄位",
+   "note": "spell.md 稱 +0x07 是「肖像編號」，assets/items.md 的產生表與 src/item.c 註解稱「型態（form id）」；src/item.c 的 C 欄位名是 portrait_id、註解寫 FORM ID AT +0x07。兩頁用詞不同，指的是同一欄位。",
+   "unit": "assets__items__2"
+  },
+  {
+   "other_doc": "assets/tables/items.md",
+   "anchor": "select_mode（+0x15）的取值與 use_effect 類別的對應",
+   "note": "該頁說「傷害類是 0、……不可使用的物品是 5」。實際 ITEM.DAT 251 筆裡 use_effect 為 0 的有 143 筆是 5、43 筆是 0、1 筆是 3；而 use_effect 為 09（冰系傷害）的 22 白銀之槍 select_mode 是 5。所以「傷害類是 0」有 22 這個例外，「不可使用的是 5」也不是全部。本頁表格（22 列選取模式 5）與 cut_content/items.md I10、known_bugs 第 10 條一致，對的是本頁；tables/items.md 那句要補上例外。",
+   "unit": "assets__items__3"
+  },
+  {
+   "other_doc": "assets/tables/spells.md",
+   "anchor": "MAGICDAT.DAT distance byte 0x10",
+   "note": "兩頁都寫「設了 0x10 這個位元表示直線」；src/spellmnu.c 的 CAST_RANGE_LAST_RADIUS 註解說原版的判斷是 CMP ...,0xf / JLE（>0x0f 即直線，0x00027e46），不是位元測試。出貨資料只有 0–9 與 0x14/0x17/0x1F，兩種說法對資料等價，但 tables/spells.md 作為擁有者宜寫成「大於 0x0F 時為直線」。",
+   "unit": "assets__spells"
+  },
+  {
+   "other_doc": "tools/guide_offsets/crosscheck.py",
+   "anchor": "ACCEPTED (appearance.spells, 0x00/0x02/0x0A/0x0B)",
+   "note": "crosscheck 把四項初始法術差異判為「資料檔為準」；實際上攻略站列的是部署記錄（珊 MAP23#10、費塔加 MAP07#19、蘭斯洛特 MAP18#42）與第 1 章授予業火後的狀態，攻略站對。tools/data_skill/build.py 的 DISCREPANCIES 是同一份副本。",
+   "unit": "assets__characters"
+  },
+  {
+   "other_doc": "cut_content/units.md",
+   "anchor": "U08「其他不學法術的可玩型態」",
+   "note": "U08 限定「可玩型態」並點出 22 的例外；本頁同一句少了限定，已在 finding 5 修正。",
+   "unit": "assets__characters"
+  },
+  {
+   "other_doc": "cut_content/units.md",
+   "anchor": "職業 27",
+   "note": "U10 重述 27 是 PROMAP.DAT 41 列最後一列、與 24 相同、PROEQU.DAT 只到 23；與 classes.md 第 140 行說法一致（已對資料確認），但兩邊都寫全文，擁有者應為 classes.md。",
+   "unit": "assets__classes"
+  },
+  {
+   "other_doc": "cut_content/units.md",
+   "anchor": "U05 職業 1C、1E、23",
+   "note": "U05 重列三個職業的 PROMAP／PROEQU 位元組（與資料一致，1C 在 +0x122 等偏移正確），屬於重述 classes.md 的數值。",
+   "unit": "assets__classes"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "RANKUP.DAT 路線數",
+   "note": "characters.md 寫「每筆四條路線」並說明其他人的路線 3 是全 0 填充；classes.md 寫「九名人物各有四條路線」，少了這個限定。",
+   "unit": "assets__classes"
+  },
+  {
+   "other_doc": "program_info/battle.md",
+   "anchor": "道具不給經驗：data_fdps_battle_pending_xp_credit 清 0",
+   "note": "battle.md 說道具指令結束時由 fdps_battle_action_menu（0x15d00）清 0，本頁說 fdps_apply_item_effect_to_targets（0x262a0）結尾清 0。兩處都有清 0（src/btlact.c:631 與 src/item.c:702），兩邊都對，但各只寫了一處。",
+   "unit": "assets__enemies"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "MAPnn.DAT 的張數",
+   "note": "characters.md 寫「64 張地圖的部署記錄」，本頁寫 63 個 MAPnn.DAT。FIELD.VFS 實際有 63 個 MAPnn.DAT（缺 MAP30、MAP33），本頁對。tools/map_decode/_index.md 也寫「全部 64 張地圖」。",
+   "unit": "assets__enemies"
+  },
+  {
+   "other_doc": "assets/text/global_text.md",
+   "anchor": "種族名區 0x097–0x09d",
+   "note": "global_text.md 第 165 行寫「種族代碼 0–6 各有名稱，後面三條是空字串」，但它自己的範圍 0x097–0x09d 只有 7 條，種族 0–6 就把 7 條用完，「後面三條」對不上。本頁「0x97–0x9C 讀成妖鬼到其他」與它第 52 行一致。",
+   "unit": "assets__enemies"
+  },
+  {
+   "other_doc": "assets/enemies.md",
+   "anchor": "部署記錄 +0x02、+0x03 與攻略站 modify2 的「種族編號」「職業編號」",
+   "note": "enemies.md 第 24 行以一整句重述「+0x02、+0x03 不讀、攻略站標錯」，與本頁「與部署記錄的欄位區分」一節同義且一致；assets/_index.md 把這個區分歸給 races.md，enemies.md 可縮成一句連結。",
+   "unit": "assets__races"
+  },
+  {
+   "other_doc": "resource_info/text.md",
+   "anchor": "出貨資料的種族代碼只有 0..6",
+   "note": "resource_info/text.md 第 30 行與本頁第 15 行都說出貨的 FRIAPRDA.DAT／ENEMYDAT.DAT 種族代碼只有 0–6，兩邊一致（實測 FRIAPRDA 只用 0、3，ENEMYDAT 用 0–6）；事實重複出現在兩處。",
+   "unit": "assets__races"
+  },
+  {
+   "other_doc": "assets/enemies.md",
+   "anchor": "ENEMYDAT.DAT 37 列樣板 01 02 12 00 00 05 02 01 04 1E",
+   "note": "enemies.md 第 48 行與本頁第 27 行都說 37 列樣板是妖鬼、村民村長顯示妖鬼；實測 91 列中該樣板出現 37 次，兩邊一致。",
+   "unit": "assets__races"
+  },
+  {
+   "other_doc": "assets/_index.md",
+   "anchor": "村莊數",
+   "note": "索引列寫 20 個村莊；實際 21 個（tools/data_tables/_index.md 寫 21，正確）。",
+   "unit": "assets__shops"
+  },
+  {
+   "other_doc": "program_info/village.md",
+   "anchor": "秘密商店／神秘商店",
+   "note": "本頁、assets/tables/shops.md、global_text.md 與遊戲對白（ch07「進秘密商店秘訣是」、ch25「秘密商店嗎？」）用「秘密商店」；program_info/village.md、known_bugs.md 第 19 條、cut_content/code.md C1、cut_content/items.md I09、ch09、ch25 用攻略站的「神秘商店」。遊戲自己的稱呼是秘密商店，名稱應統一。",
+   "unit": "assets__shops"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "SHOP25.DAT 神秘商店",
+   "note": "稱呼用「神秘商店」，與本頁「秘密商店」不一致；事實（第 26 章前進不去、攻略站記「無法進入，只能透過修改」）一致。",
+   "unit": "assets__shops"
+  },
+  {
+   "other_doc": "assets/tables/characters.md",
+   "anchor": "characters.md 開頭「三張表各自的一筆」",
+   "note": "本頁說 characters.md 收四張表（FRIAPRDA／FRILEVUP／GETMGTAB／RANKUP），characters.md 自己開頭寫「三張表」，但內文實際列了四張；本頁對，characters.md 開頭那句應改為四張。",
+   "unit": "assets__tables___index"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "FRILEVUP.DAT *_max",
+   "note": "「成長範圍的 `*_max` 是『最大成長值加 1』」一列沒有上下限相等的例外；相等時成長固定為該值（src/unitstat.c 的 fdps_level_up_apply_stat_gain），本頁修正後兩邊要一致。",
+   "unit": "assets__tables__characters"
+  },
+  {
+   "other_doc": "program_info/village.md",
+   "anchor": "教會轉職加成 *_max 原始 byte",
+   "note": "寫「比攻略站印的最大成長值多 1 的那個數」；對上下限相等的組（如多個轉職型態的 DX 2-2、3-3）攻略站印的就是 byte 本身，多 1 不成立。",
+   "unit": "assets__tables__characters"
+  },
+  {
+   "other_doc": "assets/characters.md",
+   "anchor": "FRILEVUP.DAT 範圍上限",
+   "note": "「升級成長 FRILEVUP.DAT」一節寫「每級實際的成長上限是後一個值減 1」，同樣漏掉上下限相等的例外。",
+   "unit": "assets__tables__characters"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "PROEQU.DAT 空位 0xFF／類型 0x00",
+   "note": "pitfalls 說 `0x00` 是活的物品類型碼、以 0x00 終止會提早收手；ITEM.DAT 的類型 0x00 只在 0xE2–0xFA 全零 record，PROEQU.DAT 也沒有 0x00 格，pitfalls 的說法不成立。",
+   "unit": "assets__tables__classes"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "0x126b0 漏 INC",
+   "note": "pitfalls 與 program_info/known_bugs.md 第 7 條把 0x126b0 不加 1 的例外連回本頁，本頁原文卻說呼叫端一律 +1、沒有提到例外（已以 finding 1 補上）。",
+   "unit": "assets__tables__classes"
+  },
+  {
+   "other_doc": "src/table.c",
+   "anchor": "fdps_get_class_record 呼叫端數",
+   "note": "註解說 11 個呼叫端都 +1、另有 2 個傳 0；Ghidra 顯示共 11 個呼叫點：7 個 +1、3 個傳 0、1 個不加 1。",
+   "unit": "assets__tables__classes"
+  },
+  {
+   "other_doc": "assets/enemies.md",
+   "anchor": "exp_reward",
+   "note": "enemies.md 的「擊殺經驗」區分物理攻擊（目標 LV × EXP ÷ 攻擊者 LV）與法術（EXP × 目標 LV，發放前 ÷ 施法者 LV）；本頁只寫「乘上單位等級」，enemies.md 對（與 src/combat.c、src/unitatk.c、src/unitstat.c 相符）。",
+   "unit": "assets__tables__enemies"
+  },
+  {
+   "other_doc": "program_info/spell.md",
+   "anchor": "select_mode／fdps_collect_targets_in_range 陣營表",
+   "note": "spell.md 寫 0 收敵方、1 收我方與 NPC、3 只收我方、4 以上不收，確認鍵那一步用 fdps_collect_targets_in_area；與本頁「0／1／3 沒有差別」相反，spell.md 對（src/aitarget.c）。",
+   "unit": "assets__tables__items"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "玩家端道具選取模式 +0x15",
+   "note": "pitfalls 寫 select_mode 同時當目標篩選與游標確認模式，大地之劍 4 打空、白銀之槍 5 無法確認；與本頁第 44 行矛盾，pitfalls 對。",
+   "unit": "assets__tables__items"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 10 條 大地之劍、白銀之槍",
+   "note": "known_bugs 說大地之劍可確認但命中名單永遠是空的；本頁說模式 4「游標下有單位就直接成立」，實際是不看單位，known_bugs 對。",
+   "unit": "assets__tables__items"
+  },
+  {
+   "other_doc": "assets/spells.md",
+   "anchor": "MAGICDAT.DAT 距離欄位的編碼",
+   "note": "assets/spells.md 的全表說明段重述了「0x10 位元表示直線、低 4 位是實際距離」，是本頁（record 佈局的擁有者）事實的重複；那邊也同樣沒說距離 0 的法術不瞄準、只打 side 0。",
+   "unit": "assets__tables__spells"
+  },
+  {
+   "other_doc": "assets/spells.md",
+   "anchor": "`16` 神行術的作用對象 3",
+   "note": "assets/spells.md 只說攻略站未列 3 這個值；兩頁都沒寫 3 的意義，依 src/aitarget.c 是只限我方隊伍（side 2）、不含友軍 NPC。",
+   "unit": "assets__tables__spells"
+  },
+  {
+   "other_doc": "assets/tables/items.md",
+   "anchor": "欄位名與 src 的對應",
+   "note": "items.md 的欄位名與 struct fdps_item_effect 逐字相同，本頁欄位名則與 struct fdps_spell_effect 不同（hit/distance/radius/mp/target 對 hit_rate/cast_range_flags/area/mp_cost/target_side）。",
+   "unit": "assets__tables__spells"
+  },
+  {
+   "other_doc": "src/chpost1.c",
+   "anchor": "fdps_chapter_01_post_action 註解「Unlike chapters 2 and 5, which carry their 索爾 condition as a death script on his deployment record, chapter 1 enforces it here in code」",
+   "note": "註解暗示第 1 章索爾沒有死亡腳本，但 MAP00.DAT 記錄 #21 帶 opcode 5／運算元 0x0f（map_decode show 0：death 05/15），第 1 章是死亡腳本與行動後檢查兩者都有；第 6 章的索爾（MAP05 #31）也帶敗北死亡腳本，不只第 2、5 章。本頁與 pitfalls.md 的說法正確，src 註解應改寫。",
+   "unit": "chapters__ch01"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 23 條 中毒致死不執行死亡腳本／索爾的 opcode 5 敗北腳本",
+   "note": "known_bugs 第 23 條只列第 6 章索爾毒死不敗北；第 2 章的索爾也以 opcode 5 死亡腳本判敗北，但本章敵人裝備（白刃劍、爪、魔法之杖）與冰魔導士的冰爆術都不帶中毒，尤利安的法術也沒有中毒，所以第 2 章觸發不到，兩頁不矛盾。",
+   "unit": "chapters__ch02"
+  },
+  {
+   "other_doc": "src/chevt1.c",
+   "anchor": "fdps_chapter_04_event_for_turn 單位 13、15–18 的原始 AI 行為",
+   "note": "本頁與 rebuild_info/pitfalls.md 說這五人開場是行為 2、第 5 回合才改成主動；src/chevt1.c 註解說 map03.dat 本來就寫成行為 0、改寫不生效。MAP03.DAT 實測是 2，本頁對、src 註解錯。",
+   "unit": "chapters__ch04"
+  },
+  {
+   "other_doc": "src/chevt1.c",
+   "anchor": "fdps_chapter_05_event_enemies_advance（0x370e0）的註解 \"map04.dat deploys 33 records behind the 5 party slots and the opening script has all of them on the field\"",
+   "note": "MAP04.DAT 有 33 筆部署記錄，但波次 FF 的 #10–#12 永遠不部署，場上實際是 5 個我方 slot＋索爾＋開場過場附加的 29 名（索引 6–0x22）；本頁（步驟 2 與波次 FF 一節）的說法正確，src 註解的「33 筆全部在場」不精確，結論（迴圈不越界）不受影響。",
+   "unit": "chapters__ch05"
+  },
+  {
+   "other_doc": "cut_content/story.md",
+   "anchor": "FDETXT06 0x0c／FDETXT47 0x0a",
+   "note": "story.md 記為「只差控制碼（換行、換頁或說話者）」，本頁手寫段與生成的對話區塊都稱為複本／副本；實測是說話者不同（角色 1 對角色 6），story.md 對。",
+   "unit": "chapters__ch06"
+  },
+  {
+   "other_doc": "chapters/ch17.md",
+   "anchor": "`0C` 索爾（陣營 1）",
+   "note": "ch17 記索爾是 MAP16.DAT 第 18 筆陣營 1 人質、整場在場上；本頁說他之後再以友方身分登場是第 26 章，漏了第 17 章。ch17 對。",
+   "unit": "chapters__ch06"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 23 條 中毒致死不執行死亡腳本",
+   "note": "known_bugs 列出的受影響處只有第 6、12（連帶 16）章；本頁指出第 8 章第 18 筆守衛毒死時不會叫 0x37440、費塔加不會自己開門，這是未列入的後果（本頁的說法依 src/death.c 與 known_bugs 的成因成立）。",
+   "unit": "chapters__ch08"
+  },
+  {
+   "other_doc": "chapters/ch06.md",
+   "anchor": "中毒致死不跑死亡腳本",
+   "note": "ch06 第 56 行完整轉述了 known_bugs 第 23 條的成因，且收集函式寫 fdps_collect_death_script_events（0x274e0），known_bugs 寫 fdps_collect_death_scripts（0x26180）；兩邊函式名不一致，未在本單位範圍內查證。",
+   "unit": "chapters__ch08"
+  },
+  {
+   "other_doc": "program_info/chapter.md",
+   "anchor": "名冊加入必須在 reset 之前",
+   "note": "chapter.md 第 70 行把「加入必須在 reset 之前」寫成一般規則；對開場過場會 SWITCH_MAP 回本章地圖的章（第 9 章 ICON08.DAT 切 54→55→8）而言，真正決定上場名單的是過場裡最後那次 reset，加入只需在過場之前。一般規則可保留，但應註明這個例外，或改寫成「加入必須在最後一次依名冊重建之前」。",
+   "unit": "chapters__ch09"
+  },
+  {
+   "other_doc": "src/chpost1.c",
+   "anchor": "fdps_chapter_09_post_action 註解：every deployment record in map08.dat has a zero death-script opcode",
+   "note": "map_decode show 8 顯示 MAP08.DAT 31 筆記錄中 27 筆死亡腳本 opcode 是 FF（無），#5、#15 是 00/182（掉再生藥）、#9、#24 是 01/3000、01/1000（掉金），不是全為 0。本頁「部署記錄沒有任何敗北用的死亡腳本」是對的，src 註解的措辭錯了。",
+   "unit": "chapters__ch09"
+  },
+  {
+   "other_doc": "program_info/map_ai.md",
+   "anchor": "AI 行為 11（`0B`）",
+   "note": "map_ai.md 寫施法後「無論施了沒有」再跑物理攻擊評分，與 src/mapai.c 相符；本頁原寫「否則攻擊」成互斥，已在本頁修正。",
+   "unit": "chapters__ch12"
+  },
+  {
+   "other_doc": "program_info/cutscene.md",
+   "anchor": "fdps_chapter_15_init 的 fdps_units_clear_status_bit7（0x2db50）",
+   "note": "cutscene.md 說少了那次清除砲座第一個玩家回合會停擺；砲座不在玩家階段行動，敵方階段前 fdps_battle_advance_turn 內的 0x1e5b5 本來就會清。實際差別是第一個玩家階段畫成已行動、存檔反灰。",
+   "unit": "chapters__ch15"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "第 47 行，過場直譯器進入時清已行動旗標",
+   "note": "pitfalls 說刪掉第 15 章那次會讓腳本裡行動過的單位在第一個玩家回合停擺；應改為：第一個玩家階段砲座畫成已行動、存檔反灰，敵方階段照常行動。",
+   "unit": "chapters__ch15"
+  },
+  {
+   "other_doc": "src/chinit1b.c",
+   "anchor": "fdps_chapter_15_init 註解 WHAT THE CLEAR IS FOR",
+   "note": "src 註解寫 the fortress cannon would sit out the first player phase，同樣不精確。",
+   "unit": "chapters__ch15"
+  },
+  {
+   "other_doc": "src/chpost1.c",
+   "anchor": "FDETXT15.TXT 條目數",
+   "note": "src/chpost1.c 的 CH15_DUEL_LOST_TEXT_ID 註解說 FDETXT15.TXT holds twenty-nine entries；本頁產生的表頭與對話段列 25 條（0x00–0x18）。未另外重算，建議以 text_decode 核對後修正 src 註解。",
+   "unit": "chapters__ch15"
+  },
+  {
+   "other_doc": "src/chevt3.c",
+   "anchor": "fdps_chapter_16_event_enemies_advance_for_turn 的 0x19–0x22／0x0a–0x19",
+   "note": "src 註解說單位索引 = 記錄索引 + 10（範圍是記錄 15..24、0..15），本頁說依部署順序排列、範圍是波次 2–4 與波次 0–1；依 src/deploy.c 的附加順序，本頁對。",
+   "unit": "chapters__ch16"
+  },
+  {
+   "other_doc": "assets/names.md",
+   "anchor": "角色 05 瑪麗安",
+   "note": "names.md 正名瑪麗安、FDETXT16#0x09 異寫瑪莉安；本頁第 29 行轉述時用了異寫。",
+   "unit": "chapters__ch16"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "fdps_battle_check_default_end_conditions 的章節索引 0x15",
+   "note": "pitfalls.md 說共用判定看單位 3 的另一個章節是「走不到的第 22 章」；本頁只談 0x10，沒有矛盾，但「走不到」一說未在本單元查證，屬 pitfalls.md／ch22.md 的範圍。",
+   "unit": "chapters__ch17"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 12 條 / 0x4d",
+   "note": "兩邊一致：挑戰者只在援軍（波次 1、波次 6）都出場後才落在 0x4d，提早清場接受決鬥會卡關；known_bugs 另寫明 0x4d 讀到陣列之後的堆積內容。",
+   "unit": "chapters__ch19"
+  },
+  {
+   "other_doc": "program_info/chapter.md",
+   "anchor": "fdps_chapter_19_end 決鬥恢復",
+   "note": "chapter.md 寫「角色編號在名冊範圍內」，本頁寫「角色編號 ≤ 0B（無號比較）」，意思相同，src/chend2.c 以後者為準。",
+   "unit": "chapters__ch19"
+  },
+  {
+   "other_doc": "tools/chapter_docs/judgements/ch20.json",
+   "anchor": "FDETXT20 0x0c",
+   "note": "判定檔的 why 只寫「作抉擇、蘭迪斯最後一句的斷行與換頁不同」，漏了「怎麼做／怎麼作」「我不想／我已經不想」兩處用字差異；以 text_decode 解出的兩區塊為準。",
+   "unit": "chapters__ch20"
+  },
+  {
+   "other_doc": "chapters/ch23.md",
+   "anchor": "地圖單位索引 → 部署記錄的換算",
+   "note": "本頁以「單位索引 11 對到部署記錄 0」換算（與 MAP19 部署記錄吻合）；ch23 第 49 行把地圖單位 31 寫成部署記錄 21，若同樣從 11 起算、中間無非波次 0 的記錄應是記錄 20，未在本單位內查證，留給 ch23 的驗證者。",
+   "unit": "chapters__ch20"
+  },
+  {
+   "other_doc": "chapters/ch22.md",
+   "anchor": "章節索引 0x15 與共用判定 fdps_battle_check_default_end_conditions（0x3a2e0）",
+   "note": "ch22.md 正確寫明第 22 章不呼叫共用判定、0x15 那一支走不到；ch21.md 第 246 行的寫法暗示第 22 章靠共用判定的特例看單位 3，已以 finding 2 修正。",
+   "unit": "chapters__ch21"
+  },
+  {
+   "other_doc": "src/chpost2.c",
+   "anchor": "CHAPTER_23_SECOND_LOSS_UNIT_INDEX 0x1f / fdps_chapter_23_post_action 的註解",
+   "note": "src 註解說 0x1f 是哪一筆部署記錄「not settled here -- the deployment record format has not been decoded yet」、「entry 0x14 is a stream of font glyph indices」、「identification ... is not established」；本頁已依 MAP22.DAT 與 WIN22.DAT 確定它是波次 0 的記錄 21（角色 `24`，起點 (24, 24)），0x14 是尤利安「蘭迪斯！！！」與法蓮娜「不～要～～～！」。src 註解過時，應改寫。",
+   "unit": "chapters__ch23"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 23 條 中毒致死不執行死亡腳本",
+   "note": "該條列出受影響的三處（第 6 章兩處、第 12 章），沒有第 23 章死神毒死後無法過關；本頁與該條都未記。",
+   "unit": "chapters__ch23"
+  },
+  {
+   "other_doc": "src/chevt4.c",
+   "anchor": "fdps_chapter_23_event_boss_defeat 註解「with a full bag 反禁制器 lands back in the contract's old slot」",
+   "note": "fdps_unit_remove_item 把後面的物品往前補、清空最後一格，之後 fdps_unit_add_item 取第一個空格，所以背包滿時反禁制器落在最後一格，只有契約原本在最後一格時才回到原位。本頁「落在第一個空格，不一定是契約原本的格子」正確，src 註解的說法有誤。",
+   "unit": "chapters__ch23"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 13 條／挑戰者單位索引 0x52",
+   "note": "known_bugs 第 13 條的現象寫「在第 7 回合之前清完敵人」；本頁與 program_info/chapter.md 寫只要在第 15 回合波次 5 出場前過關，0x52 就在陣列之外。依單位數計算（11+1+9+9+1+27+9+15=82），任何在波次 5 之前的清場都讓 0x52 超出單位數，本頁的範圍較完整；known_bugs 的「第 7 回合之前」只是攻略站描述的情境。",
+   "unit": "chapters__ch24"
+  },
+  {
+   "other_doc": "program_info/known_bugs.md",
+   "anchor": "第 13 條成因「讀到的堆積內容表現為已退場」",
+   "note": "陣列外的記錄內容受 fdps_relocate_unit_array 的亂數大小墊塊影響（src/unit.c:767），known_bugs 把它寫成固定表現為「已退場」；是否每次都如此需實機確認，不屬本頁範圍。",
+   "unit": "chapters__ch24"
+  },
+  {
+   "other_doc": "src/chevt5.c",
+   "anchor": "CH25_BOW_OFFER_TEXT_ID 等四條的註解（0x15–0x18）與 CH25_MERCHANT_FACE",
+   "note": "src 註解把兜售者寫成 merchant、代名詞用 his（\"the merchant's pitch, his question\"）；文字區塊與本頁都是角色 0x77「村婦」（FDETXT25 0x15 的【村婦】），本頁正確，src 註解的 his 應改為 her／the village woman。",
+   "unit": "chapters__ch25"
+  },
+  {
+   "other_doc": "docs/guide/fdps/walkthrough.txt",
+   "anchor": "法蓮娜歸隊時的升級數（walkthrough 第 1741 行）",
+   "note": "攻略站說法蓮娜「連昇十級」；本頁依 `fdps_unit_award_exp_and_level_up` 與 opcode `0x61` 的十輪 99 點推得 9 或 10 級（原有經驗餘數達 10 才是 10 級），本頁正確，攻略站是常見情況的簡化。",
+   "unit": "chapters__ch27"
+  },
+  {
+   "other_doc": "chapters/ch27.md",
+   "anchor": "WINGA26.DAT 隱藏路線的劇情銜接",
+   "note": "ch27 照遊戲對話寫封印解除、異界入口打開、眾人自行出發，並標明碎片救人是攻略站說法；ch28 概要原寫「平衡之神被復活」「被帶進異次元界」，照攻略站說法。以 ch27 與 FDETXT27／FDETXT62 為準。",
+   "unit": "chapters__ch28"
+  },
+  {
+   "other_doc": "src/chinit2b.c",
+   "anchor": "ICON28.DAT 的指令數",
+   "note": "fdps_chapter_29_init 的註解說 ICON28.DAT 的 721 byte 是 eighty-nine opcodes；本頁產生的過場表（不屬本單位）是 90 步、90 列（含 END）。若註解不算 END 應註明，否則差一。",
+   "unit": "chapters__ch29"
+  },
+  {
+   "other_doc": "src/chevt6.h",
+   "anchor": "0x55 / 0x6a 與錨點 (5, 12)、(15, 13)",
+   "note": "chevt6.h／chevt6.c 說 0x55 是死靈、錨點 (5, 12)，0x6a 是白骨戰士、錨點 (15, 13)；本頁、assets/enemies.md、global_text 與 chinit2b.c 都是 0x55 白骨戰士、0x6a 死靈。錨點與編號的對應兩邊一致，只有名稱在 src 寫反，本頁對。",
+   "unit": "chapters__ch30"
+  },
+  {
+   "other_doc": "rebuild_info/pitfalls.md",
+   "anchor": "行動後處理無條件寫敗北蓋過過關",
+   "note": "pitfalls 那一列只列第 3、25、26、27 章；本頁記載第 30 章 fdps_chapter_30_post_action 無條件寫 1，會蓋掉死亡腳本 opcode 4 同一次行動寫的 2，同一形狀卻未列入。",
+   "unit": "chapters__ch30"
+  }
+ ],
+ "pitfall_candidates": [
+  {
+   "unit": "program_info__cd_audio",
+   "text": "MSCDEX 安裝檢查（INT 2Fh AX=1500h）與 device request（AX=1510h）走兩條不同路徑：前者用 CRT int386(0x2f) 直接在保護模式發出，後者因 ES:BX 必須指向真實模式記憶體而用 DPMI 0300h 模擬；重建時把兩者統一成同一種寫法就會偏離原版。"
+  },
+  {
+   "unit": "program_info__cd_audio",
+   "text": "影片外呼前後原版會 AIL_shutdown 並在回來後以 25 Hz 重新 fdps_audio_init、卸下與裝回鍵盤中斷；只寫 spawn 呼叫而不重建音效與鍵盤中斷的拆裝，FD.EXE 執行期間 AIL 計時器與 INT 09h 仍掛在遊戲身上。"
+  },
+  {
+   "unit": "program_info__data_structures",
+   "text": "`fdps_char_spawn_record` 雖與 FD2 同為 26 byte，事件槽來源與法術遮罩不同：照 FD2 從記錄 +0x02 取事件槽、把第五個法術 byte 清零，會讓出場單位綁錯寶箱／事件格，並丟掉法術遮罩第五個 byte 所代表的法術（FDPS 取 +0x14 與 +0x19）。"
+  },
+  {
+   "unit": "program_info__data_structures",
+   "text": "`fdps_item_effect` 與 FD2 的 `item_effect` 同為 23 byte 但 FDPS 沒有前綴 byte（type 在 +0，其後各欄比 FD2 前移一格，+0x15 是 select_mode）；照 FD2 的 types.h 寫會編得過、數值全錯。"
+  },
+  {
+   "unit": "program_info__movement",
+   "text": "目標範圍（fdps_collect_targets_in_range 的擴散形）的程式碼看起來會被 0x40 格擋住，但每個呼叫點之前網格都已 reset、沒有標控制區，所以實際射程就是曼哈頓菱形。重建時如果以為「射程會被單位擋住」，在目標範圍前補標控制區，或把 reset 改成不清 0x40，攻擊、法術、道具的可選範圍都會縮小。"
+  },
+  {
+   "unit": "program_info__spell__1",
+   "text": "道具 use_effect 16（解毒）與 18（解麻痺）只清目標名單第一個單位的計時，但 Cure.saf 與閃白照整份名單播；把清除寫成對名單每個單位做，會讓範圍型的使用多解到其他單位。"
+  },
+  {
+   "unit": "program_info__spell__2",
+   "text": "戰鬥道具選單 fdps_battle_item_menu（0x252b0）只有「交給」把回傳值改成 2（回合用掉），「裝備」與「丟棄」都不改、維持 -1；照「改動了背包的分支都算行動」的直覺讓裝備也回 2，玩家裝備後取消行動選單就會失去這一回合（src/item.c 的 ITEM_MENU_NOTHING_DONE 註解）。"
+  },
+  {
+   "unit": "program_info__spell__2",
+   "text": "戰鬥道具選單的反灰旗標表只在迴圈前從樣板複製一次、之後只會被寫成 1；把宣告放進迴圈內（每輪重新初始化）會讓「交給」在鄰居走到身邊後重新可選，原版在同一次選單裡不會恢復（src/item.c 0x252bc 的註解）。"
+  },
+  {
+   "unit": "resource_info__cutscene_script",
+   "text": "過場腳本的 `SWITCH_MAP` 切到當下所在的地圖時不是 no-op：ICON29 在 0xB78 切回地圖 29，靠 fdps_chapter_state_reset 丟掉演出期間部署、退場、放置的單位與地圖改寫，再由 0xB7A 的 DEPLOY_WAVE 部署戰鬥用的平衡之神。重建時若把「目標等於目前地圖」當成可省略的切換而跳過重設，第 30 章會帶著演出殘留的單位與圖塊開戰。"
+  },
+  {
+   "unit": "resource_info__disc_images",
+   "text": "過場播放器是以 `spawnlp` 呼叫、播放器路徑同時當作檔名與 argv[0] 傳兩次；照 cd_audio.md 目前寫的 `spawnv(P_WAIT, path, argv)` 去重建會換成不同的 CRT 進入點（不走 PATH 搜尋的 spawnv），且 FD.EXE 本身是 DOS/4GW 程式，需要能找到 DOS4GW.EXE（安裝後在硬碟的 \\FDPS），光碟上的 FD.EXE 靠 stub 的 DOS4GPATH／PATH／目前目錄搜尋載入器。"
+  },
+  {
+   "unit": "resource_info__map",
+   "text": "搜尋寶箱／埋藏格時背包滿而選擇以物易物：原版把換出的物品寫回該格的可搜尋格記錄，但不設觸發旗標、不重繪，這格之後還能再搜、拿回剛換出的那件（fdps_battle_search_cell_at_cursor，src/btlact.c）。照直覺會在交換成功後也設旗標並重繪，讓寶箱變成已開啟、換出的物品就此消失。"
+  },
+  {
+   "unit": "resource_info__saf__1",
+   "text": "法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）在法術本體 `?L??.SAF` 沒有任何命中格（frame `0x05` 全為 0）時，印 `ERROR: No Hit Point !!!` 並 `exit(1)` 結束整個程式；攻擊演出 `0x196d0` 則在同一情況把分母改成 1 繼續。照直覺把兩者統一，或把法術那邊改成跳過扣血，會讓原版直接結束的情況繼續執行。"
+  },
+  {
+   "unit": "resource_info__saf__1",
+   "text": "法術演出的開場段以 `!=` 比較施法者 Magic 動畫的游標與其第 0 格的 `0x04`，而游標用「停在最後一格」模式推進；寫成 `<` 或加上 clamp 在出貨資料上無差別，但 `0x04` 不小於畫格數時原版會無限迴圈、重建版不會。"
+  },
+  {
+   "unit": "resource_info__terrain",
+   "text": "繪製深度恰好等於 10 的場景圖層兩個 pass 都不畫（fdps_draw_scene_layers 的 JGE／JLE），照直覺把其中一邊寫成 <= 或 >= 會多畫出原版永遠不顯示的圖層；深度比較與排序都是無號、排序是穩定的泡沫排序，換成 qsort 或 signed char 會改變同深度或 >=0x80 圖層的疊放順序。"
+  },
+  {
+   "unit": "resource_info__terrain",
+   "text": "fdps_draw_scene_layer 取旗標用未加動畫偏移的那一列、取半透明程度用加了偏移的那一列；照直覺從同一列讀兩者，在各幀半透明程度不同時會畫錯。"
+  },
+  {
+   "unit": "resource_info__terrain",
+   "text": "移動範圍高亮的脈動相位在 fdps_draw_scene_layer 開頭每呼叫一次（每一層）就前進一步，不是每幀一步；層數多的地圖脈動較快，把它移到每幀一次的位置會改變原版的閃爍速度。"
+  },
+  {
+   "unit": "resource_info__terrain",
+   "text": "fdps_draw_scene_layer 用圖層自己的格偏移同時索引移動網格而不讀網格檔頭；地圖 07 的 64×64 前景層在顯示移動範圍時讀到錯位且越過 33×25 網格尾端的標記 byte，重建時若改用網格自己的尺寸或做邊界檢查，前景柵欄的變色會與原版不同。"
+  },
+  {
+   "unit": "resource_info__vfs__1",
+   "text": "VFS 有兩個成員查找端，行為不一致而且都要照原樣保留：從硬碟開啟的 handle 由 fdps_vfs_find_entry 只取筆數低 byte、fdps_vfs_open 以帶號 short seek table 偏移；記憶體內的巢狀容器（BASEANI.VFS、BASEWAV.VFS）由 fdps_vfs_image_get_entry 以 32-bit 無號比較筆數、以無號 word 讀偏移，而且用 memmove 而非 memcpy 複製。照直覺把兩者併成一支共用的查找函式，會讓其中一邊的限制或符號連結改變。"
+  },
+  {
+   "unit": "rebuild_info__build_flags__1",
+   "text": "wcc386 對沒有框架的葉函式不插入 __CHK probe：原版 CD 模組 33 支裡只有 32 支帶 probe（fdps_cd_status_is_not_busy 沒有）。若要以 -os 重現 CD 模組、並拿「每支都有 probe」當檢查條件，這一支會被誤判成旗標錯。"
+  },
+  {
+   "unit": "rebuild_info__build_pipeline",
+   "text": "原版的 MSCDEX 安裝檢查 fdps_cdrom_detect（0x3c636）用 int386(0x2f, ...) 直接發 INT 2Fh AX=1500h，而其餘 CD 命令都經 fdps_cd_device_request（0x3bb7d）的 DPMI INT 31h AX=0300h；照直覺把兩者統一成同一種呼叫方式（全改 int386x DPMI，或全改 int386）會偏離原版，後者在 AX=1510h 帶真實模式指標的請求上會失敗。"
+  },
+  {
+   "unit": "rebuild_info__emit_pipeline__1",
+   "text": "`fdps_shutdown_free_resources`（`0x29440`）無條件 free `data_fdps_command_sprite_sheet_ptr` 等十八個資源指標、其餘七個以指標不為 NULL 守門，而載入器（`fdps_field_load_chapter_resources`、`fdps_build_map_unit_array`）以配對計數不為零守門；照直覺統一改成「指標不為 NULL 才 free」或「計數不為零才 free」都會改變原版在異常狀態下的行為。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__3",
+   "text": "CD 的 MSCDEX 安裝檢查（fdps_cdrom_detect，0x3c636）與其他 device request 走不同的中斷路徑：前者是保護模式 int386(0x2f)、只設 AH/AL/BX 且不清 CX、DX、SI、DI（沿用上一次 INT 呼叫留下的值），後者是 int386x 的 DPMI 0300h。把兩者統一成同一個 helper，或在安裝檢查前把整個 REGS 清零，都會改變送進 MSCDEX 的暫存器內容。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__4",
+   "text": "第 19、24 章的決鬥邀約不管玩家接受或拒絕都會把決鬥旗標設起（chpost2.c 的 CHAPTER_19/24_DUEL_LATCH_SET 寫在 if/else 之後），邀約只在共用判定剛寫下過關的那一次行動裡提出；照直覺只在接受時設旗標，拒絕後下一次行動會再問一次。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__4",
+   "text": "升級屬性成長 `fdps_level_up_apply_stat_gain` 抽的是 `rand() % (上限 - 下限)`，所以成長值落在 [下限, 上限-1]，上限本身永遠抽不到；照直覺寫成 `rand() % (range + 1)` 會讓成長變多並改變抽取結果（若 pitfalls.md 別處尚未收錄）。"
+  },
+  {
+   "unit": "assets__items__1",
+   "text": "每回合回復 MP 的判定用的是整個狀態 byte（`+0x05`）為 0，不是休息判定用的 0x81 遮罩；而且同一個單位若既在 slot 4／8 裝備了村正／正宗／形見指環、又帶著魔精石碎片，會回復兩次。照直覺合併成「每個單位最多回一次」或沿用休息的條件都會與原版不同（src/btlturn.c 的 fdps_battle_advance_turn 註解）；pitfalls.md 現有那一列只講認 slot 不認持有人。"
+  },
+  {
+   "unit": "assets__tables__items",
+   "text": "ITEM.DAT 的 use_amount（+0x0e）原版以 MOVSX 當有號 16-bit 讀（0x132d5、0x26328），照攻略站「數量」直覺宣告成 unsigned short，出貨資料（最大 9999）不會出錯，但 0x8000 以上的值會從大正數變成負數的傷害／回復量。"
+  },
+  {
+   "unit": "assets__tables__spells",
+   "text": "距離（cast_range_flags）為 00 的法術（裂地術、封神裂震）在玩家施法路徑上不看 record 的 target_side，命中清單固定只收 side 0；照直覺把 target_side 一路傳下去，將來若有距離 0 的己方法術就會與原版不同（src/spellmnu.c 的 MAP_WIDE_SELECT_MODE）。"
+  },
+  {
+   "unit": "assets__tables__spells",
+   "text": "法術／物品的作用對象 `01` 收所有非 0 的 side（含 side 1 友軍 NPC），`03` 只收 side 2 我方隊伍；把兩者都寫成「己方」的同一個判定（side != 0 或 side == 2），神行術或回復法術能選到的對象就會與原版不同（src/aitarget.c 的 select_mode）。"
+  },
+  {
+   "unit": "chapters__ch03",
+   "text": "過場腳本的 WALK_UNITS（fdps_icon_script_walk_units，src/icon.c）自己移動單位座標，不經過 walk.c 的四支行走動畫，所以不會回報格子事件。重建時如果為了省事讓腳本行走改呼叫 fdps_animate_move_path／fdps_walk_step_*，每一步都會以時機 0 呼叫 fdps_map_set_pending_tile_event：第 3 章開場 ICON02.DAT 讓蘭迪斯往上走到 (25, 16)，就會在開場腳本裡把狼人伏兵的格子事件設為待處理。pitfalls.md 第 86 列只寫了四支行走動畫每一步都回報，沒寫腳本行走刻意不回報。"
+  },
+  {
+   "unit": "chapters__ch11",
+   "text": "第 11 章 `fdps_chapter_11_post_action` 在共用判定 `fdps_battle_check_default_end_conditions` 之後，無條件以 `fdps_unit_is_retired(8)` 寫敗北（結束碼 1），不看結束碼現值、也不是 else：同一次行動裡清光敵人又失去琴琴是敗北，章節事件先寫的結果也會被蓋掉。照直覺寫成 `if (end_code == 0 && retired(8))` 或掛在過關的 else 上，兩種情況都會變成過關。pitfalls.md 第 25–27 章那列是同一形狀，但沒收第 11 章，而且本章判的是寫死的單位索引 8 而非角色編號。"
+  },
+  {
+   "unit": "chapters__ch15",
+   "text": "存檔項目反灰的條件是「任何陣營、未退場且本回合已行動」，不只看我方單位；在戰鬥開始前以過場讓敵方單位行動（第 15 章 ICON14 的 opcode 0x62）而不清掉 bit 7，第一個玩家階段就不能存檔。重建時若把存檔反灰條件只限我方陣營，或刪掉 fdps_chapter_15_init 的清除，會與原版不同。"
+  },
+  {
+   "unit": "chapters__ch17",
+   "text": "第 17 章回合事件 fdps_chapter_17_event_deploy_wave_for_turn（0x38110）的波次是「回合計數器 − 7」，沒有下限檢查；照直覺補上「小於 0 就當 0」的防呆，會在該處理函式被較早回合觸發時把地圖的整批開場波次 0 再部署一次，而原版的負值不對應任何部署記錄（src/chevt3.c 的註解）。"
+  },
+  {
+   "unit": "chapters__ch19",
+   "text": "第 19、24 章行動後處理的兩段（決鬥判定／共用判定在前、提出決鬥在後）先後不能對調：提出決鬥的條件「結束碼是 2」只能讀到同一次呼叫裡共用判定剛寫出的過關碼，把提出決鬥挪到前面（例如寫成「先處理本章特殊事件、再跑通用判定」）決鬥就永遠不會出現。rebuild_info/pitfalls.md 只收了「旗標設起後不可呼叫共用判定」，沒有收兩段的順序。"
+  },
+  {
+   "unit": "chapters__ch21",
+   "text": "第 21 章第二波伏兵 `fdps_chapter_21_event_deploy_wave_2`（`0x38400`）把 AI 行為重設迴圈的範圍寫死為單位索引 11–80（含兩端），不看 `data_fdps_map_unit_count`；波次 1 尚未出現時單位數只有 65，索引 65–80 寫到單位陣列配置區塊之外的堆積（讀檔後的區塊是 0x1e00 byte＝96 筆，才落在區塊內）。照直覺會把上限改成單位數或加邊界檢查，改了之後原版被踩到的堆積內容跟著變；pitfalls.md 的越界寫入那一列還沒收這一條。"
+  },
+  {
+   "unit": "chapters__ch26",
+   "text": "第 26 章第二條敗北判定問的是寫死的單位索引 0x5b（波次 3 的最後一名侍衛，記錄 66），不是索爾本人（0x57）；照畫面的「索爾死亡」或攻略站的規則改寫成問索爾的格位，就變成索爾一倒就敗北、最後一名侍衛倒下反而不敗北。判定還以觸發旗標陣列元素 0x10 等於 1 當閘門，拿掉閘門會在援軍出場前讀到尚未建立的記錄。"
+  },
+  {
+   "unit": "chapters__ch26",
+   "text": "第 26 章兩支改 AI 行為的事件（fdps_chapter_26_event_enemies_advance 的 0x1a–0x2d、fdps_chapter_26_event_deploy_waves_2_and_3 的 0x0c–0x4f）範圍都是寫死的常數：伏擊那次止於 0x4f，剛出場的波次 2 鎧甲武士與波次 3 索爾一行保持原本的 AI 行為。寫成「把所有敵方單位改成主動」或迴圈跑到 data_fdps_map_unit_count，背後那 7 名援軍就會往上推進、索爾一行也會被改成主動進攻。"
+  },
+  {
+   "unit": "chapters__ch30",
+   "text": "第 30 章 `fdps_chapter_30_post_action`（`0x3ba50`）蘭迪斯退場就無條件把結束碼寫成 1，不看目前的值；第三型態平衡之神的死亡腳本（opcode 4）在同一次行動裡先寫的 2 會被蓋掉，結果是敗北。照共用判定的習慣加上「結束碼已非 0 就不動」的保護，會讓這種情形變成過關。可併入 pitfalls 現有「第 25、26、27 章行動後處理無條件寫敗北」那一列。"
+  }
+ ],
+ "not_reread": [],
+ "per_unit": [
+  {
+   "unit": "CONTEXT",
+   "claims": 42,
+   "findings": 10,
+   "summary": "逐條核對詞彙表的 pool、快照、章號／章節索引／地圖編號、各組地圖檔的編號涵蓋、VFS／CEL／SAF、存檔 slot 與 live-state、刪減分類與各例，共 8 條有問題（含 2 條 lint 經判定原文可留）。"
+  },
+  {
+   "unit": "program_info___index",
+   "claims": 20,
+   "findings": 2,
+   "summary": "逐列對照 program_info 下 15 份文件的標題、驗證對象段與 src/，檔案清單完整、各列內容大致吻合；2 條有問題：村莊列把「復活」歸給教會（教會沒有復活指令），以及「每份文件的驗證對象段都寫位址範圍」不成立。"
+  },
+  {
+   "unit": "program_info__architecture",
+   "claims": 96,
+   "findings": 24,
+   "summary": "逐句查了 architecture.md 全頁（呼叫圖數字、啟動鏈、main 與頂層迴圈、子系統進入點表、共用群集與遞迴環、走不到的 function、末節各條），共 24 條有問題：共用群集的呼叫端數與大小多處過時、啟動鏈兩個名稱與離場路徑錯、sprintf 位址錯、calling convention 統計與「11 個手寫組語」錯、子系統分佈表無法重現、末節多條「仍未定」其實已有定論或屬其他頁。"
+  },
+  {
+   "unit": "program_info__battle__1",
+   "claims": 142,
+   "findings": 1,
+   "summary": "逐句對照 src/（combat.c、cmbblow.c、unitatk.c、unitstat.c、unit.c、btlturn.c、btlact.c、btlmenu.c、aiact.c、aitarget.c、audio.c）、Ghidra（rand 的全部呼叫點、srand 無呼叫者、種子初值、計時器處理函式、fdps_relocate_unit_array 的呼叫者、fdps_map_actor_move_and_attack 的動畫分支）與 FIGACT 的 91 個 ACT*.SAF 查了物理攻擊、反擊、公式、異常、計時器、經驗、升級、亂數與回合各段，只有開頭的涵蓋範圍一處不精確。"
+  },
+  {
+   "unit": "program_info__battle__2",
+   "claims": 42,
+   "findings": 2,
+   "summary": "查了 +5 狀態 byte 的寫入與測試遮罩、休息與 MP 回復、死亡動畫與死亡腳本收集／執行順序、退場的寫法共 42 條，2 條有問題：過場腳本單一單位退場是 OR 1 而非整 byte 指派，以及「見上一節」指錯章節。"
+  },
+  {
+   "unit": "program_info__cd_audio",
+   "claims": 58,
+   "findings": 15,
+   "summary": "逐句對照 src/cd.c、cdtoc.c、cdaudio.c、title.c、main.c、Ghidra 與兩片光碟的 cue 檢查 CD 音源頁：章節音軌表 60 byte、+1 換算、五個呼叫端、光碟音軌範圍、MSF 公式都正確；有 12 條問題（INT 2Fh 指令其實存在於 CRT 的 int386 stub 表、錯誤訊息看的是 DPMI carry flag、0x69e20 是 request 狀態字、換片提示是文字不是 sprite、循環檢查以 tick 計、spawnlp 不是 spawnv、重建規模段落過時等）。"
+  },
+  {
+   "unit": "program_info__chapter__1",
+   "claims": 92,
+   "findings": 3,
+   "summary": "逐句核對章節框架前半（main 分派、章節索引的 34 個寫入點、離場旗標、四張表與 13 個呼叫點、三十支進入處理函式、reset 與標題卡、單位陣列建立與波次部署、回合算式與 0xFF 波次），3 條有問題：腳本事件處理函式的位址範圍起點錯、兩個範圍終點寫成下一個 byte、0xFF 波次那句把三選一講成傳 255。"
+  },
+  {
+   "unit": "program_info__chapter__2",
+   "claims": 96,
+   "findings": 5,
+   "summary": "逐句核對事件分派、50 格 slot 對照、勝敗判定、行動後處理函式分類、章節結束與復活費用表等約 96 條主張（函式位址全數比對快照、地圖事件來源以 map_decode 普查 30 張地圖），5 條有問題：身分檢查清單漏第 8 章、「多半」與實數不符、0x36b60 並非事件處理函式呼叫的 helper、「寫之前不檢查目前值」漏第 19／24 章、玩家階段迴圈的結束碼讀取點漏一處。"
+  },
+  {
+   "unit": "program_info__code_pools__1",
+   "claims": 78,
+   "findings": 16,
+   "summary": "逐句核對 code_pools.md 前 182 行的 pool 規模、位址範圍、FID 對帳數字、thunk 與 binary_artifact 改判表、中信心軸與 AIL 狀態位址，共 12 條有問題，多數是六支 DPMI 常式改判 fdps 後沒有跟著更新的計數。"
+  },
+  {
+   "unit": "program_info__code_pools__2",
+   "claims": 34,
+   "findings": 6,
+   "summary": "查了要還原的 fdps 清單（數量、byte、tag、名稱、caller）、24 支組語模組的範圍與名單與辨識特徵、RLE 保留組語的理由與檔名、存檔兩支的指令、%hf 與 387 模擬器進入點，共 6 條有問題：byte 總數過時、覆核推翻數寫成 21、172 個無 caller 的解讀錯、main 不是 fdps_ 開頭、辨識特徵被套到全部 24 支且 Ghidra 簽章描述過時、INC EBP 其實是條件執行。"
+  },
+  {
+   "unit": "program_info__cutscene",
+   "claims": 118,
+   "findings": 5,
+   "summary": "逐句核對過場直譯器、各 opcode、階段動畫、攻擊／效果動畫與畫面轉場共約 118 條主張（位址、呼叫點數、迴圈界限、旗標處理、連結），5 條有問題：第 15 章清除 bit 7 的理由錯、存讀檔畫面的 rand() 位移步數少算一半、0x13 的屬性類別寫成「可搜尋類」、0x10 的「視野類唯一還原」比較對象錯、以及「每一幀都由 fdps_render_view_frame 畫出」過度概括。"
+  },
+  {
+   "unit": "program_info__data_structures",
+   "claims": 78,
+   "findings": 8,
+   "summary": "逐條核對了段範圍、anchor 與 pool 計數、23 個執行期記錄與 10 個程式庫記錄的大小與指標位址、鍵盤 ISR 初值、FD2 對照與 _edata 量測，共 7 條有問題：指標集中範圍的說法過寬、出場記錄與 FD2 並非逐欄相符、ISR 區範圍與「緊密排列」錯、兩個 AIL 記錄的位址其實是指標、一個欄位描述不準、一句流程敘事。"
+  },
+  {
+   "unit": "program_info__dialog",
+   "claims": 96,
+   "findings": 5,
+   "summary": "逐句對照 src/msgwin.c、src/text.c、呼叫端原始碼與地圖／文字資料查了對話系統頁約 96 條事實，4 條有問題：視野區呈現的適用範圍把滑入開窗與收窗也算進去、死亡腳本「背包已滿」的等待輪數寫錯、過場三選一的歸類不完整（兩處），另有一條 src 註解與本頁不一致。"
+  },
+  {
+   "unit": "program_info__known_bugs__1",
+   "claims": 95,
+   "findings": 4,
+   "summary": "逐條核對開頭涵蓋清單、23 列總表與第 1–17 條的函式位址、檔案歸屬、指令位址、資料計數（部署記錄、ITEM.DAT 欄位、FDETXT 條目）與成因敘述，發現 4 條問題：開頭清單漏列第 23 條的 0x1fa30、第 8 列的「所在」指向被呼叫端而非寫死參數的呼叫端、第 4 條把地圖路徑的肖像編號判定寫成「另外」要求，以及第 13 條現象的第 7 回合界線與成因推得的範圍不一致、需實機確認。"
+  },
+  {
+   "unit": "program_info__known_bugs__2",
+   "claims": 58,
+   "findings": 3,
+   "summary": "逐條核對第 18–23 條已知 bug 的函式位址、src 行為、MAP09／MAP27／MAP05／MAP11 部署與回合事件、FIGHT.VFS 缺檔、全域文字條目與連結，共 3 條有問題：第 19 條把表外暗號說成必定按不出（擁有者 village.md 是有條件的），第 21 條漏了 AI 施法同樣看動畫開關，第 23 條「流浪鐵匠」與第 16 章頁的「流浪工匠」不一致。"
+  },
+  {
+   "unit": "program_info__map_ai__1",
+   "claims": 125,
+   "findings": 5,
+   "summary": "逐句核對 map_ai.md 第 1–217 行的函式位址、呼叫端、單位記錄偏移、行為分派、三個評分與收集器規則、道具／法術數值與部署統計，共 5 條有問題（分支數算錯、直線收集器的輸出順序、不死復活連錯頁、神聖之水選用條件與持有者範圍不精確）。"
+  },
+  {
+   "unit": "program_info__map_ai__2",
+   "claims": 38,
+   "findings": 4,
+   "summary": "逐句核對「行動的執行」與「原版錯誤一覽」共 38 項（位址、執行步驟、經驗值公式、施法擊殺者錯位與出貨資料的 opcode 2 論證、光束軌跡夾限與網格寫入、錯誤清單出處），事實全部成立，4 條需修：施法段沒說收集器只收 opcode 2–5、道具門檻與游標模式清除只寫了一個呼叫端、光束夾限的成因在本頁重述了 known_bugs 第 9 條擁有的機制。"
+  },
+  {
+   "unit": "program_info__memory_layout",
+   "claims": 64,
+   "findings": 17,
+   "summary": "逐句核對記憶體佈局頁的 LE object table、DGROUP 分段、BSS 歸零、近端堆積、object 3 內容、函式指標表、跳躍表、混音分派表、object 1 歸類與基準稽核，共 17 條有問題（BSS 只清前 0x1000、跳躍表漏列與 0x463b0 誤判、0x601c4 呼叫端漏列 5 處、object 3 檔案尾巴、門檻數等）。"
+  },
+  {
+   "unit": "program_info__movement",
+   "claims": 118,
+   "findings": 8,
+   "summary": "逐句對照 src/movegrid.c、walk.c、maptile.c、mapcur.c、btlturn.c、btlmenu.c、aitarget.c、aiscore.c、mapai.c、rsrc.c、Ghidra 與地圖資料檢查全檔，8 條有問題：空指標檢查的例外、最大地圖尺寸（三處）、目標範圍不會被單位擋住、擴散的移動力參數來源、標記寫 0 的範圍、選格確認的標記前提。"
+  },
+  {
+   "unit": "program_info__save",
+   "claims": 118,
+   "findings": 4,
+   "summary": "逐句對照 src/btlmenu.c、savefile.c、save.c、savepnl.c、title.c、village.c、vilbar.c、rsrc.c、main.c 與快照位址查了存讀檔流程頁全部 175 行，4 條有問題：戰鬥存檔搬入的區塊數寫成五個（實為四個）、標題讀檔取消那句主詞含糊易被讀成旗標改回 0、戰鬥存檔「不帶 sprite 槽號」與實際照存不用不符、以及「原版錯誤」一句掛錯對象且 0xff 填充歸給讀檔畫面。"
+  },
+  {
+   "unit": "program_info__spell__1",
+   "claims": 142,
+   "findings": 3,
+   "summary": "逐句對照 src/spellmnu.c、spell.c、cmbspell.c、item.c、unitstat.c、unit.c、btlact.c、btlturn.c、aitarget.c、aiact.c、mapcur.c、fdpstype.h 與 MAGICDAT.DAT／ITEM.DAT 實際 byte，查了 142 條主張，3 條有問題：學會法術的途徑漏了第 1 章結束給蘭迪斯業火、中毒的設定來源漏了第 1 章開場、只作用在名單第一個單位的道具碼漏了 16／18。"
+  },
+  {
+   "unit": "program_info__spell__2",
+   "claims": 36,
+   "findings": 1,
+   "summary": "查了物品欄四支 function、交給／丟棄／裝備的流程、衍生數值公式、原版錯誤條目與相關文件連結共 36 條，1 條有誤（直接轉交時只重算交出者的戰鬥數值）。"
+  },
+  {
+   "unit": "program_info__village__1",
+   "claims": 120,
+   "findings": 5,
+   "summary": "逐句核對村莊階段、看板、暗號表（對映像 0x310c0 與攻略站）、章節索引 25 的堆疊落點、各場所指令列、商店庫存／清單／購買／預覽、賣與交換與成員選單，共 5 處有問題：轉職後小圖不重建的說法漏了存讀檔畫面會重建快取、商品第二行的預設標籤是 ???? 而非空白、購買流程「答否不留痕跡」涵蓋過頭、走路動畫殘影數與調色盤循環時機描述不精確。"
+  },
+  {
+   "unit": "program_info__village__2",
+   "claims": 68,
+   "findings": 1,
+   "summary": "逐句核對教會轉職、復活、酒館與抽獎各節對 src/church.c、src/vilbar.c、src/roster.c、src/village.c、src/main.c、Ghidra 映像與 RANKUP.DAT／FRILEVUP.DAT 的說法，事實全部相符，1 條問題：RANKUP.DAT 九筆路線表整張重述 assets/characters.md 擁有的資料表。"
+  },
+  {
+   "unit": "resource_info___index",
+   "claims": 26,
+   "findings": 0,
+   "summary": "逐列核對 resource_info 索引的 10 列（檔案存在、各列描述的章節確實在該檔、數量 99 個 CEL／66 支 ICONANI 腳本／九個 MISC.VFS 資料表／525 個 SAF／4 個存檔 slot／64 張地圖統計列／10 個 VFS 容器以資料或原檔重數），全部成立，沒有問題。"
+  },
+  {
+   "unit": "resource_info__cel",
+   "claims": 42,
+   "findings": 3,
+   "summary": "以 cel_decode 重跑全部 99 個 .CEL 核對內容清單、總數、空隙 byte 與容器分佈，並對照 src/ 的繪製器、取圖函式、載入常式與 Ghidra 字串；內容清單與數字全部正確，3 條有問題（光碟上的存放位置、13 種 mode 的差異描述、格式字串大小寫）。"
+  },
+  {
+   "unit": "resource_info__cutscene_script",
+   "claims": 78,
+   "findings": 1,
+   "summary": "逐條核對過場腳本頁的呼叫端與播放時機、直譯器行為、opcode 表 24 列的長度／運算元／作用／次數／腳本數、章節狀態重設、越界寫入與邊界略過、45 個切換目標與 66 列對照表；只有 1 條有問題：ICON29 那一列漏了它在 0xB78 切回地圖 29 的 SWITCH_MAP。"
+  },
+  {
+   "unit": "resource_info__data_tables",
+   "claims": 38,
+   "findings": 1,
+   "summary": "逐項核對九張表的大小、stride、筆數、取值函式位址與索引、ITEM.DAT 226 筆與 PROMAP.DAT 預設列、SHOPnn.DAT 的載入，以及攻略站六個偏移、52,184 byte 差距、三份容器的 SHA-256／大小／PROMAP 位置與連結，只有一條把「偏移吻合」推論成「內容一致、差異全在動畫成員」的說法過頭。"
+  },
+  {
+   "unit": "resource_info__disc_images",
+   "claims": 110,
+   "findings": 6,
+   "summary": "直接解析兩片光碟映像的 ISO9660 目錄、cue、INSTALL.BAT 與兩個 PACK.VFS，逐項重算檔案表（41 列大小與 SHA-256）、音軌表（36 列）、sector 數與總長，全部相符；有 5 條問題：FD.EXE 其實是 32-bit LE（DOS/4GW）不是 16-bit MZ、呼叫它的是 spawnlp 不是 spawnv、PACK1.VFS 不是「重複記錄」而是單一 ARJ 外殼包亂數內容、只存在容器內的清單漏了 PASS.DAT、光碟 2 與執行期清單把遊戲不讀的 PACK1.VFS 算成執行期檔案。"
+  },
+  {
+   "unit": "resource_info__map",
+   "claims": 96,
+   "findings": 7,
+   "summary": "逐句核對 MAPnn.DAT／COD 的格式、讀取端、出貨資料統計與每張地圖統計表（表與 map_decode report 逐列相同），共 7 條有問題：可部署格最少的地圖寫錯、兩句提示文字與一句空箱文字不是遊戲原文、重繪觸發時機說成「每次寫旗標」、波次出場只寫章節事件漏了過場腳本的 DEPLOY_WAVE（兩處）、地形欄說成格數。"
+  },
+  {
+   "unit": "resource_info__saf__1",
+   "claims": 78,
+   "findings": 7,
+   "summary": "以 saf_decode 重算 525 個檔的全部計數（frame／layer／tilemap／格子／tile／像素／音效、時長、座標範圍、半透明、佈局、空殼檔），並對照 src/saf.c、sprite.c、audio.c、cmbblow.c、combat.c、cmbspell.c、ending.c 與 Ghidra 的 0x140e0 呼叫端；數字大多正確，7 條有問題：ML/EL 檔數 38 應為 37、frame 提示 byte 的讀取者漏了法術演出讀 0x05、施法者 MAGIC 檔與片尾名單讀 0x04、0x04 與命中音的描述不準、繪製器並不裁切、layer 0x08 其實被讀到且附帶一句專案進度式的保留語。"
+  },
+  {
+   "unit": "resource_info__saf__2",
+   "claims": 413,
+   "findings": 0,
+   "summary": "以 saf_decode verify／report 對全部 525 個 SAF 重跑，內容清單第 169–575 行共 407 列與工具輸出逐列逐序完全相同，第 167 行的 cell 尺寸一律 24×24、畫格最多 LOGO.SAF 186 格、tile 最多 CHAPTER.SAF 3,487 個、283 個帶音效 242 個沒有全部正確，沒有發現問題。"
+  },
+  {
+   "unit": "resource_info__saf__3",
+   "claims": 120,
+   "findings": 0,
+   "summary": "以 saf_decode verify／report 重新解出全部 525 個 SAF，逐列比對本段內容清單 120 列（EMG01–POSION）的 frame、tilemap、tile、音效數，全部相符，無問題。"
+  },
+  {
+   "unit": "resource_info__save",
+   "claims": 92,
+   "findings": 1,
+   "summary": "逐條對照 src/（btlmenu.c、savefile.c、save.c、savepnl.c、title.c、fdpstype.h）、Ghidra 的 0x60118 引用與 0x14ea0 反組譯、MAP*.DAT 大小與七份實際存檔（fde_sav.py verify 與自寫解密腳本）核對整份存檔格式文件，偏移、大小、位址、密鑰流、檢查碼與實檔欄位全部成立，只有 1 條引用寫法不合規範。"
+  },
+  {
+   "unit": "resource_info__terrain",
+   "claims": 78,
+   "findings": 3,
+   "summary": "逐條對照 src/rsrc.c、maptile.c、mapdraw.c、combat.c、deploy.c、gamedata.c 與 FIELD1／FIELD2／MISC 的出貨資料（檔案清單、MPL／DTL／ATTR／DSC 檔頭與內容、地形類別格數、旗標值、背景編號、PROMAP 類別 6）驗證本頁，3 條有問題：DSC 欄位抄進的陣列數寫成六組（實為八個）、地圖 33 的結束點寫錯、地形類別名稱其實有攻略站來源。"
+  },
+  {
+   "unit": "resource_info__text",
+   "claims": 24,
+   "findings": 2,
+   "summary": "逐條對過文字區塊格式、控制碼、檔名編號、全域文字條數、字模表尺寸與空白格、與 FD2 字模的比對數字與數字代碼的字模映射，數值全部成立；2 條有問題：章號的說法只對 FDETXT01–30 成立、種族／職業代碼範圍是別頁擁有且與本頁主題無關的孤立句。"
+  },
+  {
+   "unit": "resource_info__vfs__1",
+   "claims": 34,
+   "findings": 2,
+   "summary": "逐一重算 10 個容器的 header、entry 欄位、四項自洽性、容器清單與 BACKGRND／FIELD／FIELD1 三張成員表（全部與資料相符），並對照 src/vfs.c 查程式端讀取行為；2 條有問題：成員數上限與偏移上限沒說明只適用於從硬碟開啟的容器且 255 的說法不精確，混合大小寫查找的例子舉成了不經過比對的容器名稱。"
+  },
+  {
+   "unit": "resource_info__vfs__2",
+   "claims": 495,
+   "findings": 0,
+   "summary": "逐列比對 FIELD2／FIGACT／FIGHT／ICONANI 四個容器共 495 列檔名與大小，與 vfs_dump 解出的實際檔案完全一致（成員數 131／91／140／133 亦符合），沒有問題。"
+  },
+  {
+   "unit": "resource_info__vfs__3",
+   "claims": 223,
+   "findings": 0,
+   "summary": "以 vfs_dump.py list 逐筆比對 MISC.VFS（208 筆）與巢狀 BASEANI.VFS（3 筆）、BASEWAV.VFS（9 筆）三張成員表的檔名、大小與順序，220 列全部與容器一致，無問題。"
+  },
+  {
+   "unit": "rebuild_info___index",
+   "claims": 32,
+   "findings": 0,
+   "summary": "逐列對照 rebuild_info 十份文件的實際章節與內容（六種等價判定、四類不 emit 符號、八類隱性契約、三種佈局約束、七個遊戲側符號與 alias、遊戲本體與測試映像差異、pitfalls 各節）與 ADR-0001 連結，全部相符，沒有問題。"
+  },
+  {
+   "unit": "rebuild_info__ail_link",
+   "claims": 32,
+   "findings": 1,
+   "summary": "逐條核對 ailv3.lib 的模組與 EXTDEF（26 個 CRT 與 7 個遊戲側符號）、七個符號的位址與出處、alias 清單、18 個 AIL 進入點、ailsmoke 的涵蓋、DIG.INI／AILDRVR.LST／MDI 的說法與驗證表，只有「計時器 ISR 在 API 裡沒有別的東西會走到」一條錯誤。"
+  },
+  {
+   "unit": "rebuild_info__build_flags__1",
+   "claims": 48,
+   "findings": 9,
+   "summary": "查了工具鏈判定的位址與大小、CD 模組範圍與 __CHK 呼叫端、inline 展開的實例與呼叫數、推送形式計數、switch 範例與旗標現況等 48 條，9 條有問題（版權字串位址錯、CD 模組是 33 支不是 32 支、三處票號與進度敘述、-zp 的結論過時、兩處小的不精確，另一條 lint 屬萬用字元）。"
+  },
+  {
+   "unit": "rebuild_info__build_flags__2",
+   "claims": 38,
+   "findings": 8,
+   "summary": "查了連結指令與 LE header、object 3、RLE 組語的 NOP 數與各分支位移、calling convention 統計、序幕形狀量測、RET imm 與重現工具，共 8 條有問題：calling convention 計數與「11 個全是組語」不符快照、序幕量測是過時的 1,042 樣本、RET imm 漏了 __GRO、object 3 誤稱 vendor 模組且帶票號、spawnvpe／spawnve 位址不是進入點、一處章節引用不準。"
+  },
+  {
+   "unit": "rebuild_info__build_gate",
+   "claims": 46,
+   "findings": 6,
+   "summary": "對照 tools/build_gate 的 gate.py、lefixup.py、lepad.py、baselines.json、建置腳本、devlog 實測與前作知識庫，逐條查了通過條件、六種判定、空隙規則、基準值與 selftest 的敘述，找到 6 條問題：warnings 其實同時比文字與摘要數量、errors 漏了連結器的重複定義行、前作 wlink 版本與本專案不同、基準值欄位漏了摘要警告數，以及兩條 lint（一條照原文成立、一條與工具索引重複）。"
+  },
+  {
+   "unit": "rebuild_info__build_pipeline",
+   "claims": 38,
+   "findings": 3,
+   "summary": "逐句對照 build_min.py、link_ail.py、build_game.py、build_emit.py、smoke.c 的實作與 smoke 的 RESULT.TXT、FDPS.EXE 的 LE 表頭及 Ghidra 的 0x3c636，38 條主張中 3 條有問題：MSCDEX 探測與原版走同一路徑的說法錯誤、測試映像並非固定連結兩次、以及一個「目前」狀態式標題。"
+  },
+  {
+   "unit": "rebuild_info__code_layout",
+   "claims": 78,
+   "findings": 26,
+   "summary": "逐句核對 code_layout.md 的路由數字、資料歸屬、不 emit 四類、標頭、RLE 組語與切換步驟、89 個檔的檔案表與章節檔切點，共 26 條有問題：單讀者資料數、gamedata 讀取檔數、章節 dispatch 表的散佈檔數、pitfalls 不存在的「B 類」與錯的佈局理由、function 分在 88 個檔、rle.c／rlecolor.c 對應的 asm 數、切換步驟漏了 check_game 與 --only 在組語狀態會被拒、chend1b 的「最後三支樣板」與第 23 章判敗條件錯，其餘為票號與拆檔經過的流水帳。"
+  },
+  {
+   "unit": "rebuild_info__data_emit",
+   "claims": 58,
+   "findings": 9,
+   "summary": "逐條核對 data_emit.md 的數量表、約束表、讀寫位址、工具鏈量測、閘門與溢寫範圍，7 條有問題（調色盤相位差、指示佇列溢寫範圍與空隙兩處、65792%、一個入口位址、閘門漏了 game 目標），另 2 條 lint 標記判定原文可留。"
+  },
+  {
+   "unit": "rebuild_info__emit_pipeline__1",
+   "claims": 58,
+   "findings": 16,
+   "summary": "查了 emit pipeline 前 165 行的角色分工、疑慮收斂、拓樸序數字、兩次連結、calling convention、八類契約、測試組織與狀態檔，15 條有問題：狀態機與實作不符、建置 .OBJ 不能直接對原版、G 類忽略 CD 模組、不存在的函式名、static 緩衝區數量過時，其餘是票號敘事與 workspace 路徑。"
+  },
+  {
+   "unit": "rebuild_info__emit_pipeline__2",
+   "claims": 24,
+   "findings": 4,
+   "summary": "對照 tools/code_emit/emit_ticket22.js、next_batch.py、ADR-0007 與 data_emit.md 查了中斷復原、界線六路徑、git 清理三指令、足跡、批次大小與檔案落點共 24 條主張，1 條不精確（停止理由不只三種），3 條 lint 提示經查文字本身成立。"
+  },
+  {
+   "unit": "rebuild_info__naming",
+   "claims": 46,
+   "findings": 16,
+   "summary": "逐句對照 Ghidra 快照、src/、ailv3.lib、Watcom 標頭、build_emit.py 與前作 FD2 查了命名慣例頁的 46 條主張，15 條有問題：9 個例子符號在本專案不存在或名稱不對、字串字面值與 thunk body 後綴的規則與 Ghidra 實際狀態不符、前作沒有裸 crt_ 的說法錯誤、型別對應的位置與公開符號清單的來源數量寫錯。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__1",
+   "claims": 62,
+   "findings": 9,
+   "summary": "逐列核對「不能修的原版 bug」表 34 列的函式名與位址、數值、連結與 plate comment 引用，頁面有 5 處要改（全域個數、章節連結、兩處正典引用、暗號鍵位的序數），另有 3 處 src/ 註解與本頁或資料不符，需在頁面以外修正。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__2",
+   "claims": 42,
+   "findings": 4,
+   "summary": "逐列查了「不能加的檢查」23 列的函式、位址、資料 byte、緩衝區大小與正典連結，4 條有問題：兩個呼叫點位址誤寫成函式入口的引用格式、商店空位列「多數商店」的影響範圍說錯（實際只有 5 家武器店）、資料表列的正典連到非擁有者。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__3",
+   "claims": 62,
+   "findings": 11,
+   "summary": "逐列查了「不能換的型別與寫法」49 列的函式、位址、資料 byte、欄位偏移、計數與正典連結，10 條有問題：CD 那一段沒有 RET 的 function 清單錯（實為 11 支，列出的 0x3be36 自己有 RET）、VFS 筆數與偏移寬度只適用 handle 路徑、CD 安裝檢查確實以 int386(0x2f) 直發、0x60008 不是「讀前從不寫入」的例子、中斷守衛沒寫出所在 function，另有 5 處正典連結指向不含該事實的頁面，以及 1 條 lint 例示符號。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__4",
+   "claims": 96,
+   "findings": 4,
+   "summary": "逐列對照 src/、Ghidra 與連結頁查了第 141–179 行共 39 列踩雷點的函式名稱、行為、數值與連結，四條有問題：SAF 播放器照幀時長的範圍、移動網格重建次數、陣營過濾改寫後果中關於 NPC 的一句、縮放轉場中心的誤差大小。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__5",
+   "claims": 58,
+   "findings": 3,
+   "summary": "逐列對照 src/（chend2.c、chpost1-3.c、chevt4.c、chevt6.c、ending.c、mapai.c、btlend.c、roster.c、unititem.c、death.c、text.c、unit.c）與 MAP21.DAT、MAP29 部署資料查了第 18–30 章結束處理、決鬥、魔王死亡事件、形見指環、片尾名單、不死援軍復活、搶寶箱 AI、共用勝敗判定共 15 列，3 條有問題：第 22 章「轉呼共用判定就會提前過關」的後果寫錯（巫湯婆婆是陣營 0）、決鬥恢復後移的後果漏了寫回跳過退場的蘭迪斯、行為 7 播的 Posion.saf 被稱為中毒動畫。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__6",
+   "claims": 62,
+   "findings": 9,
+   "summary": "逐列核對「不能照字面理解的資料」50 列的函式、位址、計數、資料檔內容與連結，8 條有問題：第 8 章「唯一不呼叫共用判定」錯（共有 9 支不呼叫）、395 個 anchor 不全是區域陣列初值、第 24 章的入隊排在 reset 之後、*_max 加 1 只在上下限不同時成立、每回合回復的裝備 use_effect 是 0、FRIAPRDA 等級欄與 0F–21／0D 的描述不精確、第 14 章那列漏連 ch14.md。"
+  },
+  {
+   "unit": "rebuild_info__pitfalls__7",
+   "claims": 46,
+   "findings": 6,
+   "summary": "查了第 16 章解禁範圍、旗標組七列與環境範圍二十三列共 46 項主張，6 條有問題：__CHK 呼叫端引用的是 spawnvpe／spawnve 內的呼叫位址而非入口、殘留票號與進度描述、光碟啟動檢查把沒有失敗路徑的讀檔也算成會 exit 的檢查、兩列的正典連結指錯頁，以及一條 lint 的萬用字元符號照原文保留。"
+  },
+  {
+   "unit": "rebuild_info__playtest",
+   "claims": 24,
+   "findings": 1,
+   "summary": "查了分工、並排條件（執行檔、遊戲檔、DOS4GW 1.97、調色盤快取、Disk.No、SB16／sbtype=none、conf 參數）、存檔檔名、當機傾印兩種位址、連結程式庫數與各連結；只有一條寫了票號的流水帳需修。"
+  },
+  {
+   "unit": "assets___index",
+   "claims": 22,
+   "findings": 2,
+   "summary": "查了 assets/_index.md 的分工說明、連結、產生工具範圍與索引表各列的筆數（物品 226、法術 40、十二名人物、職業代碼 40／可裝備 36、敵方 91、種族 7、村莊數），2 條有問題：村莊數應為 21，「法術總表」指涉不清。"
+  },
+  {
+   "unit": "assets__items__1",
+   "claims": 34,
+   "findings": 3,
+   "summary": "核對了 ITEM.DAT 的 record 數與有內容範圍、名稱公式 0xC9+n、與攻略站的名稱與 AP/HIT/DP/EV/附加屬性/使用效果逐筆比對、FF 越界、連結、每回合回復 MP 的條件與數值、永久強化常數、消耗品回復量，共 3 條有問題（攻略站引文失真、回復量未說截頂、漏列白銀之槍）。"
+  },
+  {
+   "unit": "assets__items__2",
+   "claims": 16,
+   "findings": 2,
+   "summary": "查了全表前後說明（類型與距離欄的定義、55 件拿不到）、使用效果代碼一節的函式與位址、record 位移、成對消耗規則、攻略站 K1 代碼表的「不明／無」清單與程式資料是否出現，以及沒有分支的效果碼那句；2 條有問題：戰鬥機制的連結只指到 program_info 索引而非擁有公式的 spell.md，沒有分支的效果碼那句把四個碼說成「四件」、漏了行動照樣結束、也沒說 43 封咒手套在玩家選單根本確認不了。"
+  },
+  {
+   "unit": "assets__items__3",
+   "claims": 8,
+   "findings": 0,
+   "summary": "查了「使用效果」一節的說明文字（只列 K1 非 0、距離 0x10 位元的意義、0C／22 選取模式與玩家端用不出來、I10 連結）與表格的完整性（64 列恰為 ITEM.DAT 全部 K1 非 0 的 record），名稱與數值欄由 data_tables／data_skill 閘門涵蓋且通過，沒有發現問題。"
+  },
+  {
+   "unit": "assets__spells",
+   "claims": 14,
+   "findings": 1,
+   "summary": "查了 MAGICDAT.DAT 的筆數與連續性、名稱條目基底 0x1be、與攻略站 modify2 名稱表逐字一致、攻略站法術頁逐欄比對、負威力與直線距離編碼的說明及兩個連結，一條有問題：第二處不符出自 modify2 頁的欄位說明而非法術頁，且直線絕招在法術頁的寫法與資料檔欄位不同未交代。"
+  },
+  {
+   "unit": "assets__characters",
+   "claims": 96,
+   "findings": 5,
+   "summary": "逐句核對人物頁的入隊表、公式、非隊員角色表、四張資料表的敘述與教會轉職規則（src/roster.c、deploy.c、church.c、chend1.c、64 張地圖的部署記錄與四個 .DAT），5 條有問題：法術遮罩與攻略站差異的結論錯（攻略站列的是部署記錄／第 1 章授予後的狀態）、slot 不足的章漏了第 19、24 章、FRILEVUP 其餘列不是全 0、地圖數 64 應為 63、「其他不學法術的型態」漏了例外 22。"
+  },
+  {
+   "unit": "assets__classes",
+   "claims": 31,
+   "findings": 2,
+   "summary": "逐句核對職業頁的來源說明、PROEQU.DAT 可裝備類型表與其後統計、職業來源與未用職業、轉職段落，對照 PROMAP／PROEQU／RANKUP／ITEM.DAT、FDETXT00、攻略站 modify2／memory 頁與 src/，找到 2 處不精確。"
+  },
+  {
+   "unit": "assets__enemies",
+   "claims": 46,
+   "findings": 5,
+   "summary": "逐句核對 assets/enemies.md 的來源、出場公式、擊殺經驗表、樣板列、名稱區與表尾之外的部署，數值、位址與計數都對得上，有 5 條問題：攻略站比對範圍寫成任意子集、村長在狀態視窗的說法無法觀察、地圖上物理攻擊的換算位置寫成「同上」、過場不執行 AI 步進的說法過寬，以及擊殺經驗一節整段重述 program_info 擁有的機制。"
+  },
+  {
+   "unit": "assets__races",
+   "claims": 18,
+   "findings": 0,
+   "summary": "逐句核對種族頁的來源欄位、名稱條目基底 0x97、名稱區分區、37 列樣板皆為種族 01、單位記錄 +0x1F 的寫入與唯一讀取端、部署記錄欄位與攻略站標示、FD2 的 +0x15 分組 byte 及全部連結，沒有發現問題。"
+  },
+  {
+   "unit": "assets__names",
+   "claims": 34,
+   "findings": 3,
+   "summary": "逐條核對名表正名（FDETXT00 第角色編號+1 條）、三個對白變體的區塊與條目與次數、攻略站寫法、未列於攻略站角色的出場地圖與部署記錄、名表尾端空字串與種族名，共 3 條有問題：第 9 章攻略站其實兩種寫法都有、卡里斯漏了第 23 章、未部署敵兵的連結沒指到擁有者。"
+  },
+  {
+   "unit": "assets__shops",
+   "claims": 22,
+   "findings": 1,
+   "summary": "查了商店頁的來源、村莊時機、無村莊索引、占位檔內容、秘密商店與所有連結，共 1 條有問題：有村莊的商店是 21 家不是 20 家。"
+  },
+  {
+   "unit": "assets__tables___index",
+   "claims": 14,
+   "findings": 1,
+   "summary": "查了本頁的分檔原則、九個 .DAT 的擁有者連結與六列各檔的 record 大小與涵蓋表，record 大小與檔名全部與資料檔及子頁一致，只有「一個 struct 一檔」一條與實際分檔不符。"
+  },
+  {
+   "unit": "assets__tables__characters",
+   "claims": 34,
+   "findings": 4,
+   "summary": "逐列核對四張人物表的 record 佈局、筆數、MOVSX、物品旗標、成長上限語意、GETMGTAB 慣例與 RANKUP 路線及取值函式，4 條有問題：成長上限減 1 的規則對上下限相等的組不成立、等級欄與初始物品／法術只在入隊時讀、路線 3 只對蘭迪斯有效。"
+  },
+  {
+   "unit": "assets__tables__classes",
+   "claims": 27,
+   "findings": 2,
+   "summary": "逐條核對 PROMAP.DAT／PROEQU.DAT 的 record 佈局、兩個取值函式的索引與呼叫端、讀取端行為、越界範圍與職業碼寫入點，2 條有問題：PROMAP 呼叫端並非一律 +1（漏列第三個傳 0 的呼叫端與 0x126b0 漏 INC 的例外），以及「0x00 是活的物品類型代碼」與資料不符。"
+  },
+  {
+   "unit": "assets__tables__enemies",
+   "claims": 18,
+   "findings": 1,
+   "summary": "查了 record 大小、十個欄位的偏移與型別、種族代碼範圍、出場值公式、取值函式 0x18b10 與呼叫端索引及四個連結，1 條有問題：exp_reward 的經驗值公式只對法術路徑成立。"
+  },
+  {
+   "unit": "assets__tables__items",
+   "claims": 38,
+   "findings": 8,
+   "summary": "逐欄核對 ITEM.DAT record 佈局（fdpstype.h 與原版讀取指令）、以腳本重數 251 筆的 type／use_effect／select_mode／+0x16，並對照 fdps_battle_item_menu、fdps_map_cursor_select_loop 與兩支收集函式的原始碼，共 8 條有問題：select_mode 一節的「0／1／3 沒有差別」「4 看游標下有沒有單位」「與 use_effect 類別一致」都錯，use_amount 是有號字、ev 是閃避不是速度，另有三處不精確。"
+  },
+  {
+   "unit": "assets__tables__shops",
+   "claims": 14,
+   "findings": 0,
+   "summary": "查了 SHOPnn.DAT 的檔長、三列偏移與列序、0xFF 空位語意、無號取值、載入函式與取值函式的位址與原始檔、組名格式、SHOP01 武器列範例與三個連結，全部與 src、Ghidra 與資料檔一致，沒有問題。"
+  },
+  {
+   "unit": "assets__tables__spells",
+   "claims": 17,
+   "findings": 3,
+   "summary": "逐列核對 MAGICDAT.DAT 7 byte record 的偏移、型別、欄位意義（對 struct fdps_spell_effect、Ghidra 與 40 筆實際資料）以及法術遮罩的 bit 配置與 fdps_roster_add_character 的複製規則，3 條有問題：欄位名與 src／Ghidra 不符、距離 00 的意義漏寫、對象 03 的意義未說明。"
+  },
+  {
+   "unit": "assets__text___index",
+   "claims": 18,
+   "findings": 1,
+   "summary": "查了本頁的連結、字模數 1,792、全域文字 555 條、區塊與地圖對照、各子頁的內容描述與產生工具，共 1 條不精確（把所有 token 都說成字模索引）。"
+  },
+  {
+   "unit": "chapters___index",
+   "claims": 78,
+   "findings": 5,
+   "summary": "逐句核對跨章機制鏈（章內旗標、章節索引、村莊鎖、12 名隊員的入隊表與位址、固定單位索引、隱藏獎勵、結局分歧）與開頭說明的連結，共 5 條有問題：退場角色寫回的蘭迪斯例外、暗之徽章的失去條件、第 10 章 FF 物品只在一名騎兵身上、妖刀鏈缺背包與回合條件、結局不只第 27 章會播。"
+  },
+  {
+   "unit": "chapters__ch01",
+   "claims": 58,
+   "findings": 2,
+   "summary": "逐句核對第 1 章非生成段落（概要、加入與離隊、勝敗與中毒機制、遺言兩次、業火、敵人配置與 AI、寶物、三支處理函式的流程、過場與對話的說明句）共 58 條，2 條不精確：索爾在第 3–6 章不是由開場過場部署，以及開場過場切回地圖 0 的時點。"
+  },
+  {
+   "unit": "chapters__ch02",
+   "claims": 46,
+   "findings": 3,
+   "summary": "逐句核對第 2 章手寫段落的函式位址、處理流程、勝敗判定、死亡腳本、AI 行為、部署記錄座標與台詞引用，共 3 條有問題：整章不追擊的 6 名野武士座標範圍寫錯、記錄 26「帶白刃劍」與全體野武士都裝備白刃劍混淆、兩段台詞加引號卻不是原文。"
+  },
+  {
+   "unit": "chapters__ch03",
+   "claims": 68,
+   "findings": 1,
+   "summary": "逐句對照 src/（chinit1.c、chpost1.c、chend1.c、chevt1.c、btlturn.c、walk.c、maptile.c、icon.c、death.c、btlend.c、roster.c、title.c、main.c）、functions.txt、MAP02.DAT 的回合／格子事件表與 chapter_facts 的波次統計查了第 3 章的概要、勝敗條件、敵人配置、寶物與處理流程共 68 條，只有 1 條回合計數器的描述不精確。"
+  },
+  {
+   "unit": "chapters__ch04",
+   "claims": 68,
+   "findings": 2,
+   "summary": "逐句核對第 4 章的加入機制、勝敗判定、單位索引表、敵群分組與 AI 行為、援軍、寶物敘述、四支處理函式的流程與過場重演，函式位址、單位索引、錨點與行為碼全部與 src、快照、MAP03.DAT 相符；1 條措辭不精確（第 5、6 章是兩支函式體相同的不同函式），另有 1 條本頁正確但 src/chevt1.c 註解與資料相反需在外部修正。"
+  },
+  {
+   "unit": "chapters__ch05",
+   "claims": 58,
+   "findings": 2,
+   "summary": "逐句核對第 5 章頁面的概要、加入離隊、勝敗條件、索爾麻痺、敵兵分群、寶物、處理流程與格子事件（函式位址、src 行為、MAP04 部署記錄、過場步驟、文字全文），2 條有問題：冰魔導士並未拿到酬勞、北側敵群位在起始處東北而非正北。"
+  },
+  {
+   "unit": "chapters__ch06",
+   "claims": 58,
+   "findings": 3,
+   "summary": "逐句核對第 6 章手寫段落的函式位址、處理流程、部署記錄計數與錨點、死亡腳本、中毒致死、商店與敵人裝備、勝利對話複本，共 3 條有問題：伏兵事件的引數不一定是擊殺者、索爾「之後再以友方身分登場」漏了第 17 章、0x0c 並非逐字複本。"
+  },
+  {
+   "unit": "chapters__ch07",
+   "claims": 46,
+   "findings": 0,
+   "summary": "逐句核對第 7 章非生成段落：處理函式位址與行為（chinit1.c、chpost1.c、chend1.c、chevt1.c、btlend.c、btlturn.c、roster.c）、入隊 slot、寫回以角色編號比對、第 4–6 章另測索引 3、回合事件時機、AI 行為 0／2、過場指令集無金錢指令、FDETXT07 0x09/0x0a/0x0e/0x0f 內容、埋藏格與攻略站只列 (8, 17)，全部與程式碼、資料與相關頁面一致，沒有發現問題。"
+  },
+  {
+   "unit": "chapters__ch08",
+   "claims": 62,
+   "findings": 3,
+   "summary": "逐條核對第 8 章手寫段落的函式位址、勝敗規則、獎勵表、部署座標、過場內容與連結（src、functions.txt、MAP07／M07 解碼、FDETXT08 解碼），3 條有問題：費塔加敗北規則的出場時點說法不精確、中毒不跑死亡腳本連到非擁有者頁，以及頁面正確但 src 註解把部署費塔加的函式寫錯。"
+  },
+  {
+   "unit": "chapters__ch09",
+   "claims": 62,
+   "findings": 1,
+   "summary": "逐句核對第 9 章敘述（劇情、入隊、勝敗判定、援軍時機、敵群分區與數量、寶物位置、村莊暗號、四支處理函式的步驟與位址），1 條有問題：進入處理第 3 步說兩次加入必須在 fdps_chapter_state_reset 之前，但 ICON08.DAT 最後的 SWITCH_MAP 會再依名冊重建地圖 8，實際約束是加入須在開場過場之前。"
+  },
+  {
+   "unit": "chapters__ch10",
+   "claims": 62,
+   "findings": 0,
+   "summary": "逐句核對第 10 章頁的概要、加入、勝敗判定、回合援軍與階梯伏兵、敵人配置、裂地術掉落、處理流程、起始站位與對話複本說明，對照 src（chinit1.c、chpost1.c、chevt2b.c、chend1.c、death.c、unititem.c、btlend.c、deploy.c）、快照位址、MAP09 解碼、FDETXT10／FDETXT00 解碼與戰場圖，沒有發現問題。"
+  },
+  {
+   "unit": "chapters__ch11",
+   "claims": 62,
+   "findings": 5,
+   "summary": "逐句核對第 11 章非生成段落的函式位址、處理流程、波次與座標、搶寶箱狼人、援軍時機與游標索引，共 5 條有問題：琴琴與隊伍在玩家接手時的位置（過場裡還有行走）、援軍時機寫成「回合結束時」、波次 2 並未緊貼琴琴、寶箱已開時的移動方式含糊。"
+  },
+  {
+   "unit": "chapters__ch12",
+   "claims": 52,
+   "findings": 1,
+   "summary": "查了第 12 章的概要台詞與說話者、入隊、勝敗判定、三選一流程與 0xff 波次、死亡腳本掉落與反擊擊殺、中毒致死、第 16 章鐵匠檢查、部署錨點與地形、寶物、處理流程各步驟與位址、文字區塊複本，共 1 條有問題（AI 行為 11 的描述把施法與攻擊寫成互斥）。"
+  },
+  {
+   "unit": "chapters__ch13",
+   "claims": 68,
+   "findings": 1,
+   "summary": "逐句核對第 13 章的概要、加入離隊、勝敗條件與特殊機制、敵人分群、寶物、處理流程與過場說明（函式位址、src、Ghidra 0x379d0、MAP12 地圖資料與圖磚），只有 1 條把 fdps_chapter_state_reset 與 fdps_build_map_unit_array 的分工寫得不精確。"
+  },
+  {
+   "unit": "chapters__ch14",
+   "claims": 58,
+   "findings": 2,
+   "summary": "逐句核對第 14 章的概要、加入與離隊、勝敗條件、敵人配置、寶物與處理流程（函式位址、MAP13.DAT 部署與寶箱、ICON13／WIN13 腳本、0x37a50 的索引與幀數、共用勝敗判定、搶寶箱狼人的行為 5／7），共 2 條有問題：埋藏格的取得方式寫成不存在的「調查」指令，以及勝利處理把掉落的金錢也說成隨背包進名冊。"
+  },
+  {
+   "unit": "chapters__ch15",
+   "claims": 96,
+   "findings": 3,
+   "summary": "逐句核對第 15 章手寫段落的函式位址、處理流程、決鬥條件、砲座射擊、敵人分群與計數、索橋重繪格、連結與對話摘要，2 條有問題：開場後清「已行動」位元的作用寫錯（砲座第一個敵方階段本來就會行動），概要說全場敵人都守在原地忽略了右上群的出擊。"
+  },
+  {
+   "unit": "chapters__ch16",
+   "claims": 62,
+   "findings": 4,
+   "summary": "逐句核對第 16 章概要、離隊、勝敗、流浪工匠、敵人配置、寶物與處理流程共 62 條主張（位址、src 行為、腳本偏移、地圖單位排列、連結），3 條需修正頁面文字，另有 1 條 src 註解與頁面矛盾（頁面正確）。"
+  },
+  {
+   "unit": "chapters__ch17",
+   "claims": 62,
+   "findings": 1,
+   "summary": "逐句核對第 17 章手寫段落（上場五人與退場五人、名冊寫回與收費復活、勝敗判定與單位 3、敵人分群與座標、援軍波次與回合事件、狼人戰士搶寶箱、埋藏格 CC、進入／行動後／勝利流程與 15 個 function 位址），只有一處用詞不精確：開場過場說「不寫單位狀態」，但同一支腳本就用 RETIRE_UNIT 寫了退場旗標。"
+  },
+  {
+   "unit": "chapters__ch18",
+   "claims": 62,
+   "findings": 1,
+   "summary": "逐句核對第 18 章的概要、隊伍、勝敗判定、回合援軍、勇者徽章交換、敵人配置、處理流程與對話說明（函式位址、src 行為、名冊順序、文字區塊與過場腳本），只有一條有問題：兩支勝利過場的差別不只台詞，WIN17.DAT 另有停止音樂與不同的開頭指令順序。"
+  },
+  {
+   "unit": "chapters__ch19",
+   "claims": 62,
+   "findings": 3,
+   "summary": "逐句核對第 19 章敘述（決鬥條件與流程、0x4d 寫死索引的單位計數、勝利恢復、兩支事件處理、開場過場走位、敵人分布、函式位址與連結），3 條有問題：開場敵人來源比例、第 12 列觸發格不是整列、行動後檢查「順序不能反過來」的理由張冠李戴。"
+  },
+  {
+   "unit": "chapters__ch20",
+   "claims": 78,
+   "findings": 2,
+   "summary": "逐條核對第 20 章手寫段落的函式位址、放出排程與 17 列部署記錄換算、換劍條件與物品操作、勝利過場流程、搶寶箱狼人與對話複本說明，共 2 條不精確（行動後處理首次呼叫時機、0x0c 與 FDETXT59 版本差異漏列）。"
+  },
+  {
+   "unit": "chapters__ch21",
+   "claims": 68,
+   "findings": 2,
+   "summary": "逐句核對第 21 章的概要、入隊、勝敗條件、兩波伏兵、敵人配置、處理流程與對話說明（函式位址、src、MAP20 部署與格子事件、ICON20／WIN20 腳本、FDETXT21／FDETXT52 說話者），有 2 條問題：開場 AI 行為 2 的人數寫成 38（實為 37），以及把第 22 章看單位 3 的敗北條件歸給共用判定的 0x15 特例（那一支走不到）。"
+  },
+  {
+   "unit": "chapters__ch22",
+   "claims": 62,
+   "findings": 1,
+   "summary": "逐句對過第 22 章手寫段落的函式位址、處理流程、波次與座標、勝敗條件、過場與對話讀取端，全部與 src／快照／遊戲檔一致，只有概要裡亡靈弱點的描述一條不精確。"
+  },
+  {
+   "unit": "chapters__ch23",
+   "claims": 92,
+   "findings": 4,
+   "summary": "逐句核對第 23 章頁的概要、加入離隊、勝敗條件（含第 21 回合的推算、地形與擋路）、反禁制器與形見指環、敵人配置、六支處理函式的處理流程與過場敘述，對照 src/、快照、MAP22 資料與過場／文字區塊，共 4 條有問題：波次 4 分區人數算錯、死神行為 2 被寫成「不移動」兩處、過關條件漏了毒死不執行死亡腳本。"
+  },
+  {
+   "unit": "chapters__ch24",
+   "claims": 78,
+   "findings": 3,
+   "summary": "逐句核對第 24 章非生成段落的處理函式位址、決鬥與恢復流程、波次組成與單位索引算術、寶物與過場越界描述，共 3 條有問題：u30 寫入位置與 memory_layout 連結、挑戰者退場原因的括注、known_bugs 連結缺章節錨點。"
+  },
+  {
+   "unit": "chapters__ch25",
+   "claims": 72,
+   "findings": 1,
+   "summary": "逐句核對第 25 章非生成段落的函式位址、處理流程、觸發線格數、部署分群、寶箱南北、村莊暗號與過場敘述，共 72 條，1 條措辭自相矛盾（未觸發的伏兵不在場上）。"
+  },
+  {
+   "unit": "chapters__ch26",
+   "claims": 64,
+   "findings": 1,
+   "summary": "逐句核對第 26 章敘述（概要、加入離隊、勝敗條件、伏擊與 AI 改寫範圍、敵人配置、寶物、六支處理函式的流程與 WIN25 單位索引）對 src/、函式快照與 MAP25 解碼結果，位址、單位索引、記錄編號、座標與流程都成立，只有 1 條：AI 行為 2 的援軍與索爾被寫成只打進入射程的目標、留在原地，實際上最佳行動會先在移動範圍內走到攻擊格再出手。"
+  },
+  {
+   "unit": "chapters__ch27",
+   "claims": 72,
+   "findings": 1,
+   "summary": "逐句核對第 27 章的概要、加入離隊、勝敗條件、敵人配置、處理流程、片尾字幕與過場說明（函式位址、src 行為、腳本偏移、經驗公式、AI 代碼、座標與文字內容），只有一條有問題：兩支勝利過場的開頭並非相同指令。"
+  },
+  {
+   "unit": "chapters__ch28",
+   "claims": 46,
+   "findings": 4,
+   "summary": "逐句核對第 28 章非生成段落的函式位址、處理流程、波次與援軍數量、起始站位模擬、勝敗判定、寶物與過場描述，發現 4 條問題（概要的劇情銜接照攻略站說法、敵人種族稱不死系、援軍間隔說成每隔一兩回合、勝利過場說全員走出畫面）。"
+  },
+  {
+   "unit": "chapters__ch29",
+   "claims": 46,
+   "findings": 3,
+   "summary": "逐條核對第 29 章的函式位址、觸發線與單位索引範圍、七群敵兵的記錄與座標、開場與勝利過場的排列、法蓮娜倒下時的過場行為與各連結，共 3 條有問題：兩處敵兵名寫成攻略站的「骷髏兵」而非名表正名「骷顱兵」，以及行為 10 的轉述把「用道具後照樣評估攻擊」說成二選一。"
+  },
+  {
+   "unit": "chapters__ch30",
+   "claims": 72,
+   "findings": 5,
+   "summary": "逐句對照 src（chevt6.c、chinit2b.c、chend2b.c、chpost3.c、mapai.c、death.c、combat.c、unitstat.c、ending.c）、函式位址快照、MAP29 地圖資料與攻略站查了第 30 章非生成段落約 72 條敘述，4 條需修正（經驗公式漏了肖像編號大於 10 時 LV 加 30、拿不到經驗的情形漏了道具擊殺、概要裡第二型態現身的時序、開場過場「之後的四條指令」數不上），另有 src/chevt6.c 與 chevt6.h 把 0x55／0x6a 的名稱寫反，要在頁外修正。"
+  },
+  {
+   "unit": "libs___index",
+   "claims": 12,
+   "findings": 0,
+   "summary": "查了 libs/_index.md 全部 16 行的 12 項主張（ailv3 檔案內容與前作逐 byte 相同、標頭由 gen_ailv3_h.py 產生、106 條宣告全掛 \"*\" modify [eax ebx ecx edx]、Watcom 三個 lib 由建置腳本以全路徑引用、ADR-0004／ail_link.md／pitfalls.md 連結與內容），沒有發現問題。"
+  },
+  {
+   "unit": "ghidra_snapshot___index",
+   "claims": 6,
+   "findings": 1,
+   "summary": "查了產生工具、資料夾內容、兩個連結與「細節記在工具索引、匯出時機記在 README」的分工，1 條不精確：本資料夾的 _index.md 本身不是工具輸出。"
+  }
+ ],
+ "stopped": "",
+ "scope_left_to_gates": {
+  "assets/text/glyph_table.md": "tools/glyph/glyph_table.py build (a rebuild is byte-identical)",
+  "assets/text/global_text.md": "tools/global_text/global_text.py verify",
+  "assets/text/scene_text.md": "tools/global_text/global_text.py verify",
+  "cut_content/": "tools/cut_content/cut_content.py check and verify-media, tools/cut_content/story.py check --final (every entry already verified one by one, by the new-trace workflows and by a batch re-verification)",
+  "ghidra_snapshot/ (except _index.md)": "output of tools/ghidra_snapshot/ExportGhidraSnapshot.java"
+ },
+ "developer_questions": [
+  {
+   "unit": "program_info__cd_audio",
+   "n": 15,
+   "question": "要確認需對照 DOSBox-X（本專案使用的版本）的 src/dos/dos_mscdex.cpp 原始碼，或在 DOSBox-X 內以刻意填入非零垃圾的 header／control block 發請求比對結果。"
+  },
+  {
+   "unit": "program_info__code_pools__1",
+   "n": 16,
+   "question": "要不要在目前的 FDPS.LE 上重跑 tools/pool_triage/fid 的 AIL 查詢（FidQuery + FidHashDump + analyze_ail_matches.py），以確認合併後的 000447a6 是否命中、以及命中／不可雜湊／可雜湊三列的現值？"
+  },
+  {
+   "unit": "program_info__known_bugs__1",
+   "n": 4,
+   "question": "請實機在第 24 章第 7–14 回合之間（珊已到場、波次 5 未出場）清場並接受決鬥：狂戰士是否仍在第一回合我方結束時自動認輸？若會，現象應改為「在第 15 回合的援軍出場之前清完敵人」；若不會，成因需補上第 7 回合前後陣列之外內容的差別。"
+  }
+ ]
+}

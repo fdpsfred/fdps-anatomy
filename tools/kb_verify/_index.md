@@ -20,6 +20,8 @@
 | `verify_ticket25_17.js` | 第一段 workflow：一段一個 agent 驗證、每輪 gate、失敗重試一次、第二位 agent 回掃（回掃弄壞 gate 的也重試一次）、落地（`apply` 後跑全部知識庫閘門，閘門不過只回報、不自行修）、收尾報告與判定彙整到 `devlog/runs/<date>-kb-verify-*.json` |
 | `kbconsist.py` | 跨文件一致性不需判斷的部分：`freeze` 從五個來源產生並凍結候選項目——第一段落地的每筆事實修正（錨點：位址、`fdps_` 符號、檔名）在其他頁與同頁其他地方出現的行（P）、字元 4-gram 大量重疊的段落（D，只比文字、不比程式碼引用，章節頁之間與 `_index.md` 描述自己資料夾頁面的列不算，連成一串超過 6 段的拆成兩兩一組）、驗證者回報的跨文件矛盾（X，同一對頁面同一錨點合成一項）、驗證者提出的踩雷點候選（PF）、票面要求重判的 `cut_content/` 分類（R，一個條目一項）；`show`、`check`、`rescan`、`report`、`apply`（同樣只落地第二位 agent 確認或修改的修正） |
 | `consist_ticket25_17.js` | 第二段 workflow：一項一個 agent、gate、回掃、落地（`apply`、`cut_content.py index` 重產總表、全部閘門）、收尾報告到 `devlog/runs/<date>-kb-consist-*.json`；要在第一段落地之後才跑，擴散項目是從落地紀錄產生的 |
+| `kbrefused.py` | 一致性段落地時被拒收的修正（`old` 已被同一段落上先落地的另一筆修正改掉）：`triage` 把新文字已經逐字在頁面上的判為已涵蓋、記進 `workspace/kb_refused/triage.json`，其餘每一筆凍結成一個項目；其他子命令沿用 `kbconsist.py` 的判定檔格式、gate、回掃與落地（`use_workspace` 換成自己的項目清單與判定檔） |
+| `refused_ticket25_17.js` | 第三段 workflow：被拒收的修正一筆一個 agent，判斷現行文字是否已經說出那筆修正要說的事實，不是就寫出對現行文字的修正；gate、回掃、落地與全部閘門、收尾報告到 `devlog/runs/<date>-kb-refused-*.json` |
 | `test_kb_verify.py` | 單元測試：`python -m unittest tools/kb_verify/test_kb_verify.py` |
 
 判定檔在 `workspace/kb_verify/verdicts/` 與 `workspace/kb_consist/verdicts/`，落地紀錄在 `workspace/kb_verify/applied.json`。
@@ -31,6 +33,8 @@ Workflow({ scriptPath: "tools/kb_verify/verify_ticket25_17.js",
            args: { date: "YYYY-MM-DD", exclude: [還不能改的頁] } })
 Workflow({ scriptPath: "tools/kb_verify/consist_ticket25_17.js",
            args: { date: "YYYY-MM-DD", exclude: [還不能改的頁] } })
+Workflow({ scriptPath: "tools/kb_verify/refused_ticket25_17.js",
+           args: { date: "YYYY-MM-DD" } })                     （一致性段有拒收時）
 ```
 
 兩支的最後都有落地段：`apply` 只落地第二位 agent 確認或修改的修正，其餘每一項（沒有判定、判定不過 gate、還沒回掃、`old` 已經不是恰好一次、`exclude` 擋下的頁）都以名字列在拒收清單，不靜默略過；接著跑全部知識庫閘門（`check_chapter.py --landed-all`、`index.py verify`、`data_tables.py check`、`global_text.py verify`、`cut_content.py check`、`story.py check --final`、`data_skill/build.py`、`kbverify.py indexes`），`lint` 的剩餘筆數只列出、由票的 session 人工檢視（驗證者判定「照原樣成立」的會留在裡面）。閘門不過時落地段只回報，修正要判斷，歸票的 session。`exclude` 擋下的頁之後直接再跑一次 `apply` 即可補落地。

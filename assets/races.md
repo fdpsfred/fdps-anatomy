@@ -6,7 +6,7 @@
 
 - **代碼的來源欄位**：`FRIAPRDA.DAT` 與 `ENEMYDAT.DAT` 每筆的第一個 byte（佈局見 [`tables/characters.md`](tables/characters.md)、[`tables/enemies.md`](tables/enemies.md)）。
 - **名稱**：`FDETXT00.TXT` 第 `0x97` + 代碼條，這是 `fdps_draw_unit_status_panel`（`src/statunit.c`）畫種族欄時加上的基底；名稱表的分區見 [`text/global_text.md`](text/global_text.md)。攻略站沒有列種族名稱。
-- **單位**：`我方與客串單位` 是遊戲會讀到的 `FRIAPRDA.DAT` 索引（十二名我方人物，加上任何一張地圖以角色編號部署過的 `0x3C` 以下索引）；`敵方與 NPC 單位` 是有部署記錄的 `ENEMYDAT.DAT` 列。兩欄都只列有名字的單位，名稱照 [`enemies.md`](enemies.md)、[`characters.md`](characters.md)。
+- **單位**：`我方與客串單位` 是遊戲會讀到的 `FRIAPRDA.DAT` 索引（十二名我方人物，加上任何一張地圖以角色編號部署過的小於 `0x3C` 的索引）；`敵方與 NPC 單位` 是有部署記錄的 `ENEMYDAT.DAT` 列。兩欄都只列有名字的單位，名稱照 [`enemies.md`](enemies.md)、[`characters.md`](characters.md)。
 
 表由 [`tools/data_tables/`](../tools/data_tables/_index.md) 從資料檔產生並逐格驗證。
 
@@ -24,7 +24,7 @@
 | `05` | 龍族 | `0x9c` | — | 守護魔龍 |
 | `06` | 其他 | `0x9d` | — | 平衡之神 |
 
-`ENEMYDAT.DAT` 的 37 列樣板全部是種族 `01`，所以村民、村長等過場演員在狀態視窗裡顯示「妖鬼」。
+`ENEMYDAT.DAT` 的 37 列樣板（見 [`enemies.md`](enemies.md)）全部是種族 `01`，所以用這一列的單位在狀態視窗裡的種族是「妖鬼」，例如第 8 章戰場上護送的村民、村婦。
 
 ## 種族只用來顯示
 

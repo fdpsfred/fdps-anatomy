@@ -19,15 +19,13 @@
 | -6 | 數字 |
 | -0x11／-0x12 | 後接一個 operand（角色 id／單位索引） |
 
-檔名的編號是章節索引加 1，也就是玩家看到的章號；`FDETXT00.TXT` 是全域文字，以固定檔名載入。重建時會踩的雷見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
+檔名的編號是地圖編號加 1：載入端取目前的地圖編號加 1 格式化檔名，而過場腳本的 `SWITCH_MAP` 會把地圖編號改成不對應章節的額外場景。地圖 0–29 與章節索引重合，所以 `FDETXT01`–`FDETXT30` 的編號也就是玩家看到的章號；`FDETXT00.TXT` 是全域文字，以固定檔名載入。重建時會踩的雷見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 
 ### `FDETXT00.TXT` 的佈局
 
 `FDETXT00.TXT` 的 555 條分成單位、種族、職業、物品、法術五張名稱表與一段系統訊息，各表以「編號 + 表的起點」取條目。各分區的範圍、公式、全文與讀取端由 [`assets/text/global_text.md`](../assets/text/global_text.md) 擁有；地圖 30 以上的額外場景區塊 `FDETXT31`–`FDETXT65` 的內容見 [`assets/text/scene_text.md`](../assets/text/scene_text.md)。
 
 永遠不會顯示的條目——沒有讀取端的條目、沒有腳本切過去的整個區塊——由 [`cut_content/story.md`](../cut_content/story.md) 逐條歸到一個條目或排除項，屬於條目的全文照錄。
-
-出貨的 `FRIAPRDA.DAT` 與 `ENEMYDAT.DAT` 種族代碼只有 0..6，職業代碼最大 `0x26`。
 
 ## `FDETXT.FON`
 

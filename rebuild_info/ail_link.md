@@ -79,6 +79,6 @@ AIL_start_sample            AIL_stop_sample             AIL_sample_status
 | `AIL_install_MDI_INI` | 回 NULL，與原版安裝一致 |
 | 關閉 | `AIL_shutdown` 正常返回 |
 
-計時器那一項是刻意加的：ISR 路徑正是遊戲側 DPMI 鎖頁常式存在的理由，API 裡沒有別的東西會走到它。
+計時器那一項是刻意加的：遊戲自己的時鐘就是 `fdps_audio_timer_install` 以 `AIL_register_timer` 掛上的 callback，這一項證明應用程式註冊的 callback 真的在計時器 ISR 裡被呼叫。計時器 ISR 不是只有這條路會走到——DIG 驅動安裝時 `AIL_internal_dig_driver_setup_full`（`000469f0`）以 `AIL_register_timer` 掛上 `AIL_internal_audio_mix_isr` 並啟動，混音就在計時器 ISR 裡跑，所以方波播完那一項也已經走過 ISR 路徑，而 ISR 路徑正是遊戲側 DPMI 鎖頁常式存在的理由。
 
 `link_ail.py selftest` 拿掉一條 alias 重連，要求連結器真的報出那個解不掉的符號——「0 個未解析符號」是本頁的主要結論，而永遠不會失敗的檢查在壞掉的連結上也會這樣回報。

@@ -16,7 +16,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 依**子系統與呼叫關係**分組，不依位址、不依字母。判準依序是：
 
-1. **語意**——function 在做什麼，由票 15 的名稱與 plate comment 給出。
+1. **語意**——function 在做什麼，由 Ghidra 裡的名稱與 plate comment 給出。
 2. **呼叫關係**——caller 與 callee 儘量落在同一個檔，跨檔呼叫走該檔的 `.h`。
 3. **共用的全域**——一起讀寫同一組狀態的 function 屬於同一個檔，那個檔就是那組狀態的擁有者。
 
@@ -26,7 +26,7 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 **每個檔的預估行數不超過 1000。** 這不是程式的性質，是模型讀寫的效率界線：超過之後每次改一行都要把整個檔讀進 context。
 
-預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分成 89 個 `.c`。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
+預估值的來源是 **Ghidra decompiled code 的行數**，由 `tools/code_emit/DumpRoutingInputs.java` 產生。全部 514 支合計約 50,000 行，分在 88 個 `.c`；第 89 個 `gamedata.c` 只放資料。這是估計不是保證——實際 emit 出來的 C 會偏離，處置規則見下面「超標了怎麼辦」。
 
 ## 資料符號歸誰
 
@@ -34,18 +34,18 @@ emit 是序列的，一次一支 function，每支各自 commit。檔案落點�
 
 | 情況 | 落點 |
 | --- | --- |
-| 只被一個目標檔的程式碼讀 | 該檔。共 91 個 |
+| 只被一個目標檔的程式碼讀 | 該檔。共 87 個 |
 | 被兩個以上的目標檔讀 | `gamedata.c`。共 135 個 |
 | 章節四張 dispatch 表 | `chapter.c`，見下面的例外 |
 | 佈局上必須與別檔的全域相鄰 | 相鄰者的檔，理由記在 `tools/code_emit/build_routing.py` 的 `DATA_OVERRIDES`。目前 `data_fdps_animation_baseani_entry_ptr`、`data_fdps_battle_indicator_queue_unit_idx`、`data_fdps_indicator_queue_cell_x_offset`、`data_fdps_indicator_queue_count`、`data_fdps_indicator_queue_glyph_ids`、`data_fdps_spell_list_window_last_tick` 六個因此進 `gamedata.c`，`gamedata.c` 合計 141 個 |
 
-`gamedata.c` 不是雜項桶，入場條件是「跨檔共用」這個事實本身。把它集中還有第二個好處：未初始化全域的擺放順序與相鄰關係在 Watcom 下不保證（[`pitfalls.md`](pitfalls.md) 的 B 類），全部落在同一個 translation unit 至少讓那個順序是一份可讀的清單，而不是散在七十幾個檔裡的湊巧。
+`gamedata.c` 不是雜項桶，入場條件是「跨檔共用」這個事實本身。把它集中還有第二個好處：兩個全域要相鄰只有一種寫法——都帶初值、落在同一個 `.c`、原始碼裡前後緊接，不帶初值的連檔內順序都由工具鏈決定（[`data_emit.md`](data_emit.md) 的「工具鏈怎麼擺全域」），所以跨檔共用的全域集中在同一個 translation unit，原版必須相鄰的那幾段才寫得成一份照位址排的定義清單，而不是散在各個讀取檔裡的湊巧。
 
-**例外是 `data_fdps_chapter_*_handler_table` 四張表。** 照「誰讀它」會把它們拆到三個不同的檔、其中一張還單獨落在 `main.c`，但它們指向的 handler 分佈在六個章節檔裡，是同一組 dispatch 介面。四張一起放進 `chapter.c`。
+**例外是 `data_fdps_chapter_*_handler_table` 四張表。** 照「誰讀它」，init、event、post-action 三張因為多檔共用會進 `gamedata.c`，end 表只被 `main.c` 讀而單獨落在 `main.c`，但它們指向的 140 個 handler 分佈在 19 個章節檔裡，是同一組 dispatch 介面。四張一起放進 `chapter.c`。
 
 ## 不 emit 的東西
 
-Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。共同點是編譯器會從我們給它的 C 自己產生一份，我們再定義一次就會多出一個原版沒有的符號。它們在 `routing.json` 的 `skipped` 區，不進票 23 的工作清單。
+Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。共同點是編譯器會從我們給它的 C 自己產生一份，我們再定義一次就會多出一個原版沒有的符號。它們在 `routing.json` 的 `skipped` 區，不進資料 emit 的工作清單。
 
 | 類 | 數量 | 為什麼不 emit |
 | --- | ---: | --- |
@@ -63,12 +63,12 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 | 檔 | 內容 | 誰 include 它 |
 | --- | --- | --- |
 | `X.h`（每個 `X.c` 一個） | `X.c` 的公開 function 原型，含各自的 `#pragma aux` calling convention 宣告；以及 `X.c` 定義的全域的 `extern` | 呼叫 `X.c` 的檔 |
-| `fdpstype.h` | 23 個遊戲 struct 的定義（票 17 的產物），不含任何 function 宣告。**產生物**：`tools/code_emit/gen_types.py` 從 `ghidra_snapshot/data_types.txt` 產生，連同逐欄檢查偏移的 `tests/fdpstype.c`。改佈局要改 Ghidra 再重跑，不手改 | 需要那些型別的檔 |
+| `fdpstype.h` | 23 個遊戲 struct 的定義，不含任何 function 宣告。**產生物**：`tools/code_emit/gen_types.py` 從 `ghidra_snapshot/data_types.txt` 產生，連同逐欄檢查偏移的 `tests/fdpstype.c`。改佈局要改 Ghidra 再重跑，不手改 | 需要那些型別的檔 |
 | `gamedata.h` | `gamedata.c` 定義的 141 個全域的 `extern` | 讀那些全域的檔 |
 
 **`extern` 的擁有者就是定義它的那個 `.c` 的 `.h`，只有一個。** 任何檔都不得自己寫一份 `extern`——那樣的宣告不會跟著定義一起改，型別一旦調整就是兩份不一致的真相，而連結器不會抱怨。
 
-票 22 的 emit 期間，擁有者的 `.c` 常常還不存在（資料是票 23 的產物，`gamedata.c` 尤其）。這不改變規則：**先建出擁有者的 `.h`、把 `extern` 寫在裡面**，該 `.c` 之後補上定義。宣告的落點由誰擁有那個符號決定，不由誰先寫到它決定。
+擁有者的 `.c` 還沒有那個定義時規則也不變：**先建出擁有者的 `.h`、把 `extern` 寫在裡面**，定義之後補進該 `.c`。宣告的落點由誰擁有那個符號決定，不由誰先寫到它決定。
 
 程式庫的型別（`FILE`、`tm`、`REGS`、`SAMPLE` 等）來自 Watcom 與 AIL 的真標頭，不進 `fdpstype.h`；理由與「程式庫函式就叫程式庫的名字」同源（[`naming.md`](naming.md)）。
 
@@ -82,7 +82,7 @@ Ghidra 必須給名字、但重建版**不能定義**的符號，共 159 個。�
 
 拆檔與任何落點更正，都改 `tools/code_emit/build_routing.py` 的判定表，重跑腳本重新產生 `routing.json` 與 `routing.md`，不手改產出檔。程式碼的搬移、重新產生的路由表、本檔的檔案表，三者進同一個 commit。
 
-**拆完之後，手上那份工作清單就作廢了**——它是用舊路由算的，照著跑會把 function 寫進路由已經不再指名的檔。正確的處置是重新問一次 `next_batch.py`，不是把整批收掉：拆檔發生在檔案跨過預算的時候，而那正是最大的那些 function 陸續落地的時期，所以它會**成群出現在後期批次**而不是偶發。實測 `t22-08` 就是在第二支撞到拆檔、剩下 98 支一支沒動。
+**拆完之後，手上那份工作清單就作廢了**——它是用舊路由算的，照著跑會把 function 寫進路由已經不再指名的檔。正確的處置是重新問一次 `next_batch.py`，不是把整批收掉：拆檔發生在檔案跨過預算的時候，而那正是最大的那些 function 陸續落地的時期，所以它會**成群出現在後期批次**而不是偶發。
 
 `next_batch.py` 以 `routing.json` 為工作清單的名冊，`emit_state.json` 只記進度；兩邊對某支 function 的目標檔不一致時它報錯而不是二選一，因為那正是「同一支 function 被寫進兩個檔」的前兆。
 
@@ -120,9 +120,9 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 
 1. `python tools/rle_asm/switch_impl.py c`——把 13 個標記區的 `#if 0` 翻成 `#if 1`，並把五個 `.asm` 移出 `src/`、停放在工具自己的暫存處（[`tools/rle_asm/`](../tools/rle_asm/_index.md)）。建置編的是 `src/` 裡現有的檔，組語檔留著就會與 C 重複定義。狀態不一致（標記少了、半套翻轉、`.asm` 缺一部分）時它拒絕動手。
 2. `python tools/code_emit/build_emit.py all`（只看這兩套時加 `--only rledisp,rlebase,rlepal,rleturn,rlemix,rle,rlecolor,rlerot,rleblend`，照樣全部編譯連結、只跑這 9 個測試檔）——建置零錯誤零警告、兩套測試全綠：`tests/rledisp.c`／`rlebase.c`／`rlepal.c`／`rleturn.c`／`rlemix.c` 經分派者的測試（兩種實作都要過），加上重新啟用的 C 版直接呼叫測試。
-3. build gate（`python tools/build_gate/gate.py check --target emittest`）裡的 `rle_asm.check` 在 C 版狀態下必然失敗——它比對的就是組語檔。長期改回 C 版時要一併把它從 `tools/build_gate/gate.py` 的 `TEST_SUITES` 拿掉；只是暫時切過去驗證時，其餘套件全綠即可。
+3. build gate（`python tools/build_gate/gate.py check --target emittest`）裡的 `rle_asm.check`，以及 `--target game` 的 `rle_asm.check_game`，在 C 版狀態下必然失敗——它們比對的就是組語檔。長期改回 C 版時要一併把這兩項從 `tools/build_gate/gate.py` 的 `TEST_SUITES` 拿掉；只是暫時切過去驗證時，其餘套件全綠即可。
 
-改回組語版是 `python tools/rle_asm/switch_impl.py asm`，再跑一次第 2 步（C 版直接呼叫的測試回到 `#if 0`，只剩經分派者的那一套）與完整的 build gate。兩個方向都可行：C 版建置零錯誤零警告、兩套測試全綠，切回組語版後 gate 全綠。
+改回組語版是 `python tools/rle_asm/switch_impl.py asm`，再跑一次第 2 步（C 版直接呼叫的測試回到 `#if 0`，只剩經分派者的那一套；此時 `--only` 只能列 `rledisp,rlebase,rlepal,rleturn,rlemix`，列到另外四個會因為沒有測試進入點而被拒）與完整的 build gate。兩個方向都可行：C 版建置零錯誤零警告、兩套測試全綠，切回組語版後 gate 全綠。
 
 ## 檔案表
 
@@ -154,7 +154,7 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 | --- | --- |
 | `btlturn.c` | 回合與階段引擎：敵方／NPC／玩家階段、回合推進 |
 | `btlmenu.c` | 戰鬥中的系統選單：目標、存檔、讀檔、離開，以及開啟它的外層選單 |
-| `btlact.c` | 單位在自己回合開的行動指令環（攻擊／法術／道具／待命），以及它第四個命令所做的格子搜尋。`btlmenu.c` 原本三支同檔，寫到 1038 行、外層系統選單還沒落地，於是照兩個 caller 的界線切開：系統選單由玩家階段迴圈開啟、並帶著存檔臂重建的整份 FDE.SAV 影像，行動指令環則由單位回合逐一開啟，而搜尋指令是那個環的第四個命令、沒有別的呼叫者 |
+| `btlact.c` | 單位在自己回合開的行動指令環（攻擊／法術／道具／待命），以及它第四個命令所做的格子搜尋。與 `btlmenu.c` 的界線是兩個 caller：系統選單由玩家階段迴圈開啟、並帶著存檔臂重建的整份 FDE.SAV 影像，行動指令環則由單位回合逐一開啟，而搜尋指令是那個環的第四個命令、沒有別的呼叫者 |
 | `btlend.c` | 勝敗條件判定與結果視窗 |
 | `combat.c` | 戰鬥演出的驅動、命中判定與背景滑入 |
 | `cmbblow.c` | 一次揮擊的演出 |
@@ -187,17 +187,17 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 | --- | --- |
 | `chapter.c` | 章節框架：狀態重置、標題卡、四張 dispatch 表 |
 | `chinit1.c` / `chinit1b.c` / `chinit2.c` / `chinit2b.c` | 第 1–10 章／第 11–15 章／第 16–24 章／第 25–30 章的 init handler |
-| `chinit1b.c` | 第 11–15 章的 init handler。`chinit1.c` 原本涵蓋第 1–15 章，寫到第 10 章就已經 1024 行——每支 handler 都要交代地圖宣告幾個 player slot、過場腳本自己部署了誰、以及 roster 加人排在重建之前有沒有差別，這份說明與函式本體只有幾行呼叫無關——於是趁第 11 章落地前把後五章切出來自成一檔；字母後綴的理由同 `chevt2b.c` |
-| `chinit2b.c` | 第 25–30 章的 init handler。`chinit2.c` 原本涵蓋第 16–30 章，寫到第 24 章就已經 1108 行、後面還排著六支，於是照「這支 handler 有沒有人入隊」的界線切開：全遊戲最後一個會呼叫 `fdps_roster_add_character` 的 init handler 就是第 24 章的，第 16–24 章那九支的說明重心都在 roster 與地圖 player slot 數的對帳，第 25–30 章則是結局前的收束，六支全是同一個四呼叫的平版形、彼此只差過場腳本的檔名。字母後綴的理由同 `chevt2b.c` |
+| `chinit1b.c` | 第 11–15 章的 init handler。與 `chinit1.c`（第 1–10 章）分開是行數預算：每支 handler 都要交代地圖宣告幾個 player slot、過場腳本自己部署了誰、以及 roster 加人排在重建之前有沒有差別，這份說明的長度與函式本體只有幾行呼叫無關，第 1–15 章放在一檔會超過 1000 行；字母後綴的理由同 `chevt2b.c` |
+| `chinit2b.c` | 第 25–30 章的 init handler。與 `chinit2.c`（第 16–24 章）照「這支 handler 有沒有人入隊」的界線分開：全遊戲最後一個會呼叫 `fdps_roster_add_character` 的 init handler 就是第 24 章的，第 16–24 章那九支的說明重心都在 roster 與地圖 player slot 數的對帳，第 25–30 章則是結局前的收束，六支全是同一個四呼叫的平版形、彼此只差過場腳本的檔名。字母後綴的理由同 `chevt2b.c` |
 | `chpost1.c` / `chpost2.c` / `chpost3.c` | 第 1–15 章／第 16–24 章／第 25–30 章的 post-action handler |
-| `chpost3.c` | 第 25–30 章的 post-action handler。`chpost2.c` 原本涵蓋第 16–30 章，十三支落地後已 1160 行，第 23、24 章還排在後面，於是趁它們落地前切開。切在第 24、25 章之間是因為地圖到這裡才定型：這些 handler 寫死的敵方 unit index 一律是「地圖的 player slot 數加上部署記錄編號」，而 `MAPnn.DAT` 的 header byte +1 讀出來是第 16–19 章 10、第 20–24 章 11、第 25–30 章 12——蘭斯洛特在第 19 章、珊在第 24 章入隊之後就沒有任何 handler 再加人，所以第 25–30 章是唯一一段跑在固定十二個 player slot 上的章節，魔戰將軍與魔導王能被寫成 slot 0x0c 起算正是這個緣故，那段推導在六支裡寫了三次。這一刀同時把檔裡兩對雙生的 handler 各自留在一起：第 19 與 24 章是妖刀決鬥的第二、三場（第一場是 `chpost1.c` 的第 15 章），是第 16–30 章裡唯一會對玩家說話並搬動道具的兩支，共用同一組訊息面板與顏色常數；第 22 與 23 章則是兩支不宣告勝利、只看 slot 3 法蓮娜的。第 19 到 24 章之間任何一刀都會拆散其中一對。不叫 `chpost2b.c` 是因為 `chpost2.c` 是這個家族編號最大的檔，沒有更後面的號碼要跨過，直接接號就維持得住章序 |
+| `chpost3.c` | 第 25–30 章的 post-action handler。與 `chpost2.c`（第 16–24 章）切在第 24、25 章之間，是因為地圖到這裡才定型：這些 handler 寫死的敵方 unit index 一律是「地圖的 player slot 數加上部署記錄編號」，而 `MAPnn.DAT` 的 header byte +1 讀出來是第 16–19 章 10、第 20–24 章 11、第 25–30 章 12——蘭斯洛特在第 19 章、珊在第 24 章入隊之後就沒有任何 handler 再加人，所以第 25–30 章是唯一一段跑在固定十二個 player slot 上的章節，魔戰將軍與魔導王能被寫成 slot 0x0c 起算正是這個緣故，那段推導在六支裡寫了三次。這一刀同時把檔裡兩對雙生的 handler 各自留在一起：第 19 與 24 章是妖刀決鬥的第二、三場（第一場是 `chpost1.c` 的第 15 章），是第 16–30 章裡唯一會對玩家說話並搬動道具的兩支，共用同一組訊息面板與顏色常數；第 22 與 23 章則是兩支不宣告勝利、只判敗的：slot 3 法蓮娜退場即敗，第 23 章另外在 slot 0x1f 退場時判敗。第 19 到 24 章之間任何一刀都會拆散其中一對。不叫 `chpost2b.c` 是因為 `chpost2.c` 是這個家族編號最大的檔，沒有更後面的號碼要跨過，直接接號就維持得住章序 |
 | `chend1.c` / `chend1b.c` / `chend2.c` / `chend2b.c` | 第 1–11 章／第 12–15 章／第 16–24 章／第 25–30 章的 end handler |
-| `chend1b.c` | 第 12–15 章的 end handler。`chend1.c` 原本涵蓋第 1–15 章，寫到第 11 章就已經 1021 行、後面還排著四支——本體只有四五個呼叫，但每支都要交代這一章能不能帶著敵人存活過關，那決定了開頭那道掃地圖是關鍵步驟還是保險步驟，這段說明不會因為本體短就變短——於是趁第 12 章落地前切開。切在第 11、12 章之間是因為剩下的四支自成一段：第 12–14 章是這個家族最後三支樣板（掃地圖、回寫、過場、復活、寫下一章索引），第 15 章則是這段的例外，第 3–15 章裡唯一不掃地圖、改為把要塞砲決鬥中退場的隊員放回場上的那支。第 1–11 章維持原狀不搬，它已經沒有 function 排在後面，正是上一節第二條的情況。字母後綴的理由同 `chevt2b.c` |
-| `chend2b.c` | 第 25–30 章的 end handler，也是這個家族裡唯二會讓遊戲結束的兩支所在。`chend2.c` 原本涵蓋第 16–30 章，寫到第 24 章就已經 1015 行、後面還排著六支，於是照 `chinit2b.c` 與 `chpost3.c` 同一個章界切開。第 16–24 章的 handler 一律只把遊戲交給下一章；第 25–30 章是結局前的收束，其中第 27 章在蘭迪斯與法蓮娜沒有同時帶著魔精石碎片與反禁制器時改播結局並送出回標題的請求、不寫下一章索引，第 30 章則無條件如此，因為沒有第 31 章。這一刀同時把第 19 與 24 章留在同一檔：它們是妖刀決鬥的第二、三場，是第 16–30 章裡唯二在回寫名冊前把全隊放回滿值的 handler，共用同一段恢復的寫法與說明。第 16–24 章已落地的九支原地不動，這次拆檔沒有搬任何程式碼。字母後綴的理由同 `chevt2b.c` |
+| `chend1b.c` | 第 12–15 章的 end handler。與 `chend1.c`（第 1–11 章）分開是行數預算：本體只有四五個呼叫，但每支都要交代這一章能不能帶著敵人存活過關，那決定了開頭那道掃地圖是關鍵步驟還是保險步驟，這段說明不會因為本體短就變短。切在第 11、12 章之間是因為剩下的四支自成一段：第 12–14 章是第 1–15 章這一段最後三支樣板（掃地圖、回寫、過場、復活、寫下一章索引），第 15 章則是這段的例外，第 3–15 章裡唯一不掃地圖、改為把要塞砲決鬥中退場的隊員放回場上的那支。字母後綴的理由同 `chevt2b.c` |
+| `chend2b.c` | 第 25–30 章的 end handler，也是這個家族裡唯二會讓遊戲結束的兩支所在。與 `chend2.c`（第 16–24 章）的章界同 `chinit2b.c` 與 `chpost3.c`。第 16–24 章的 handler 一律只把遊戲交給下一章；第 25–30 章是結局前的收束，其中第 27 章在蘭迪斯與法蓮娜沒有同時帶著魔精石碎片與反禁制器時改播結局並送出回標題的請求、不寫下一章索引，第 30 章則無條件如此，因為沒有第 31 章。這一刀同時把第 19 與 24 章留在同一檔：它們是妖刀決鬥的第二、三場，是第 16–30 章裡唯二在回寫名冊前把全隊放回滿值的 handler，共用同一段恢復的寫法與說明。字母後綴的理由同 `chevt2b.c` |
 | `chevt1.c` … `chevt6.c` | 章節腳本事件 handler，依章號切段；切點不平均，因為第 8 章一章的四支 handler 就抵得上第 9–14 章的總和 |
-| `chevt2.c` | 第 8 章的四支事件 handler：回合排程、守衛陣亡、村民逃出。`chevt2.c` 原本涵蓋第 8–14 章，第 8 章的第四支還沒落地就已經 1106 行，於是照上一列那句話的界線切開，第 8 章一章自成一檔 |
+| `chevt2.c` | 第 8 章的四支事件 handler：回合排程、守衛陣亡、村民逃出。第 8 章與第 9–14 章合起來超過行數預算，照上一列那句話的界線切開，第 8 章一章自成一檔 |
 | `chevt2b.c` | 第 9–14 章的事件 handler，即上一列切出去的另一半；不叫 `chevt7.c` 是因為 `chevt6.c` 已經是第 28–30 章，用字母後綴才能讓檔名維持章序 |
-| `chevt5b.c` | 第 26、27 章的事件 handler。`chevt5.c` 原本涵蓋第 24–27 章，光第 24、25 章的四支就寫到 1113 行，於是把後兩章切出來自成一檔，字母後綴的理由同 `chevt2b.c` |
+| `chevt5b.c` | 第 26、27 章的事件 handler。與 `chevt5.c`（第 24、25 章）合起來超過行數預算，所以後兩章自成一檔，字母後綴的理由同 `chevt2b.c` |
 | `icon.c` | ICON 腳本直譯器與它的指令實作（過場演出） |
 
 ### 村莊與商店
@@ -238,7 +238,7 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 | `rlepal.asm` | RLE 調色盤重映與換色，原版組語 |
 | `rleturn.asm` | RLE 旋轉與旋轉縮放，原版組語 |
 | `rlemix.asm` | RLE 半透明與著色，原版組語 |
-| `rle.c`、`rlecolor.c` | 上面三個 `.asm` 的 C 譯本，整段 `#if 0`（參考用） |
+| `rle.c`、`rlecolor.c` | `rlebase.asm` 與 `rlepal.asm` 的 C 譯本，整段 `#if 0`（參考用） |
 | `rlerot.c`、`rleblend.c` | 旋轉與半透明畫法的 C 譯本（`#if 0`，參考用），以及組語讀寫的旋轉步進與顏色範圍全域的定義（編譯） |
 | `palette.c` | 調色盤暫存器與查找表 |
 | `palcycle.c` | 場景與 UI 的調色盤循環動畫 |
@@ -260,5 +260,5 @@ RLE 繪製的 15 支（`fdps_blit_dispatch` 與它底下的 14 支）連進執�
 | `keybd.c` | 鍵盤 ISR、佇列與掃描碼讀取 |
 | `main.c` | 進入點、全域資源載入與釋放 |
 | `title.c` | 標題畫面、demo、game over、FMV 播放 |
-| `ending.c` | 片尾：roster 每個成員一張動畫卡與收尾的 End 影片。原本與標題畫面同屬 `title.c`，但四支落地後已 1117 行、`fdps_title_screen`還排在後面，於是把片尾這段自成一檔——它是唯一不屬於「標題與結束畫面」那組、由章節結局叫起來的前台演出 |
+| `ending.c` | 片尾：roster 每個成員一張動畫卡與收尾的 End 影片。不與標題畫面同放 `title.c`，因為兩者合起來超過行數預算，而片尾是唯一不屬於「標題與結束畫面」那組、由章節結局叫起來的前台演出 |
 | `gamedata.c` | 跨檔共用的全域狀態，唯一的資料專用檔 |

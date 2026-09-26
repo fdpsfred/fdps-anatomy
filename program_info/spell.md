@@ -1,6 +1,6 @@
 # 法術與道具效果
 
-**驗證對象**：`FDPS.LE` 的法術與道具子系統，本檔是下列 function 的唯一正典——`src/spell.c` 的 `0x28320`–`0x29201`（`fdps_spell_damage_unit`、`fdps_spell_heal_unit`、`fdps_spell_deduct_mp_cost`、`fdps_play_spell_11_cutscene`、`fdps_cast_spell_on_targets`、`fdps_play_spell_palette_flash`）；`src/spellmnu.c` 的 `0x276f0`–`0x282a4`（`fdps_draw_spell_list_page`、`fdps_spell_list_window_wait_input`、`fdps_battle_spell_command`、`fdps_spell_list_select_loop`）；`src/cmbspell.c` 的 `0x1a4c0`（`fdps_combat_play_spell_on_targets`）；`src/item.c` 的 `0x252b0`（`fdps_battle_item_menu`）、`0x26230`（`fdps_apply_damage_to_targets`）、`0x262a0`（`fdps_apply_item_effect_to_targets`）、`0x26fd0`（`fdps_apply_heal_to_targets`）；`src/unititem.c` 的 `0x25140`–`0x26173` 與 `0x34520`（物品欄與裝備）。另外本檔擁有下列在別的 `src/` 檔、但只為法術與道具服務的效果規則：`src/unitstat.c` 的 `0x27070`（`fdps_unit_apply_heal`）、`0x275a0`（`fdps_unit_restore_mp`）、`0x27840`（`fdps_unit_collect_known_spells`）、`0x28460`（`fdps_unit_apply_damage`）、`0x28ee0`（`fdps_unit_inflict_random_ailments`）、`0x28f70`（`fdps_unit_apply_status_effect`）、`0x29080`（`fdps_unit_is_ailment_immune`），與 `src/unit.c` 的 `0x24d70`（`fdps_unit_recompute_combat_stats`）、`0x282b0`（`fdps_set_flag_bit`）。
+**驗證對象**：`FDPS.LE` 的法術與道具子系統，本檔是下列 function 的唯一正典——`src/spell.c` 的 `0x28320`–`0x29201`（`fdps_spell_damage_unit`、`fdps_spell_heal_unit`、`fdps_spell_deduct_mp_cost`、`fdps_play_spell_11_cutscene`、`fdps_cast_spell_on_targets`、`fdps_play_spell_palette_flash`）；`src/spellmnu.c` 的 `0x276f0`–`0x282a4`（`fdps_draw_spell_list_page`、`fdps_spell_list_window_wait_input`、`fdps_battle_spell_command`、`fdps_spell_list_select_loop`）；`src/cmbspell.c` 的 `0x1a4c0`（`fdps_combat_play_spell_on_targets`）；`src/item.c` 的 `0x252b0`（`fdps_battle_item_menu`）、`0x26230`（`fdps_apply_damage_to_targets`）、`0x262a0`（`fdps_apply_item_effect_to_targets`）、`0x26fd0`（`fdps_apply_heal_to_targets`）；`src/unititem.c` 的 `0x25140`–`0x26173` 與 `0x34520`（物品欄與裝備）。另外本檔擁有下列在別的 `src/` 檔、但只為法術與道具服務的效果規則：`src/unitstat.c` 的 `0x27070`（`fdps_unit_apply_heal`）、`0x275a0`（`fdps_unit_restore_mp`）、`0x27840`（`fdps_unit_collect_known_spells`）、`0x28460`（`fdps_unit_apply_damage`）、`0x28ee0`（`fdps_unit_inflict_random_ailments`）、`0x28f70`（`fdps_unit_apply_status_effect`）、`0x29080`（`fdps_unit_is_ailment_immune`），與 `src/unit.c` 的 `0x282b0`（`fdps_set_flag_bit`）。`fdps_unit_recompute_combat_stats`（`0x24d70`）的戰鬥數值重算公式歸 [`battle.md`](battle.md)。
 
 法術與物品的數值（威力、命中率、距離、範圍、MP、對象、物品的使用效果碼與數量）在 [`../assets/spells.md`](../assets/spells.md) 與 [`../assets/items.md`](../assets/items.md)，record 佈局在 [`../assets/tables/spells.md`](../assets/tables/spells.md) 與 [`../assets/tables/items.md`](../assets/tables/items.md)；本檔只寫程式怎麼用它們。本檔的欄位名沿用 `src/fdpstype.h`：法術 record 的 `power`（`+0x00`）、`hit_rate`（`+0x02`）、`cast_range_flags`（`+0x03`）、`area`（`+0x04`）、`mp_cost`（`+0x05`）、`target_side`（`+0x06`）；物品 record 的 `use_effect`（`+0x0d`）、`use_amount`（`+0x0e`）、`use_distance`（`+0x10`）、`use_target`（`+0x11`）、`use_radius`（`+0x12`）、`select_mode`（`+0x15`）。
 
@@ -12,7 +12,7 @@
 - 單位身上的封魔咒術計時（單位記錄 `+0x27`，`status_timers[5]`）不為 0，同一支 function 判斷；
 - 單位這回合移動過——`fdps_battle_unit_turn`（`0x15470`）在路徑步數非 0 時把法術項設成反灰，只有角色編號（單位記錄 `+0x08`）為 `07` 琴琴與 `03` 裘娜的單位豁免；原地不動則清回可選。
 
-已學法術記在單位記錄 `+0x1a` 起的 5 byte 位元遮罩，bit 編號就是法術編號（佈局見 [`../assets/tables/spells.md`](../assets/tables/spells.md)）。`fdps_unit_collect_known_spells`（`0x27840`）依 byte 0→4、bit 0→7 的順序把設了的位元展開成一串遞增的法術編號，最多 40 個。學會新法術是 `fdps_set_flag_bit`（`0x282b0`）對同一張遮罩 OR 一個位元：升級時依習得表呼叫（習得表見 [`../assets/characters.md`](../assets/characters.md)），另外蓋亞的強化套件（`use_effect` `0x21`）直接給 `0x1d` 轟神砲。
+已學法術記在單位記錄 `+0x1a` 起的 5 byte 位元遮罩，bit 編號就是法術編號（佈局見 [`../assets/tables/spells.md`](../assets/tables/spells.md)）。`fdps_unit_collect_known_spells`（`0x27840`）依 byte 0→4、bit 0→7 的順序把設了的位元展開成一串遞增的法術編號，最多 40 個。學會新法術是 `fdps_set_flag_bit`（`0x282b0`）對同一張遮罩 OR 一個位元：升級時依習得表呼叫（習得表見 [`../assets/characters.md`](../assets/characters.md)），另外蓋亞的強化套件（`use_effect` `0x21`）直接給 `0x1d` 轟神砲，第 1 章的結束處理 `fdps_chapter_01_end`（`0x3a410`）在寫回名冊之前給戰場單位 0（蘭迪斯）`00` 業火（見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。
 
 法術清單一頁 8 列，由 `fdps_draw_spell_list_page`（`0x276f0`）畫：名稱是全域文字 `0x1be + 法術編號`，右側的 MP 消耗是 `mp_cost` 無號讀出、4 位補零（消耗 12 顯示 `0012`）。清單以「清單索引」取編號，第二頁畫的是第 9 個以後的法術。
 
@@ -24,25 +24,15 @@
 
 **一般距離（`0x01`–`0x0f`）**：
 
-1. 可瞄準範圍由 `fdps_collect_targets_in_range`（`0x11e50`）從施法者所在格（游標此刻停在施法者身上）算出，`range_code = cast_range_flags`、`min_dist = 0`（施法者自己的格也算），選取模式 = `target_side`。`range_code < 0x10` 時是以 `PROMAP.DAT` 第 0 列（每種地形消耗 1）做洪水填充，包含端點；帶不可通行旗標的格會擋住擴散（洪水填充的規則見 [`movement.md`](movement.md)）。
+1. 可瞄準範圍由 `fdps_collect_targets_in_range`（`0x11e50`）從施法者所在格（游標此刻停在施法者身上）算出，`range_code = cast_range_flags`、`min_dist = 0`（施法者自己的格也算），選取模式 = `target_side`。`range_code < 0x10` 時是以 `PROMAP.DAT` 第 0 列（每種地形消耗 1）做洪水填充，包含端點；呼叫時網格已重設、沒有任何單位佔格旗標，所以範圍就是地圖內 `|Δx| + |Δy| <= cast_range_flags` 的菱形，地形與單位都擋不住（收集規則見 [`map_ai.md`](map_ai.md) 的「目標收集」）。
 2. 玩家在 `fdps_map_cursor_select_loop`（`0x2b4f0`）移動游標；確認鍵要求游標格在上一步標出的範圍內，**而且**以游標為中心、曼哈頓距離 `<= area` 之內至少有一個選取模式接受的單位（這一步不看地形）。
-3. 確認後的命中名單是**第二次** `fdps_collect_targets_in_range`：從游標格出發、`range_code = area`、`min_dist = 0`、選取模式 = `target_side`。這次同樣是洪水填充，所以半徑內隔著不可通行地形的單位不會被打到，即使確認時的菱形把它算進去。
+3. 確認後的命中名單是**第二次** `fdps_collect_targets_in_range`：從游標格出發、`range_code = area`、`min_dist = 0`、選取模式 = `target_side`。這次同樣是在剛重設的網格上以第 0 列洪水填充，範圍就是地圖內以游標為中心、`|Δx| + |Δy| <= area` 的菱形，與確認時的菱形相同，隔著地形也照樣打到。
 
 **直線（`0x10` 以上）**：可瞄準範圍同樣由 `fdps_collect_targets_in_range` 算，`range_code >= 0x10` 時是施法者所在列與所在行上、距離 `<= 值 − 0x10` 的十字形，不看地形。確認後的命中名單由 `fdps_collect_targets_in_line`（`0x13670`）從施法者的格往游標方向走 `cast_range_flags − 0x10` 格：游標與施法者的 x 不同就只沿水平方向走（y 差完全忽略），x 相同才沿垂直方向走；起點格不算；每格只收**陣營 0** 的單位，不看 `target_side`。走完播 `Chess.wav`。
 
 **以自己為中心（`0`，只有 `0A` 裂地術與 `0B` 封神裂震）**：命中名單在瞄準之前就定了——從施法者的格、半徑 `area` 做洪水填充，固定只收陣營 0，不看 `target_side`；接著游標繪製模式改成一般游標，瞄準迴圈以模式 4（任何標出的格都能確認）執行，名單為空時改用模式 5（確認鍵永遠不成立，只能取消）。游標停在哪裡不影響打到誰。
 
-選取模式（`target_side` 或物品的 `select_mode`）在命中名單收集時的意義，由 `fdps_collect_targets_in_range`（`0x11e50`）決定：
-
-| 值 | 收的單位 |
-| ---: | --- |
-| 0 | 陣營 0（敵方） |
-| 1 | 陣營不是 0（我方與 NPC） |
-| 2 | 陣營 1 |
-| 3 | 陣營 2（我方） |
-| 4 以上 | 沒有 |
-
-確認鍵那一步用的是另一支 `fdps_collect_targets_in_area`（`0x109f0`），它對 2 的解讀是「陣營 2 且本回合已行動」，其餘相同。出貨的法術只用 0、1、3。
+選取模式（`target_side` 或物品的 `select_mode`）在命中名單收集時由 `fdps_collect_targets_in_range`（`0x11e50`）解讀，確認鍵那一步由另一支 `fdps_collect_targets_in_area`（`0x109f0`）解讀：兩者都是 0 收陣營 0（敵方）、1 收陣營不是 0（我方與 NPC）、3 收陣營 2（我方）、4 以上不收，只有 2 的意義不同。兩張模式表見 [`map_ai.md` 的「目標收集」](map_ai.md#目標收集)。出貨的法術只用 0、1、3。
 
 **傳送術（`15`）** 在確認目標之後多一段：命中名單的第一個單位若就是施法者，整次施法作廢並回到清單；否則以 `fdps_map_cursor_select_loop` 的模式 6 選目的格——全圖任何一格都可以，條件只有該格上沒有在場單位、且**被傳送者**的職業對該格地形的消耗小於 20。目的座標存進 `data_fdps_battle_teleport_dest_tile_x`／`data_fdps_teleport_destination_tile_y`。
 
@@ -183,8 +173,8 @@ return base + bonus
 | 0 | `+0x22` | 攻擊力 ×1.15 | 神之祝福 |
 | 1 | `+0x23` | 防禦力 ×1.15 | 神之祝福 |
 | 2 | `+0x24` | DX +15（命中與閃避都加） | 神之祝福 |
-| 3 | `+0x25` | 中毒 | 腐毒術、鬼動死靈陣、武器附加效果 |
-| 4 | `+0x26` | 麻痺 | 麻痺術、鬼動死靈陣、武器附加效果 |
+| 3 | `+0x25` | 中毒 | 腐毒術、鬼動死靈陣、武器附加效果、第 1 章開場處理 `fdps_chapter_01_init`（`0x20e90`，對索爾設 11） |
+| 4 | `+0x26` | 麻痺 | 麻痺術、鬼動死靈陣、武器附加效果、第 5 章開場過場 `ICON04.DAT` 的 `SET_UNIT_TIMER`（對索爾設 255） |
 | 5 | `+0x27` | 封魔咒術（不能施法） | 封魔咒術、鬼動死靈陣 |
 
 計時不為 0 就是生效中。每回合的遞減、中毒的扣血與麻痺的行動限制見 [`battle.md`](battle.md)；麻痺同時讓單位不能反擊（`fdps_check_can_counter_attack`（`0x137e0`））。
@@ -199,7 +189,7 @@ return base + bonus
 
 `fdps_unit_inflict_random_ailments`（`0x28ee0`）是鬼動死靈陣命中後的附加：對槽 3、4、5 各擲一次，`rand() % 100 < 20` 且目標不免疫就把該槽設成 `rand() % 2 + 2`。它不看法術的命中率、**會覆蓋**已在倒數的計時、不計經驗；免疫判定在機率判定之後，免疫的目標照樣消耗 `rand()`。
 
-buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）在重算戰鬥數值時套上（見「裝備」一節的公式）：槽 0／1 是在裝備加總**之後**乘上 double 常數 1.15 再向零截斷，槽 2 是在 DX 基礎值上加 15。
+buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）在重算戰鬥數值時套上，公式見 [`battle.md`](battle.md) 的「狀態計時器：效果、持續與解除」。
 
 ## 施法與使用道具的經驗值
 
@@ -223,31 +213,19 @@ pending_xp = pending_xp / lv            // 有號除法，向零截斷
 
 **瞄準**：與法術相同的兩段收集，換成物品的欄位——可瞄準範圍 `range_code = use_distance`、選取模式 = `select_mode`（`+0x15`）；確認後的名單在 `use_distance < 0x10` 時是從游標格、`range_code = use_radius`、同一個 `select_mode` 的洪水填充，`use_distance >= 0x10` 時是從施法者格往游標走 `use_distance − 0x10` 格的直線（只收陣營 0）。玩家這邊用的是 `select_mode`；AI 用的是 `use_target`（`+0x11`），見 [`map_ai.md`](map_ai.md)。`use_effect` 為 `0x1c` 時第一次收集排除自己的格，`0x1c` 與 `0x19` 另會追加一段目的格選取，但出貨的 `ITEM.DAT` 沒有任何物品帶這兩個碼，`fdps_apply_item_effect_to_targets` 也沒有對應的處理。確認後道具效果套用、單位標成已行動（`fdps_battle_mark_unit_done`（`0x119b0`）），回合結束；瞄準取消則回到物品清單，游標停在剛才選的那一列。
 
-**效果**：`fdps_apply_item_effect_to_targets`（`0x262a0`）依 `use_effect` 分派，`amount` 是 `use_amount`（有號 16-bit）。「消耗」指 `fdps_unit_remove_item` 把使用者背包裡那一格移除：
+**效果**：`fdps_apply_item_effect_to_targets`（`0x262a0`）依 `use_effect` 分派，`amount` 是 `use_amount`（有號 16-bit）。每個碼做什麼、使用後是否消耗、哪些物品帶這個碼，見 [`../assets/items.md`](../assets/items.md) 的「使用效果代碼」；「消耗」指 `fdps_unit_remove_item` 把使用者背包裡那一格移除。那張表沒寫的實作細節：
 
-| `use_effect` | 效果 | 消耗 |
-| --- | --- | --- |
-| `01` 炎、`02` 雷、`03` 冰（道具） | 播 `EMg00`／`EMg05`／`EMg08.saf`，`fdps_apply_damage_to_targets(amount)` | 是 |
-| `07` 炎、`08` 雷、`09` 冰（武器） | 同上 | 否 |
-| `04` 地（道具）／`0A` 地（武器） | 播 `EarQu.wav`、震動 25 格（同裂地術的 `rand() % 4 − 2`），再 `fdps_apply_damage_to_targets(amount)` | `04` 是、`0A` 否 |
-| `0B`（道具）／`20`（武器） | `fdps_apply_heal_to_targets(amount)` | `0B` 是、`20` 否 |
-| `0C` | 播 `CureMP.saf` 並閃白，每個目標：`mp_max == 0` 浮出 MISS，否則 `fdps_unit_restore_mp(amount)` 並浮出數字 | 是 |
-| `0F` | 名單第一個單位 `hp_max += 15`（`hp_current` 不動） | 是 |
-| `10` | `mp_max += 15` | 是 |
-| `11` | AP 基礎值（`+0x37`）`+= 7`，重算戰鬥數值 | 是 |
-| `12` | DP 基礎值（`+0x39`）`+= 7`，重算戰鬥數值 | 是 |
-| `13` | DX 基礎值（`+0x3e`）`+= 7`，重算戰鬥數值 | 是 |
-| `14` | 移動力（`+0x3b`，byte）`+= 1` | 是 |
-| `16` | 清中毒計時（`+0x25`），原本有中毒才浮出 CURE；清除發生在特效播放之前 | 是 |
-| `18` | 清麻痺計時（`+0x26`），同上 | 是 |
-| `1E`（光束砲、火焰） | 每個目標 `fdps_unit_apply_damage(amount)` 並浮出數字，沒有特效 | 否 |
-| `21` | 開訊息視窗；名單第一個單位的肖像編號（`+0x07`）是 `09` 蓋亞時 AP 基礎值 +30、DP 基礎值 +30、移動力 +1、學會 `1D` 轟神砲並消耗；否則顯示拒絕訊息（文字 `0x21d`） | 成功才消耗 |
-| `22` | 同上的判斷；成功時 `hp_max += 100` | 成功才消耗 |
-| `23` | 判斷的是**角色編號**（`+0x08`）是否為 `08` 布蘭多；是的話背包裡有 `A3` 金屬礦就移除高能量裝置與金屬礦、放入 `BE` 高能量砲，沒有金屬礦只顯示訊息（文字 `0x220`） | 成功才消耗 |
-| `05`、`06`、`0D`、`1B` | 沒有任何分支：什麼都不發生、不消耗，但回合照樣用掉 | 否 |
+- 元素傷害（`01`–`04` 道具、`07`–`0A` 武器）：道具版與武器版共用同一段，先播 `EMg00`／`EMg05`／`EMg08.saf`（地系改成播 `EarQu.wav`、震動 25 格，同裂地術的 `rand() % 4 − 2`），再 `fdps_apply_damage_to_targets(amount)`；傷害落下後再比一次碼，只有道具版移除物品。
+- `0B`／`20` 直接交給 `fdps_apply_heal_to_targets(amount)`，動畫與閃白都在它裡面。
+- `0C` 播 `CureMP.saf` 並閃白，每個目標 `mp_max == 0` 浮出 MISS，否則 `fdps_unit_restore_mp(amount)` 並浮出擲出的數字。
+- `0F`–`14` 播 `Cure.saf`，分別改 `hp_max`（`hp_current` 不動）、`mp_max`、AP 基礎值（`+0x37`）、DP 基礎值（`+0x39`）、DX 基礎值（`+0x3e`）與移動力（`+0x3b`，byte）。
+- `16`／`18` 清中毒（`+0x25`）／麻痺（`+0x26`）計時，原本有才浮出 CURE；清除發生在特效播放之前。
+- `1E` 每個目標 `fdps_unit_apply_damage(amount)` 並浮出數字，沒有特效。
+- `21`／`22` 開訊息視窗，看的是肖像編號（`+0x07`）是否 `09` 蓋亞；`23` 看的是**角色編號**（`+0x08`）是否 `08` 布蘭多。不符時三者都顯示拒絕訊息（文字 `0x21d`）、不消耗；`23` 符合但背包沒有 `A3` 金屬礦時只顯示文字 `0x220`、不消耗。
+- `05`、`06`、`0D`、`1B` 沒有任何分支：什麼都不發生、不消耗，但回合照樣用掉。
 
 - 永久強化的幅度（15、7、1、30、100）是程式裡的常數，這些物品的 `use_amount` 都是 0（見 [`../assets/items.md`](../assets/items.md)）。
-- `0F`–`14` 與 `21`–`23` 只作用在名單第一個單位，不論名單多長。只有 `11`、`12`、`13`、`21` 會重算戰鬥數值。
+- `0F`–`14`、`16`、`18` 與 `21`–`23` 只作用在名單第一個單位，不論名單多長。只有 `11`、`12`、`13`、`21` 會重算戰鬥數值。
 - 永久強化的數字以「增益」字色浮出（字形基底 `0x0d`），傷害用 `0`、回復用 `0x27`。
 - 分派結束後一律：待結算經驗清 0、收集死亡事件、播死亡動畫、執行死亡事件（事件的獎勵給使用者）。
 
@@ -260,7 +238,7 @@ pending_xp = pending_xp / lv            // 有號除法，向零截斷
 - `fdps_unit_item_count`（`0x25240`）數旗標沒有 `0x80` 的格。
 - `fdps_unit_find_item_slot`（`0x34520`）只掃前「已佔用格數」格，回傳第一個編號相符的格。
 
-**交給**：只有在使用者上下左右相鄰處有我方（陣營 2）單位時才可選——`fdps_battle_item_menu`（`0x252b0`）每一輪開頭探測一次，探不到就把這一項反灰，而且在這次選單裡不會再恢復。選好物品與對象後，對方背包有空位就直接轉交；對方背包全滿時改成交換：玩家再從對方背包選一件，雙方互換。兩人的戰鬥數值都會重算。交付或交換成功後，就算玩家接著取消整個行動選單，這個單位的回合也算用掉了。
+**交給**：只有在使用者上下左右相鄰處有我方（陣營 2）單位時才可選——`fdps_battle_item_menu`（`0x252b0`）每一輪開頭探測一次，探不到就把這一項反灰，而且在這次選單裡不會再恢復。選好物品與對象後，對方背包有空位就直接轉交；對方背包全滿時改成交換：玩家再從對方背包選一件，雙方互換。直接轉交時只重算交出者的戰鬥數值（對方收到的物品不是裝備中），交換時兩人都重算。交付或交換成功後，就算玩家接著取消整個行動選單，這個單位的回合也算用掉了。
 
 **丟棄**：選一件移除；不論有沒有丟，都重算一次戰鬥數值。
 
@@ -278,21 +256,7 @@ Esc 離開，或背包變成空的時離開。裝備不用掉回合。
 
 武器與防具的查找用 `fdps_unit_find_equipped_slot`（`0x25140`）：武器是類型 `0x01`–`0x15`、防具是 `0x16`–`0x27`，回傳最低的那一格。
 
-戰鬥中的衍生數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）算：
-
-```
-dx = dx_base (+0x3e)                   // 有號 word
-if (status_timers[2]) dx += 15
-ap  = ap_base (+0x37) + Σ 裝備中物品的 ap
-dp  = dp_base (+0x39) + Σ dp
-hit = dx + Σ hit
-ev  = dx + Σ ev
-if (status_timers[0]) ap = (int)(ap * 1.15)    // double 乘法，向零截斷
-if (status_timers[1]) dp = (int)(dp * 1.15)
-存回 +0x48 ap、+0x4a dp、+0x4c hit、+0x4e ev    // 16-bit 截斷
-```
-
-「裝備中」是背包 8 格裡所有帶 `0x40` 旗標的格，不限兩件。命中與閃避都從同一個 DX 出發，所以 DX buff 兩者都加。1.15 的 double 常數略小於 1.15，100 乘出來是 114（踩雷點見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。名冊版的 `fdps_roster_recompute_combat_stats`（`0x23ac0`）做同樣的基礎值與裝備加總，但不套任何 buff。
+裝備改變後由 `fdps_unit_recompute_combat_stats`（`0x24d70`）重算 AP、DP、HIT、EV；哪些格算裝備中、公式、1.15 的截尾與名冊版的差別見 [`battle.md`](battle.md) 的「狀態計時器：效果、持續與解除」。
 
 ## 原版錯誤
 

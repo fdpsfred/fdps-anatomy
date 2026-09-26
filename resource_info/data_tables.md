@@ -1,6 +1,6 @@
 # MISC.VFS 的資料表檔
 
-`MISC.VFS` 裡有九個 `.DAT` 成員承載遊戲的數值資料。它們不是各自獨立的格式：`FDPS.LE` 在 `0x18930` 一次把九個讀進記憶體、各存一個全域指標，每張表配一支形如 `base + index * stride` 的取值函式，沒有任何 header、magic 或筆數欄位——record 從成員的第一個 byte 開始連續排列，筆數等於成員大小除以 record 大小。
+`MISC.VFS` 裡有九個 `.DAT` 成員承載遊戲的數值資料。它們不是各自獨立的格式：`FDPS.LE` 由 `0x18930` 把九個一起讀進記憶體、各存一個全域指標（何時載入、載入幾次見 [`program_info/data_structures.md`](../program_info/data_structures.md)），每張表配一支形如 `base + index * stride` 的取值函式，沒有任何 header、magic 或筆數欄位——record 從成員的第一個 byte 開始連續排列，筆數等於成員大小除以 record 大小。
 
 容器本身的格式見 [`vfs.md`](vfs.md)。record 的欄位佈局屬於 [`assets/tables/`](../assets/tables/_index.md)，數值本身屬於 [`assets/`](../assets/_index.md)。
 
@@ -37,6 +37,6 @@
 | 法術功效 | `0x96DF9E` | `MAGICDAT.DAT` 起點 |
 | 職業相關 | `0x19D513A` | `PLYPHASE.SAF` 中段 |
 
-職業表的偏移比這份的 `PROMAP.DAT` + 10 少了 52,184 byte，它指的是另一個發行版本的容器：前五張表精確吻合，表示那份容器的前 9.9 MB 與這份一致，差異全在 `MAGICDAT.DAT` 之後的動畫成員上。專案手上的三份都不是它——硬碟安裝版與光碟資料軌上的那份 SHA-256 相同，兩片光碟 `PACK.VFS` 內封的那份是 27,392,799 byte、`PROMAP.DAT` 在 `0x19E051C`。
+職業表的偏移比這份的 `PROMAP.DAT` + 10 少了 52,184 byte，它指的是另一個發行版本的容器：前五張表精確吻合，表示那份容器從開頭到 `MAGICDAT.DAT` 起點的長度（entry table 加上前面各成員）與這份相同，但這證明不了內容相同；52,184 byte 的差距出在 `MAGICDAT.DAT` 到 `PROMAP.DAT` 之間的成員上，這一段以 `.SAF` 動畫為主，也包含 `MESSAGE.CEL`、`NUMBER.CEL` 與 `PROEQU.DAT`。專案手上的三份都不是它——硬碟安裝版與光碟資料軌上的那份 SHA-256 相同，兩片光碟 `PACK.VFS` 內封的那份是 27,392,799 byte、`PROMAP.DAT` 在 `0x19E051C`。
 
 職業表在這份容器裡的位置是 `PROMAP.DAT` + 10，依攻略站列出的職業資料內容比對確定，容器內沒有第二個位置符合。

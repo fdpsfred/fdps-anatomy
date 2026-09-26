@@ -1,6 +1,6 @@
 # 戰鬥數值與回合
 
-**驗證對象**：`FDPS.LE` 的物理攻擊、經驗值與升級、狀態計時器、回合推進與單位死亡。涵蓋的 function 與所在的 `src/` 檔：`0x18d60`–`0x1a4bf`（全螢幕戰鬥畫面：`fdps_combat_play_attack_exchange`、`fdps_combat_slide_in_attacker`、`fdps_combat_play_blow`、`fdps_combat_compute_hit_outcome`、`fdps_combat_slide_backdrops`，`src/combat.c`、`src/cmbblow.c`）；`0x120d0`、`0x1c3a0`–`0x1ca99`（地圖上的攻擊與休息，`src/unitatk.c`）；`0x1dd30`、`0x1e370`、`0x1fa30`、`0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（經驗、升級、HP／MP 增減、狀態異常與計時器，`src/unitstat.c`）；`0x119b0`、`0x12960`、`0x12b20`、`0x15470`、`0x1e3f0`、`0x2bae0`、`0x2e0c0`、`0x2ea10`（回合與階段，`src/btlturn.c`）；`0x1d6c0`、`0x1d990`、`0x26180`、`0x274e0`（死亡，`src/death.c`）；`0x109b0`、`0x12550`、`0x24d70`、`0x2d210`、`0x2db50`、`0x2df90`（單位記錄的存取與衍生數值，`src/unit.c`）；`0x15d00`（行動選單，`src/btlact.c`）。以上範圍內的戰鬥規則以此檔為唯一正典。敵方 AI 怎麼選行動見 [`map_ai.md`](map_ai.md)，法術與道具的效果見 [`spell.md`](spell.md)，移動範圍與地形讀取見 [`movement.md`](movement.md)，章節勝敗判定見[`chapter.md`](chapter.md)。
+**驗證對象**：`FDPS.LE` 的物理攻擊、經驗值與升級、狀態計時器、回合推進與單位死亡。涵蓋的 function 與所在的 `src/` 檔：`0x18d60`、`0x194e0`–`0x1a4bf`（全螢幕戰鬥畫面：`fdps_combat_play_attack_exchange`、`fdps_combat_slide_in_attacker`、`fdps_combat_play_blow`、`fdps_combat_compute_hit_outcome`、`fdps_combat_slide_backdrops`，`src/combat.c`、`src/cmbblow.c`）；`0x120d0`、`0x1c3a0`–`0x1ca99`（地圖上的攻擊與休息，`src/unitatk.c`）；`0x1dd30`、`0x1e370`、`0x1fa30`、`0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（經驗、升級、HP／MP 增減、狀態異常與計時器，`src/unitstat.c`）；`0x119b0`、`0x12960`、`0x12b20`、`0x15470`、`0x1e3f0`、`0x2bae0`、`0x2e0c0`、`0x2ea10`（回合與階段，`src/btlturn.c`）；`0x1d6c0`、`0x1d990`、`0x26180`、`0x274e0`（死亡，`src/death.c`）；`0x109b0`、`0x12550`、`0x24d70`、`0x2d210`、`0x2db50`、`0x2df90`（單位記錄的存取與衍生數值，`src/unit.c`）；`0x15d00`（行動選單，`src/btlact.c`）。以上範圍內的戰鬥規則以此檔為唯一正典。敵方 AI 怎麼選行動見 [`map_ai.md`](map_ai.md)，法術與道具的效果見 [`spell.md`](spell.md)，移動範圍與地形讀取見 [`movement.md`](movement.md)，章節勝敗判定見[`chapter.md`](chapter.md)。
 
 下文的「記錄 `+n`」指單位記錄（`fdps_unit_record`，0x50 byte，[`data_structures.md`](data_structures.md)）的位移：`+5` 狀態 byte、`+6` 陣營（0 敵方、1 友軍 NPC、2 我方）、`+7` 肖像編號、`+0x20` 職業、`+0x21` 等級、`+0x22`..`+0x27` 六個狀態計時器、`+0x3c` 經驗餘數、`+0x40`／`+0x42` HP／HP 上限、`+0x44`／`+0x46` MP／MP 上限、`+0x48` AP、`+0x4a` DP、`+0x4c` HIT、`+0x4e` EV。
 
@@ -142,9 +142,10 @@ if 計時器[0]: AP = (int)(AP * 1.15)                # x87 double 乘法後截�
 if 計時器[1]: DP = (int)(DP * 1.15)
 ```
 
-- 「裝備中」是八個背包格裡旗標 byte 帶 `0x40` 的格；物品的四個修正是有號 16-bit，欄位位置見 [`assets/tables/items.md`](../assets/tables/items.md)。四個結果以 16-bit 寫回，超出範圍就截斷。
-- 1.15 是 double 常數 `0x3FF2666666666666`，比 1.15 略小，乘完截尾：AP 100 變 114、200 變 229，不是整數算術的 115、230。
+- 「裝備中」是八個背包格裡所有旗標 byte 帶 `0x40` 的格，不限兩件；三個基礎值與物品的四個修正都是有號 16-bit，物品欄位的位置見 [`assets/tables/items.md`](../assets/tables/items.md)。四個結果以 16-bit 寫回，超出範圍就截斷。
+- 1.15 是 double 常數 `0x3FF2666666666666`，比 1.15 略小，乘完截尾：AP 100 變 114、200 變 229，不是整數算術的 115、230（踩雷點見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。
 - buff 乘在「基礎 + 裝備」的總和上，不是只乘基礎值。
+- 名冊版的 `fdps_roster_recompute_combat_stats`（`0x23ac0`）做同樣的基礎值與裝備加總，但不套任何 buff。
 
 **倒數與中毒傷害**由 `fdps_battle_tick_status_effects`（`0x1fa30`）(陣營) 在每個陣營階段開始時執行（時機見「回合的各階段」）：
 
@@ -177,7 +178,7 @@ credit = (這一擊後 D 的 HP == 0) ? base : base * dmg / D.HP上限
 
 ### 法術、回復與道具
 
-法術的傷害（`fdps_unit_apply_damage`（`0x28460`））、回復（`fdps_unit_apply_heal`（`0x27070`））與狀態（`fdps_unit_apply_status_effect`（`0x28f70`））對累加器是**累加**（`+=`），一次施法打到幾個目標就累加幾次，與物理攻擊的指派相反；三者各加多少、施法後怎麼除以施法者等級見 [`spell.md`](spell.md)。道具指令結束時 `fdps_battle_action_menu`（`0x15d00`）把累加器清成 0 而且沒有付款，所以使用道具不給經驗；AI 施法後同樣清 0 不付款。
+法術的傷害（`fdps_unit_apply_damage`（`0x28460`））、回復（`fdps_unit_apply_heal`（`0x27070`））與狀態（`fdps_unit_apply_status_effect`（`0x28f70`））對累加器是**累加**（`+=`），一次施法打到幾個目標就累加幾次，與物理攻擊的指派相反；三者各加多少、施法後怎麼除以施法者等級見 [`spell.md`](spell.md)。使用道具不給經驗：道具效果 `fdps_apply_item_effect_to_targets`（`0x262a0`）在結算死亡事件前把累加器清 0，行動選單 `fdps_battle_action_menu`（`0x15d00`）在道具成功使用後再清一次，都不付款；AI 施法與 AI 使用道具同樣清 0 不付款，見 [`spell.md`](spell.md#施法與使用道具的經驗值)。
 
 ### 付款與升級
 
@@ -202,12 +203,12 @@ if max - min != 0: gain = min + rand() % (max - min)
 欄位 = (short)(欄位 + gain)                         # 16-bit，不設上限
 ```
 
-- `max` 是**不含**的上界：可能的成長是 `min`..`max − 1`。
+- `max` 與 `min` 不同時是**不含**的上界：可能的成長是 `min`..`max − 1`。
 - `max == min` 時不呼叫 `rand()`，不消耗亂數。
 - 寫入的欄位是 `ap_base`（`+0x37`）、`dp_base`（`+0x39`）、`dx_base`（`+0x3e`）、HP 上限（`+0x42`）、MP 上限（`+0x46`）。**目前 HP 與 MP 不增加**。
 - 學法術：成長記錄 byte `+0x0a` 是 `GETMGTAB.DAT` 的索引（`0xff` 表示不學），該記錄的六組（等級, 法術編號）中等級等於新等級的每一組都以 `fdps_set_flag_bit`（`0x282b0`）設進法術位元圖（`+0x1a`），並在視窗裡顯示法術名。
 
-成長表與法術習得表的數值見 [`assets/characters.md`](../assets/characters.md)（表上印的上限是檔案原值，實際擲不到）。
+成長表與法術習得表的數值見 [`assets/characters.md`](../assets/characters.md)（表上印的上限是檔案原值，上下限不同時實際擲不到）。
 
 ## 共用亂數
 
@@ -280,7 +281,7 @@ return (seed >> 16) & 0x7FFF                       # 0..32767
 
 | 位元 | 意義 | 寫入 | 讀取 |
 | --- | --- | --- | --- |
-| bit 0（`0x01`） | 已退場 | 整個 byte 指派為 1（其他位元一併清掉） | `fdps_unit_is_retired`（`0x109b0`）只看這一位 |
+| bit 0（`0x01`） | 已退場 | 多數是整個 byte 指派為 1（其他位元一併清掉）；過場腳本的 `0x0B` 退場以 OR 1 設、`0x0C` 復活以 AND `0xfe` 清，只動這一位（見[單位死亡與退場](#單位死亡與退場)） | `fdps_unit_is_retired`（`0x109b0`）只看這一位 |
 | bit 7（`0x80`） | 本回合已行動 | `fdps_battle_mark_unit_done`（`0x119b0`）以 OR 設；`fdps_units_clear_status_bit7`（`0x2db50`）以 AND `0x7f` 清 | 地圖上改畫成已行動的影格（`fdps_draw_map_unit`（`0x2cda0`）） |
 | bit 2（`0x04`） | 沒有意義，恆為 0 | 沒有任何寫入會設它（見表下） | 只出現在 `0x85` 遮罩裡 |
 
@@ -298,7 +299,7 @@ bit 7 每回合在敵方字卡後與我方字卡後各清一次。退場單位�
 
 ## 休息與每回合的 MP 回復
 
-**休息指令**：行動選單的第四格在單位本回合沒移動時先呼叫 `fdps_unit_rest`（`0x120d0`），再搜尋腳下的格子、標成已行動。`fdps_unit_rest`（`0x120d0`）在 HP 不**等於** HP 上限、未中毒、未麻痺時 `HP += HP上限 / 5`（有號截尾），超過上限則設為上限，閃白並播 `REST.WAV`。AI 的休息呼叫同一支（[`map_ai.md`](map_ai.md)）。回合推進時的閒置休息見上一節。
+**休息指令**：行動選單的第四格在單位本回合沒移動時先呼叫 `fdps_unit_rest`（`0x120d0`），再搜尋腳下的格子、標成已行動。`fdps_unit_rest`（`0x120d0`）在 HP 不**等於** HP 上限、未中毒、未麻痺時 `HP += HP上限 / 5`（有號截尾），超過上限則設為上限，閃白並播 `REST.WAV`。AI 的休息呼叫同一支（[`map_ai.md`](map_ai.md)）。回合推進時的閒置休息見[回合推進](#回合推進)。
 
 **MP 回復**（`fdps_battle_advance_turn`（`0x1e3f0`）步驟 5）：
 
@@ -320,10 +321,11 @@ bit 7 每回合在敵方字卡後與我方字卡後各清一次。退場單位�
 | AI 攻擊 | `fdps_collect_death_scripts`（`0x26180`） | 被攻擊的單位 | 付款在執行腳本之後 |
 | 我方施法 | `fdps_collect_death_scripts`（`0x26180`） | 施法者 | 見 [`spell.md`](spell.md) |
 | AI 施法 | `fdps_collect_death_script_events`（`0x274e0`），只收 opcode 2..5 | AI 攻擊評分留下的目標索引（[`map_ai.md`](map_ai.md)） | 不付款 |
+| 道具使用（我方與 AI） | `fdps_collect_death_scripts`（`0x26180`） | 使用者 | 不付款 |
 
 收集條件是未退場、HP ≤ 0、有腳本；由 `fdps_run_death_scripts`（`0x1d990`）逐筆執行。opcode 的意義、「掉物品與金錢要求擊殺者是存活的我方單位，否則整串剩下的都不執行」的規則見 [`resource_info/map.md`](../resource_info/map.md)。opcode 4、5 把戰鬥結束碼設成 2（過關）或 1（敗北）；其餘的勝敗由章節的行動後處理函式判定，見[`chapter.md`](chapter.md)。
 
-**退場**是 `+5` 被整個設成 1 的狀態，死亡只是其中一條路：AI 行為 7 走到目的地時（[`map_ai.md`](map_ai.md)）與章節、過場腳本（[`chapter.md`](chapter.md)、[`cutscene.md`](cutscene.md)）都以同樣的整 byte 指派讓單位離場，章節腳本也會把它寫回 0 讓單位重新出場。`fdps_unit_mark_retired`（`0x138f0`）是這個動作的函式版本，但沒有任何呼叫者，各處都是內嵌寫法。
+**退場**是 `+5` 的 bit 0 為 1 的狀態，死亡只是其中一條路。死亡、AI 行為 7 走到目的地時（[`map_ai.md`](map_ai.md)）與章節腳本（[`chapter.md`](chapter.md)）都把整個 byte 指派成 1，連 bit 7 一併清掉；過場腳本（[`cutscene.md`](cutscene.md)）的 `0x09` 閃爍退場同樣是整 byte 指派，單一單位的 `0x0B` 退場與 `0x0C` 復活卻是 OR 1／AND `0xfe`（`fdps_icon_script_run` 內的 `0x21b11`），只動 bit 0。章節腳本也會把整個 byte 寫回 0 讓單位重新出場。`fdps_unit_mark_retired`（`0x138f0`）是整 byte 指派的函式版本，原版映像中沒有任何引用，各處都是內嵌寫法（重建的 `src/mapai.c` 把行為 7 的內嵌處寫成呼叫它）。
 
 ## 相關文件
 

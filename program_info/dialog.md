@@ -17,7 +17,7 @@
 
 `Message.cel`、`Command.cel`、`Shadow.cel`、`Number.cel` 由 `fdps_load_global_resources`（`0x29660`）在啟動時從 `MISC.VFS` 載入並常駐；`FACE.CEL` 不在容器裡，每次要畫頭像才以 `fopen("FACE.CEL", "rb")` 從目前目錄開檔（見下節）。
 
-等待、提示與開關窗動畫每一幀只把**視野區**呈現到畫面上：(4, 4) 起 312×192 的矩形。它們都先在一張 360×240 的合成頁上組好整幀，再在兩段式的垂直歸線等待之後把視野區複製上去；合成頁上的像素座標等於畫面座標加 20。戰場上的背景每幀由 `fdps_draw_scene_layers`（`0x2bf60`）重新合成，村莊裡（`data_fdps_village_mode_flag` 非 0）則把目前畫面上的視野區原樣複製回來當背景。
+等待按鍵、二選一提示、換頁與從格子縮放開窗每一幀只把**視野區**呈現到畫面上：(4, 4) 起 312×192 的矩形。它們都先在一張 360×240 的合成頁上組好整幀，再在兩段式的垂直歸線等待之後把視野區複製上去；合成頁上的像素座標等於畫面座標加 20。滑入開窗與收窗則在 64000 byte 的整頁上組好每一幀、整頁呈現（見「開窗」與「收窗」節）。戰場上的背景每幀由 `fdps_draw_scene_layers`（`0x2bf60`）重新合成，村莊裡（`data_fdps_village_mode_flag` 非 0）則把目前畫面上的視野區原樣複製回來當背景。
 
 所有等待都以遊戲時鐘為節拍：tick 計數器 `data_fdps_timer_tick_counter` 只由 `fdps_timer_tick_handler`（`0x30790`）遞增，而 `fdps_audio_init`（`0x304e0`）經 `fdps_audio_timer_install`（`0x307b0`）把這個中斷設成每秒 25 次。本頁的「tick」都是 1/25 秒。
 
@@ -165,7 +165,7 @@
 4. 等 tick 計數器與 `last_tick` 不同，`last_tick` 更新為目前的 tick。`last_tick` 從 0 起，所以第一輪不等待，等待指示第一輪是 `0x48`，之後每 3 tick 換一格、4 格一循環。
 5. `max_passes` 減 1，不為 0 就回到第 2 步。
 
-所以等待**有時限**：`max_passes` 輪之後就算沒按鍵也結束。第一輪不等 tick，之後每輪至少一個 tick，所以 `n` 輪至少是 `n − 1` tick。文字直譯器的每一次等待都是 100 輪，約 99 tick、4 秒，沒人按鍵時對話每頁約 4 秒自動前進。死亡腳本（`fdps_run_death_scripts`（`0x1d990`））的「撿到物品」與「背包已滿」是 30 輪，「撿到金錢」與「物品遺失」是 50 輪。
+所以等待**有時限**：`max_passes` 輪之後就算沒按鍵也結束。第一輪不等 tick，之後每輪至少一個 tick，所以 `n` 輪至少是 `n − 1` tick。文字直譯器的每一次等待都是 100 輪，約 99 tick、4 秒，沒人按鍵時對話每頁約 4 秒自動前進。死亡腳本（`fdps_run_death_scripts`（`0x1d990`））的「撿到物品」是 30 輪（背包已滿時也是先對它等 30 輪，再換成「背包已滿」的二選一提示，那一筆不等待按鍵），「撿到金錢」與「物品遺失」是 50 輪。
 
 等待期間戰場的場景每幀重新合成，但不呼叫 `fdps_cycle_scene_palette`（`0x2eab0`），所以場景的調色盤循環在等待按鍵時停住；二選一提示每輪都呼叫它，會繼續循環。
 
@@ -214,10 +214,10 @@
 **條目自己帶說話者碼**。章節事件處理函式、過場腳本、死亡腳本以 `dest` = `0xa0000`（畫面左上角）呼叫 `fdps_draw_text`（`0x1ff60`），畫本章文字的一筆；這些條目以說話者碼開頭，所以開窗、換人、等待與收窗全由條目決定，傳入的 `dest` 在第一個字之前就被說話者碼改寫掉。條目不以說話者碼開頭的話，字會直接畫在畫面左上角。這類呼叫者：
 
 - 章節的 init、end、post-action 與事件處理函式，何時觸發見 [`chapter.md`](chapter.md)；
-- 過場腳本直譯器 `fdps_icon_script_run`（`0x21650`）的畫文字 opcode，以及三選一 `fdps_icon_script_prompt_three_way_choice`（`0x22600`），見 [`cutscene.md`](cutscene.md)；
+- 過場腳本直譯器 `fdps_icon_script_run`（`0x21650`）的畫文字 opcode，以及三選一 `fdps_icon_script_prompt_three_way_choice`（`0x22600`）選擇之後的回應與結語（它的兩個問題屬於下一類），見 [`cutscene.md`](cutscene.md)；
 - 死亡腳本 `fdps_run_death_scripts`（`0x1d990`）的 opcode 3 以上，opcode 的意義見 [`resource_info/map.md`](../resource_info/map.md)。
 
-**呼叫端自己開窗**。呼叫端以 `fdps_message_window_open`（`0x205b0`）開窗、傳入頭像編號，把一筆條目畫在 `0xaa44a`，再視需要呼叫 `fdps_prompt_two_choice`（`0x17990`），最後 `fdps_message_window_close`（`0x20820`）。等待按鍵來自條目結尾的 -3，或呼叫端自己呼叫 `fdps_message_window_wait_key`（`0x203d0`）——後者只有死亡腳本這樣做。這類呼叫者：死亡腳本的物品與金錢（`fdps_run_death_scripts`（`0x1d990`））、搜尋寶箱與埋藏（`fdps_battle_search_cell_at_cursor`（`0x184f0`））、道具效果（`fdps_apply_item_effect_to_targets`（`0x262a0`））、戰鬥系統選單的存讀檔與離開確認（`fdps_battle_system_menu`（`0x14ab0`）、`fdps_battle_system_submenu`（`0x14ea0`））、讀檔（`fdps_load_savegame`（`0x23e20`））、換片提示（`fdps_cd_verify_disc_and_play_track`（`0x30cc0`）），以及第 15、16、19、24、25 章的幾個事件（例如 `fdps_chapter_16_event_wandering_smith_forge`（`0x37cd0`））。
+**呼叫端自己開窗**。呼叫端以 `fdps_message_window_open`（`0x205b0`）開窗、傳入頭像編號，把一筆條目畫在 `0xaa44a`，再視需要呼叫 `fdps_prompt_two_choice`（`0x17990`），最後 `fdps_message_window_close`（`0x20820`）。等待按鍵來自條目結尾的 -3，或呼叫端自己呼叫 `fdps_message_window_wait_key`（`0x203d0`）——後者只有死亡腳本這樣做。這類呼叫者：死亡腳本的物品與金錢（`fdps_run_death_scripts`（`0x1d990`））、搜尋寶箱與埋藏（`fdps_battle_search_cell_at_cursor`（`0x184f0`））、道具效果（`fdps_apply_item_effect_to_targets`（`0x262a0`））、戰鬥系統選單的存讀檔與離開確認（`fdps_battle_system_menu`（`0x14ab0`）、`fdps_battle_system_submenu`（`0x14ea0`））、讀檔（`fdps_load_savegame`（`0x23e20`））、換片提示（`fdps_cd_verify_disc_and_play_track`（`0x30cc0`））、過場腳本三選一的兩個問題（`fdps_icon_script_prompt_three_way_choice`（`0x22600`）），以及第 15、16、19、24、25 章的幾個事件（例如 `fdps_chapter_16_event_wandering_smith_forge`（`0x37cd0`））。
 
 **村莊裡不開窗**。村莊的各個畫面自己把 `ShopWin.Cel` 的視窗畫好，把全域文字或本章文字畫在 `0xaa3d4`，需要回答時直接呼叫 `fdps_prompt_two_choice`（`0x17990`）；例如商店的買賣確認 `fdps_shop_buy_loop`（`0x33b80`）、教會轉職 `fdps_church_promote_loop`（`0x345a0`）、酒館 `fdps_run_bar_shop`（`0x35cc0`）。村莊的流程見 [`village.md`](village.md)。
 

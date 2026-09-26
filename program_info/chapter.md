@@ -1,19 +1,12 @@
 # 章節生命週期與事件分派
 
-**驗證對象**：`FDPS.LE` 的章節框架——四張章節處理表 `0x60074`（進入）、`0x601c4`（腳本事件）、`0x6028c`（行動後）、`0x60304`（結束）與它們的全部呼叫點；章節進入的共用尾巴 `0x22750` 與標題卡 `0x20c60`（`src/chapter.c`）；三十支進入處理函式 `0x20e90`–`0x2164f`（`src/chinit1.c`、`chinit1b.c`、`chinit2.c`、`chinit2b.c`）；單位陣列的建立與波次部署 `0x22be0`、`0x232b0`、`0x23830`（`src/deploy.c`）；回合事件的掃描 `0x2e0c0`（`src/btlturn.c`）；五十支腳本事件處理函式 `0x36b60`–`0x398ee`（`src/chevt1.c`–`chevt6.c`）；共用勝敗判定、殘敵清除與勝敗條件視窗 `0x3a2e0`、`0x39e10`、`0x17ca0`、`0x18350`（`src/btlend.c`）；三十支行動後處理函式與三十支結束處理函式 `0x3a3b0`–`0x3bade`（`src/chpost1.c`–`chpost3.c`、`src/chend1.c`–`chend2b.c`）；章節結束時的名冊寫回 `0x23980` 與陣亡者復活 `0x39e70`（`src/roster.c`）。「一章怎麼開始、戰鬥中的劇情怎麼被觸發、勝敗怎麼判定、一章怎麼收尾」以此檔為唯一正典。`main` 頂層迴圈的形狀由 [`architecture.md`](architecture.md) 擁有，四張表在 `.object2` 的位置由 [`memory_layout.md`](memory_layout.md) 擁有；各章實際的事件內容屬於 [`../chapters/`](../chapters/_index.md)。
+**驗證對象**：`FDPS.LE` 的章節框架——四張章節處理表 `0x60074`（進入）、`0x601c4`（腳本事件）、`0x6028c`（行動後）、`0x60304`（結束）與它們的全部呼叫點；章節進入共用的狀態重置 `0x22750` 與標題卡 `0x20c60`（`src/chapter.c`）；三十支進入處理函式 `0x20e90`–`0x2164f`（`src/chinit1.c`、`chinit1b.c`、`chinit2.c`、`chinit2b.c`）；單位陣列的建立與波次部署 `0x22be0`、`0x232b0`、`0x23830`（`src/deploy.c`）；回合事件的掃描 `0x2e0c0`（`src/btlturn.c`）；五十支腳本事件處理函式 `0x36bb0`–`0x398ed`（`src/chevt1.c`–`chevt6.c`）；共用勝敗判定、殘敵清除與勝敗條件視窗 `0x3a2e0`、`0x39e10`、`0x17ca0`、`0x18350`（`src/btlend.c`）；三十支行動後處理函式與三十支結束處理函式 `0x3a3b0`–`0x3badd`（`src/chpost1.c`–`chpost3.c`、`src/chend1.c`–`chend2b.c`）；章節結束時的名冊寫回 `0x23980` 與陣亡者復活 `0x39e70`（`src/roster.c`）。「一章怎麼開始、戰鬥中的劇情怎麼被觸發、勝敗怎麼判定、一章怎麼收尾」以此檔為唯一正典。`main` 頂層迴圈的形狀由 [`architecture.md`](architecture.md) 擁有，四張表在 `.object2` 的位置由 [`memory_layout.md`](memory_layout.md) 擁有；各章實際的事件內容屬於 [`../chapters/`](../chapters/_index.md)。
 
 本頁的「章節索引」是 0 起算的內部編號（`data_fdps_chapter_current_chapter_id`，`0x69cf4`），章號是它加 1，見 [`../CONTEXT.md`](../CONTEXT.md)。「單位索引」是戰場單位陣列的位置，不是角色編號。
 
 ## 一章的流程
 
-`main`（`0x29220`）先呼叫一次 `fdps_title_screen`（`0x2a2b0`），之後整個遊戲是一個以離場旗標 `data_fdps_shared_quit_game_requested`（`0x643eb`）為 0 為條件的迴圈：每一圈跑一次 `fdps_battle_player_phase_loop`（`0x2bae0`），回來後看戰鬥結束碼 `data_fdps_chapter_event_or_battle_end_code`（`0x69da0`），跑完對應動作再把結束碼清成 0：
-
-| 結束碼 | 意義 | `main` 接著做的事 |
-| ---: | --- | --- |
-| 0 | 戰鬥還沒結束 | 什麼都不做，下一圈繼續同一場戰鬥 |
-| 1 | 敗北 | `fdps_show_game_over`（`0x2a960`），然後 `fdps_title_screen`（`0x2a2b0`） |
-| 2 | 過關 | 結束表 `0x60304[章節索引]`，然後 `fdps_run_village_phase`（`0x31210`） |
-| 其他 | — | 同 0 |
+`main`（`0x29220`）的頂層迴圈每一圈跑一次戰鬥的玩家階段，再看戰鬥結束碼 `data_fdps_chapter_event_or_battle_end_code`（`0x69da0`）：1（敗北）走 Game Over 回標題畫面，2（過關）跑結束表 `0x60304[章節索引]` 再進村莊階段，其餘值什麼都不做、下一圈繼續同一場戰鬥；迴圈的形狀與分派見 [`architecture.md`](architecture.md) 的「頂層迴圈的形狀」。
 
 一章的完整流程因此是：
 
@@ -48,7 +41,7 @@
 | `0x14d28` | `fdps_battle_system_menu`（`0x14ab0`）的全軍移動 | 剛移動完的我方單位 |
 | `0x15839` | `fdps_battle_unit_turn`（`0x15470`）的結尾 | 行動的我方單位 |
 | `0x188d8` | `fdps_battle_search_cell_at_cursor`（`0x184f0`） | 搜尋者 |
-| `0x1dcae` | `fdps_run_death_scripts`（`0x1d990`） | 擊殺者 |
+| `0x1dcae` | `fdps_run_death_scripts`（`0x1d990`） | 它收到的擊殺者參數，不一定是擊殺者（各情境見 [`battle.md`](battle.md)） |
 | `0x2e140` | `fdps_battle_run_turn_events`（`0x2e0c0`） | 固定 0 |
 
 Ghidra 只對其中三個（`0x188d8`、`0x1dcae`、`0x2e140`）建了資料參照，另外五個是 `CALL dword ptr [EDX+0x601c4]` 而沒有參照，所以只查 xref 會漏。
@@ -67,7 +60,7 @@ Ghidra 只對其中三個（`0x188d8`、`0x1dcae`、`0x2e140`）建了資料參�
 
 例外只有三個：`fdps_chapter_01_init`（`0x20e90`）在第 4 步後把單位 2（開場過場部署的索爾）的中毒計時設為 11、目前 HP 設為 100（16-bit 寫入，HP 上限不動）；`fdps_chapter_15_init`（`0x21240`）在第 5 步前呼叫 `fdps_units_clear_status_bit7`（`0x2db50`）；`fdps_chapter_24_init`（`0x21490`）把名冊加入排在 reset 之後。
 
-**名冊加入必須在 reset 之前。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），加入得晚，新成員就不會出現在本章的地圖上，那一格變成歸零、退場的空 slot。第 24 章之所以可以反過來，是因為地圖 23 的 11 個我方 slot 在加入前已經被 11 名成員填滿，新成員（名冊第 12 位）兩種順序都不會上場。這些「照樣板寫就會錯」的點記在 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
+**名冊加入排在 reset 之前，新成員才坐得上本章地圖的我方 slot。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），slot i 只在 i 小於名冊人數時從名冊第 i 位取人，否則歸零成退場的空 slot。所以只有地圖的我方 slot 數多於入隊前名冊人數的章節，順序才決定結果：第 1、2、3、11 章加入得晚，新成員那一格就變成退場的空位；第 9 章的兩人只需在開場過場以 `SWITCH_MAP` 重建地圖 8 之前加入。第 4、7、8、15、19、24 章的我方 slot 在加入前已被既有成員填滿，新成員兩種順序都不會以名冊記錄上場；原版唯一把加入排在 reset 之後的第 24 章（地圖 23 的 11 個 slot 對 11 人名冊）就屬於這一類。這些「照樣板寫就會錯」的點記在 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 
 `fdps_chapter_state_reset`（`0x22750`）不帶參數，依序：
 
@@ -78,7 +71,7 @@ Ghidra 只對其中三個（`0x188d8`、`0x1dcae`、`0x2e140`）建了資料參�
 5. 游標繪製模式 ← 1、回合計數器 `data_fdps_battle_turn_counter`（`0x69ce8`）← 1。
 6. `fdps_flush_keyboard_queue`（`0x567b3`）。
 
-同一支 reset 也是過場腳本 `SWITCH_MAP` 的實作，所以腳本切換地圖時回合計數器、事件旗標與單位陣列一起重來。
+同一支 reset 也是過場腳本 `SWITCH_MAP` 的實作，所以腳本切換地圖時回合計數器、事件旗標與單位陣列一起重來；展示關 `fdps_title_demo`（`0x2ac10`）把章節索引設成展示關、組好名冊後也呼叫它建立戰場。
 
 `fdps_show_chapter_title_card`（`0x20c60`）從 `MISC.VFS` 取 `Chapter.saf` 與 `Chapter.pal`，以章節索引為 sprite 編號，把標題卡畫在 368×248 的工作頁的 (24, 24)，取其 320×200 視窗貼上畫面。淡入是 bias `−4k` 從 k = 16 走到 k = 0（含兩端，17 步），全亮停 1000 ms，淡出是 k = 1 走到 k = 16（16 步），每一步先等垂直回掃開始、再 `delay(80)`。結束時清空畫面並以 bias 0 載入主調色盤，三塊配置全部釋放。整段不讀鍵盤，無法跳過。
 
@@ -126,7 +119,7 @@ Ghidra 只對其中三個（`0x188d8`、`0x1dcae`、`0x2e140`）建了資料參�
 
 第 28 章的回合事件排在第 2、4、6、7、10、12、14、16、18 回合，第 6、7 回合都算出波次 3，波次 4 永不出場：這是原版 bug，見 [`known_bugs.md`](known_bugs.md) 第 20 條，被封住的敵兵見 [`../cut_content/story.md`](../cut_content/story.md) 的 S10。
 
-部署記錄的波次 `0xFF` 只有以 255 呼叫才會出場。出貨資料裡帶 `0xFF` 波次的地圖是 `MAP03`、`MAP04`、`MAP07`、`MAP08`、`MAP23`、`MAP27`，而傳 `0xFF` 的只有 `MAP11` 開場過場的三選一，上表的算式在回合事件排定的回合也算不出 255，所以這些記錄不會出場。
+部署記錄的波次 `0xFF` 只有以 255 呼叫才會出場。出貨資料裡帶 `0xFF` 波次的地圖是 `MAP03`、`MAP04`、`MAP07`、`MAP08`、`MAP23`、`MAP27`，而沒有任何呼叫端以 255 部署：過場腳本 `DEPLOY_WAVE` 的波次運算元 `0xFF` 只出現在第 12 章開場過場 `ICON11.DAT` 切到 `MAP11` 之後，代表前面三選一的答案，交給 `fdps_deploy_wave` 的是 1–3；腳本事件處理函式與決鬥的常數波次也沒有 255，上表的算式在回合事件排定的回合也算不出 255，所以這些記錄不會出場。
 
 ## 戰鬥中的事件分派
 
@@ -135,13 +128,13 @@ Ghidra 只對其中三個（`0x188d8`、`0x1dcae`、`0x2e140`）建了資料參�
 - **回合事件**：`fdps_battle_run_turn_events`（`0x2e0c0`）掃 `MAPnn.DAT` `+0x03` 起的 16 筆，回合 byte（零延伸）等於回合計數器、陣營 byte 等於參數的每一筆都呼叫，依表內順序、沒有提前結束，單位索引固定傳 0；每一輪都重讀常駐資料的指標。`fdps_battle_advance_turn`（`0x1e3f0`）在 NPC 階段前以 1、敵方階段前以 0、回合計數器加 1 之後以 2 呼叫它，每次之後都接著 `fdps_battle_tick_status_effects` 同一陣營。
 - **格子事件**：單位回報停留或經過某格時，`fdps_map_set_pending_tile_event`（`0x2e030`）只對屬性類別 `0x00`、事件碼非 0 的格查 `+0x33 + 2 ×（事件碼 − 1）`，slot 不是 `0xff` 且觸發時機相符就把 slot 存進待處理事件 `data_fdps_chapter_pending_event_idx`（`0x69d90`）。後回報的蓋掉先回報的。會派遣它的迴圈在處理每個單位前把它設為 `0xff`，處理完若不是 `0xff` 就以**該單位的索引**呼叫一次：敵方兩輪與 NPC 一輪對每個單位都做（不論有沒有行動）、`fdps_battle_unit_turn`（`0x15470`）在整個回合結束時做、`fdps_battle_system_menu`（`0x14ab0`）的全軍移動在每個單位移動後做。
 - **搜尋**：可搜尋格記錄種類 ≥ 2 時，`fdps_battle_search_cell_at_cursor`（`0x184f0`）以搜尋者索引呼叫該 slot。
-- **死亡腳本**：opcode 2 由 `fdps_run_death_scripts`（`0x1d990`）以擊殺者索引呼叫運算元的 slot。
+- **死亡腳本**：opcode 2 由 `fdps_run_death_scripts`（`0x1d990`）以它收到的擊殺者參數呼叫運算元的 slot；這個參數不一定是擊殺者，各情境傳的是誰見 [`battle.md`](battle.md)。
 
-處理函式收到的參數是觸發者的單位索引。用得到它的處理函式自己檢查身分：格子事件的處理函式多半要求觸發者陣營不是 0（`fdps_chapter_03_event_deploy_wave_14`（`0x36ea0`）、`fdps_chapter_10_event_deploy_wave_10`（`0x378a0`）、`fdps_chapter_19_event_deploy_wave_6`（`0x381d0`））或正好是 2（第 21、25、26、29 章），因為敵方與 NPC 走上事件格同樣會回報；有的再比角色編號或單位索引（第 16、20、22、23、25 章）。
+處理函式收到的參數是觸發者的單位索引。用得到它的處理函式自己檢查身分：出貨地圖選用的 19 支格子事件處理函式裡，有 9 支要求觸發者陣營不是 0（`fdps_chapter_03_event_deploy_wave_14`（`0x36ea0`）、`fdps_chapter_10_event_deploy_wave_10`（`0x378a0`）、`fdps_chapter_19_event_deploy_wave_6`（`0x381d0`））或正好是 2（第 21、25、26、29 章），因為敵方與 NPC 走上事件格同樣會回報；有的再比角色編號或單位索引（第 8、16、20、22、23、25 章）。
 
 **一次性是處理函式自己做的。**格子事件每走上一次就觸發一次，表本身沒有「已觸發」的概念；要只發生一次的處理函式在章節事件旗標陣列 `0x640d8` 裡借一個元素當閂：出貨資料的事件碼只到 15，所以元素 `0x10` 以上沒有格子會用到，處理函式用的是 `0x10`、`0x11`，第 26、27 章另用 `0x12`；第 8 章把 `0x11` 當成逃出村民的計數而不是旗標。這些元素進章節時由 reset 清零、隨存檔保存。
 
-處理函式常做的事有五種，組合起來就是各章的劇情：部署波次（`fdps_deploy_wave`（`0x23830`））、以本章文字區塊畫一行字（`fdps_draw_text`（`0x1ff60`））、改一段單位的 AI 行為（`(行為 & 0xF0) | 新值`，保留高 4 bit，AI 行為的意義見 [`map_ai.md`](map_ai.md)）、移動游標並原地重畫幾幀當鏡頭（`fdps_map_cursor_move_to`（`0x2d7c0`）加 `fdps_render_view_frame`（`0x2beb0`））、直接寫結束碼。`fdps_object_set_field34_low_nibble_range`（`0x36b60`）是其中改 AI 行為低 4 bit 的共用 helper。
+處理函式常做的事有五種，組合起來就是各章的劇情：部署波次（`fdps_deploy_wave`（`0x23830`））、以本章文字區塊畫一行字（`fdps_draw_text`（`0x1ff60`））、改一段單位的 AI 行為（`(行為 & 0xF0) | 新值`，保留高 4 bit，AI 行為的意義見 [`map_ai.md`](map_ai.md)）、移動游標並原地重畫幾幀當鏡頭（`fdps_map_cursor_move_to`（`0x2d7c0`）加 `fdps_render_view_frame`（`0x2beb0`））、直接寫結束碼。事件處理函式裡改一段單位 AI 行為的迴圈都是 `fdps_object_set_field34_low_nibble_range`（`0x36b60`）的 inline 展開，不是呼叫；真正呼叫它的只有 `fdps_chapter_20_post_action`（`0x3b150`）與 `fdps_title_demo`（`0x2ac10`）。
 
 slot 對照（各 slot 屬於哪一章的劇情見 [`../chapters/_index.md`](../chapters/_index.md)）：
 
@@ -177,14 +170,14 @@ slot 2 的 `fdps_chapter_event_set_game_over`（`0x36cd0`）只把結束碼設�
 
 ## 勝敗判定
 
-結束碼 `0x69da0` 是 32-bit：0 進行中、1 敗北、2 過關。寫它的有四種來源，**沒有任何一處在寫之前檢查目前的值，除了共用判定自己的入口**，所以同一次行動內誰最後寫誰就是結果：
+結束碼 `0x69da0` 是 32-bit：0 進行中、1 敗北、2 過關。寫它的有四種來源，**除了共用判定自己的入口，以及第 19、24 章行動後處理函式在結束碼為 2 時才改回 0 的決鬥開啟，沒有任何一處在寫之前檢查目前的值**，所以同一次行動內誰最後寫誰就是結果：
 
 - 行動後處理函式（每章一支，見下）；
 - 腳本事件處理函式：`fdps_chapter_event_set_game_over`（`0x36cd0`）與 `fdps_chapter_03_event_turn_limit_game_over`（`0x36f10`）寫 1，`fdps_chapter_15_event_boss_defeat`（`0x37b70`）、`fdps_chapter_22_event_boss_defeat`（`0x388b0`）、`fdps_chapter_23_event_boss_defeat`（`0x38950`）寫 2；
 - 死亡腳本 opcode 4（寫 2）與 5（寫 1），由 `fdps_run_death_scripts`（`0x1d990`）執行（見 [`../resource_info/map.md`](../resource_info/map.md)）；
 - `fdps_chapter_state_reset`（`0x22750`）與 `main` 清成 0。
 
-**行動後處理函式的呼叫時機**：敵方兩輪與 NPC 一輪對每個單位處理完（含觸發的格子事件）後各呼叫一次，接著測結束碼非 0 就立刻結束該階段；`fdps_battle_unit_turn`（`0x15470`）在我方單位的回合結束時呼叫一次；`fdps_battle_tick_status_effects`（`0x1fa30`）每次結算中毒、播完死亡動畫後呼叫一次，而它在每個回合對陣營 1、0、2 各跑一次——所以即使沒有人行動，每回合也至少跑三次。全軍移動（`fdps_battle_system_menu`（`0x14ab0`））在各單位之間不呼叫，直接進回合推進。戰鬥結束的讀取點：`fdps_battle_advance_turn`（`0x1e3f0`）在 NPC 狀態結算後、NPC 階段後、敵方狀態結算後、敵方階段後各測一次（我方狀態結算後不測），`fdps_battle_player_phase_loop`（`0x2bae0`）在每一幀的尾端測，非 0 就結束迴圈回到 `main`。
+**行動後處理函式的呼叫時機**：敵方兩輪與 NPC 一輪對每個單位處理完（含觸發的格子事件）後各呼叫一次，接著測結束碼非 0 就立刻結束該階段；`fdps_battle_unit_turn`（`0x15470`）在我方單位的回合結束時呼叫一次；`fdps_battle_tick_status_effects`（`0x1fa30`）每次結算中毒、播完死亡動畫後呼叫一次，而它在每個回合對陣營 1、0、2 各跑一次——所以即使沒有人行動，每回合也至少跑三次。全軍移動（`fdps_battle_system_menu`（`0x14ab0`））在各單位之間不呼叫，直接進回合推進。戰鬥結束的讀取點：`fdps_battle_advance_turn`（`0x1e3f0`）在 NPC 狀態結算後、NPC 階段後、敵方狀態結算後、敵方階段後各測一次（我方狀態結算後不測），`fdps_battle_player_phase_loop`（`0x2bae0`）在我方單位行動返回後先測一次（非 0 就不檢查全員是否行動完、不推進回合），並在每一幀的尾端再測，非 0 就結束迴圈回到 `main`。
 
 **共用判定 `fdps_battle_check_default_end_conditions`（`0x3a2e0`）**，依序：
 
@@ -209,7 +202,7 @@ slot 2 的 `fdps_chapter_event_set_game_over`（`0x36cd0`）只把結束碼設�
 
 **過關可以被撤回。**`fdps_chapter_19_post_action`（`0x3ae80`）與 `fdps_chapter_24_post_action`（`0x3b3d0`）在共用判定之後讀結束碼：若它是 2、回合數未超過期限（第 19 章 ≤ 20、第 24 章 ≤ 25）、旗標元素 `0x11` 未設、裘娜（單位 4）未退場且帶著指定的刀，就部署挑戰者、詢問玩家。接受時把裘娜以外的一段單位設為退場、**把結束碼改回 0**，戰鬥繼續成為一對一決鬥；不論接受與否都設起旗標。旗標設起後處理函式不再呼叫共用判定，改判「裘娜或挑戰者退場 → 2」。第 15 章同樣的決鬥由 `fdps_chapter_15_event_boss_defeat`（`0x37b70`）開啟，由 `fdps_chapter_15_post_action`（`0x3ab30`）以旗標元素 `0x10` 切換。決鬥結束後，結束處理函式把被設為退場的我方恢復（見「章節結束」）。
 
-**挑戰者是寫死的單位索引。**決鬥的勝負判定問的是固定的單位索引——第 19 章 `0x4d`、第 24 章 `0x52`——不是 `fdps_deploy_wave` 剛附加上去的那一筆；只有在陣列當時正好有這麼多單位（該章的援軍波次全部出場過）時，兩者才是同一個單位。接受時的退場掃描也不同：第 19 章掃單位 0..`0x4c`（字面值），第 24 章掃到目前單位數減 1。所以提早過關時，第 19 章的挑戰者落在較小的索引、被掃描一起設為退場，而判定問的 `0x4d` 已超出陣列，戰鬥再也結束不了；第 24 章的挑戰者倖存，但判定問的是陣列之外的 `0x52`，表現為挑戰者在第一回合自動認輸。這兩個原版 bug 記在[`known_bugs.md`](known_bugs.md)；重建要照寫死的索引，不可改成追蹤實際部署的單位。
+**挑戰者是寫死的單位索引。**決鬥的勝負判定問的是固定的單位索引——第 19 章 `0x4d`、第 24 章 `0x52`——不是 `fdps_deploy_wave` 剛附加上去的那一筆；只有在陣列當時正好有這麼多單位（該章的援軍波次全部出場過）時，兩者才是同一個單位。接受時的退場掃描也不同：第 19 章掃單位 0..`0x4c`（字面值），第 24 章掃到目前單位數減 1。所以提早過關時，第 19 章的挑戰者落在較小的索引、被掃描一起設為退場，而判定問的 `0x4d` 已超出陣列，戰鬥再也結束不了；第 24 章的挑戰者倖存，但判定問的是陣列之外的 `0x52`，攻略站記載第 7 回合之前過關時表現為挑戰者在第一回合自動認輸。這兩個原版 bug 記在[`known_bugs.md`](known_bugs.md)；重建要照寫死的索引，不可改成追蹤實際部署的單位。
 
 **勝敗條件視窗**：系統選單的 `fdps_battle_system_submenu`（`0x14ea0`）呼叫 `fdps_battle_show_win_fail_window`（`0x17ca0`），顯示章號（索引 + 1）、回合數、隊伍金錢、三個陣營的剩餘人數（`fdps_battle_count_remaining_units_on_side`（`0x18350`）：陣營相符且未退場者，依敵方 0、我方 2、NPC 1 的順序），以及本章文字區塊 `FDETXT(章號)` 的第 2 筆（勝利條件）與第 3 筆（失敗條件）。這兩行字只是顯示，判定完全由上面的程式決定。第 14、20 章的失敗條件文字是「蘭迪斯死亡／法蓮娜死亡」，但這兩章的行動後處理函式只經共用判定看單位 0，沒有任何程式判定法蓮娜——這個原版 bug 記在[`known_bugs.md`](known_bugs.md)，照文字補判定的陷阱見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。這個視窗每開一次就重載九張資料表而不釋放舊的，見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
 

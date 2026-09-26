@@ -54,6 +54,17 @@ REPO = kbverify.REPO
 WORK = REPO / "workspace" / "kb_consist"
 ITEMS = WORK / "items.json"
 VERDICTS = WORK / "verdicts"
+REPORT_STEM = "kb-consist"
+
+
+def use_workspace(name, report_stem):
+    """Point the item list, the verdicts and the report at another pass that
+    shares this pass's verdict shape, gate, rescan and landing (kbrefused.py)."""
+    global WORK, ITEMS, VERDICTS, REPORT_STEM
+    WORK = REPO / "workspace" / name
+    ITEMS = WORK / "items.json"
+    VERDICTS = WORK / "verdicts"
+    REPORT_STEM = report_stem
 RUNS = kbverify.RUNS
 
 # Pages written wholly by a generator: an edit there has to go into the generator.
@@ -414,6 +425,29 @@ def render(item):
                    "old = an existing row, new = that row + a newline + the new row), linking the "
                    "page that owns the fact.  If it is already there, or below the bar, change "
                    "nothing and say why.")
+    elif item["kind"] == "refused":
+        out.append("Kind: an edit the consistency pass could not land")
+        out.append("Consistency item %s (%s) settled on: %s" % (item["source_id"], item["source_kind"],
+                                                             item["source_conclusion"]))
+        out.append("One of its edits was refused at landing because its old text was no longer "
+                   "in the page: another edit landed first on the same passage.")
+        out.append("  page: %s" % item["doc"])
+        out.append("  why the edit was made: %s" % item["why"])
+        out.append("  old: %s" % item["old"])
+        out.append("  new: %s" % item["new"])
+        out.append("")
+        out.append("See what happened to that passage: git diff %s -- %s (the page before both "
+                   "passes landed, against the working tree), and the other items' verdicts in "
+                   "workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\."
+                   % (item["base"], item["doc"]))
+        out.append("")
+        out.append("Question: does the page as it stands now state what this edit meant to "
+                   "state -- the fact, not the wording?  If yes (the edit that landed covers it, "
+                   "possibly better), verdict consistent with no edits.  If the landed wording "
+                   "is wrong or lost part of this fix, write the edit that brings the current "
+                   "text to the correct, complete statement (old copied from the page as it is "
+                   "now).  Check the fact itself against first-hand sources if the two edits "
+                   "disagree on it.")
     elif item["kind"] == "reclass":
         out.append("Kind: reclassification of a cut_content/ entry")
         out.append(item["question"])
@@ -489,7 +523,9 @@ def check_verdict(v, item):
         problems.append("confidence %r" % v["confidence"])
     if not isinstance(v["conclusion"], str) or len(v["conclusion"].strip()) < 15:
         problems.append("conclusion must state the settled fact")
-    problems += kbverify.check_evidence(v["evidence"], item["kind"] != "duplicate")
+    # A duplicate or a refused edit is about the pages' own wording; the rest
+    # are claims about the program or the data and need first-hand evidence.
+    problems += kbverify.check_evidence(v["evidence"], item["kind"] not in ("duplicate", "refused"))
     if v.get("_landed"):
         return problems             # the edits are in the pages now
     problems += check_edits(v["edits"])
@@ -655,7 +691,9 @@ def summarize(stopped):
 
 # ------------------------------------------------------------------- CLI
 
-def main():
+def main(builder=None):
+    """The CLI; builder replaces build_items for a pass that shares this one's
+    machinery with its own item list (kbrefused.py)."""
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -681,7 +719,7 @@ def main():
         if ITEMS.is_file() and not a.refresh:
             print(json.dumps({"frozen": True, "items": len(load_items())}))
             return 0
-        items = build_items()
+        items = (builder or build_items)()
         WORK.mkdir(parents=True, exist_ok=True)
         ITEMS.write_text(json.dumps(items, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         counts = {}
@@ -736,7 +774,7 @@ def main():
     if a.cmd == "report":
         summary = summarize(a.stopped)
         RUNS.mkdir(parents=True, exist_ok=True)
-        stem = "%s-kb-consist" % a.date
+        stem = "%s-%s" % (a.date, REPORT_STEM)
         written = [RUNS / ("%s-summary.json" % stem)]
         written[0].write_text(json.dumps(summary, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         if not a.stopped:

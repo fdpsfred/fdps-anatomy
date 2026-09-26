@@ -11,9 +11,9 @@
 | 項目 | 判定 |
 | --- | --- |
 | build | 產出執行檔存在，且建置流程有完成標記（三訊號結束偵測，見 [`build_pipeline.md`](build_pipeline.md)） |
-| errors | `Error!` 行 0 個，且每個 translation unit 的摘要行回報 0 errors |
-| undefined | 連結器的未解析符號 0 個。`emittest` 連結兩次，這一項判的是**第二次**——第一次刻意不帶 stub，它報出來的是還沒 emit 的資料與 function，是清單不是錯誤（[`emit_pipeline.md`](emit_pipeline.md)） |
-| warnings | 出現任何**基準值沒記錄過的警告**就不過。比對的是警告文字不是數量，換掉一個警告不會蒙混過關 |
+| errors | `Error!` 行與連結器的 `redefinition of … ignored` 行 0 個，且每個 translation unit 的摘要行回報 0 errors。重複定義算錯誤而不是警告：連結器只留一份，那個名字下的 body 不一定是剛 emit 的那份，基準值也不能接受它 |
+| undefined | 連結器的未解析符號 0 個。`emittest` 最多連結兩次，這一項判的是**最後一次**——第一次刻意不帶 stub，它報出來的是還沒 emit 的資料與 function，是清單不是錯誤；清單空時不跑第二次，判的就是第一次（[`emit_pipeline.md`](emit_pipeline.md)） |
+| warnings | 出現任何**基準值沒記錄過的警告**就不過，而且各 translation unit 摘要行加總的警告數不得超過基準值。兩者都判：只比數量，換掉一個警告會蒙混過關；只比文字，同一個警告多觸發一次會漏掉 |
 | equivalence | 產出與基準值的關係落在下表的前四級 |
 
 另外每個註冊的測試套件都要通過。因環境缺件而跳過的套件會逐一列在結果裡，不會靜默消失。
@@ -45,7 +45,7 @@
 | `different` | 有 code 或 data 的 byte 落在所有重定位位置與對齊空隙之外而改變了，或空隙的位置本身變了 | ✗ |
 | `size` | 大小就不同，更細的比對沒有意義 | ✗ |
 
-`strict` 與 `reloc` 存在的理由是兩個「binary 看得見但行為中性」的效果，兩者都由前作 FD2 在數百個 object 的連結上實測確立，wlink 與 LE 容器都相同，因此原封沿用：
+`strict` 與 `reloc` 存在的理由是兩個「binary 看得見但行為中性」的效果，兩者都由前作 FD2 在 Watcom 9.5a 的 wlink 上實測確立。本專案的 wlink 是 10.0a，相同的是 LE 容器；10.0a 的 wlink 在本專案的真實建置上是否同樣依符號名排序沒有實測過，這兩級的判定法原封沿用，正確性目前由 `selftest` 的合成映像保證：
 
 1. **Fixup 重排。** wlink 送出 LE fixup record 的順序與符號名有關，改名會讓那張表的 byte 重排，但重定位的集合不變。
 2. **Tentative definition 移位。** 未初始化的全域是 Watcom 的 COMDEF，wlink 依名稱排序擺放；改一個名可能讓它與鄰居位移幾個 byte，於是每個指向它的 fixup **site 值**與對應 record 的 target 欄位跟著變。載入後的映像行為完全相同。
@@ -71,7 +71,7 @@
 
 ## 基準值的更新
 
-基準值存在 `tools/build_gate/data/baselines.json`，一個建置目標一筆，進版控——放在 `workspace/` 下就會跟著中間產物一起消失。每筆記的是日期、當時的 commit、**更新的理由**、可接受的警告文字，以及重定位感知的指紋；有 map 的目標，指紋另帶空隙的位置與抹掉空隙後的殘差。舊的一筆推進到 `history`，鏈條不刪，因為那就是「閘門被要求接受過什麼」的完整記錄。
+基準值存在 `tools/build_gate/data/baselines.json`，一個建置目標一筆，進版控——放在 `workspace/` 下就會跟著中間產物一起消失。每筆記的是日期、當時的 commit、**更新的理由**、可接受的警告文字與摘要行的警告總數，以及重定位感知的指紋；有 map 的目標，指紋另帶空隙的位置與抹掉空隙後的殘差。舊的一筆推進到 `history`，鏈條不刪，因為那就是「閘門被要求接受過什麼」的完整記錄。
 
 基準值只存指紋、不存映像，所以 `pad` 要兩邊都帶空隙指紋才判得出來；沒有空隙指紋的基準值遇到只差空隙的建置，照樣是 `different`。有了 `pad` 之後，同一個 commit 在任何工作目錄狀態（主工作目錄、乾淨的 git checkout、worktree）建出來的 `game` 與 `ailsmoke` 都判為過閘的等級，基準值不必因為換了地方建置而推進。
 
@@ -109,7 +109,7 @@ python tools/build_gate/gate.py show                # 目前的基準值與推�
 python tools/build_gate/gate.py selftest            # 驗證閘門自己的每一項判定
 ```
 
-建置腳本要在前景呼叫時直接 `import gate` 用 `gate.check(...)`，它回傳的 dict 與 `--json` 印出來的是同一份，也一律落到 `workspace/build_gate/result.json`。離開碼 0 只在整個閘門通過時給。
+從建置腳本前景呼叫、結果檔與離開碼見 [`tools/build_gate/`](../tools/build_gate/_index.md)。
 
 ## 閘門看不到的東西
 

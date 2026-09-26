@@ -4,23 +4,23 @@
 
 ## 兩片光碟的分工
 
-光碟 1 是安裝來源，資料軌帶著完整的可安裝遊戲檔案與 `INSTALL.BAT`。光碟 2 只有執行期需要的檔案。
+光碟 1 是安裝來源，資料軌帶著完整的可安裝遊戲檔案與 `INSTALL.BAT`。光碟 2 只有執行期需要的檔案，外加一個遊戲不讀的填充檔 `PACK1.VFS`。
 
 `INSTALL.BAT` 把 `DOS4GW.EXE`、`FDPS.EXE`、`*.CEL`、`FIELD*.VFS`、`BACKGRND.VFS`、`FIGHT.VFS`、`FIGACT.VFS`、`ICONANI.VFS`、`MISC.VFS`、`*.DIG`、`SETSOUND.EXE`、`AILDRVR.LST` 複製到硬碟的 `\FDPS`，寫出 `Disk.No`（內容為 `CDROM at <磁碟機>:`），最後執行 `SETSOUND` 做音效卡設定。
 
-因此執行期仍留在光碟上、不會被複製到硬碟的是：`PACK.VFS`、`PACK1.VFS`、`FD.EXE`、三組 `.VID` / `.AUD`，以及全部音軌。
+因此執行期仍留在光碟上、不會被複製到硬碟的是：`PACK.VFS`、`FD.EXE`、三組 `.VID` / `.AUD`，以及全部音軌。
 
 ## 各檔案的角色
 
-- **`PACK.VFS`**（兩片都有，內容不同）：VFS 容器，header 帶簽章字串 `Dynasty Information Co.,`，內含 24 個 entry。兩片的 entry 名稱與順序完全相同，依序為 `BACKGRND.VFS`、`DATA.VFS`、`DEBUG.SAV`、`DIG.INI`、`DISK.NO`、`DOS4GW.EXE`、`F30.SAV`、`FACE.CEL`、`FDE.EXE`、`FDE.SAV`、`FIELD.VFS`、`FIELD1.VFS`、`FIELD2.VFS`、`FIGACT.VFS`、`FIGHT.VFS`、`FMER1.TMP`、`FMER2.TMP`、`ICON.CEL`、`ICONANI.VFS`、`MER1.TMP`、`MER2.TMP`、`MISC.VFS`、`PASS.DAT`、`SBLASTER.DIG`——注意這份清單與資料軌上的檔案清單不是同一組，`FDE.EXE`、`FDE.SAV`、`F30.SAV`、`DEBUG.SAV`、`DATA.VFS`、`DIG.INI`、`DISK.NO`、`FMER*.TMP`、`MER*.TMP` 只存在於容器內。
+- **`PACK.VFS`**（兩片都有，內容不同）：VFS 容器，header 帶簽章字串 `Dynasty Information Co.,`，內含 24 個 entry。兩片的 entry 名稱與順序完全相同，依序為 `BACKGRND.VFS`、`DATA.VFS`、`DEBUG.SAV`、`DIG.INI`、`DISK.NO`、`DOS4GW.EXE`、`F30.SAV`、`FACE.CEL`、`FDE.EXE`、`FDE.SAV`、`FIELD.VFS`、`FIELD1.VFS`、`FIELD2.VFS`、`FIGACT.VFS`、`FIGHT.VFS`、`FMER1.TMP`、`FMER2.TMP`、`ICON.CEL`、`ICONANI.VFS`、`MER1.TMP`、`MER2.TMP`、`MISC.VFS`、`PASS.DAT`、`SBLASTER.DIG`——注意這份清單與資料軌上的檔案清單不是同一組，`FDE.EXE`、`FDE.SAV`、`F30.SAV`、`DEBUG.SAV`、`DATA.VFS`、`DIG.INI`、`DISK.NO`、`FMER*.TMP`、`MER*.TMP`、`PASS.DAT` 只存在於容器內。
 
   兩片之間有 5 個成員內容不同，其餘 19 個成員位元組相同：
 
   - `PASS.DAT`：3 個 byte，光碟 1 為 `1\r\n`、光碟 2 為 `2\r\n`，是遊戲判斷目前放的是哪一片的依據。
   - `FDE.EXE`（372,789）與 `FDE.SAV`（22,987）：兩片大小相同而內容不同，只憑大小分辨不出來。
   - `FIELD.VFS`（249,543 / 248,869）與 `ICONANI.VFS`（4,718,665 / 4,718,685）：大小差 −674 與 +20，恰好構成容器總大小 654 byte 的落差。
-- **`PACK1.VFS`**（只有光碟 2）：139 MB 的填充檔，內容是重複的假 `XXX.ARJ` / `ARCHIVE.RAR` 記錄，不是 VFS 容器，執行檔中沒有任何參照。
-- **`FD.EXE`**：16-bit MZ 執行檔，過場動畫播放器。由 `FDPS.LE` 以 `spawnv` 呼叫，兩片上的檔案位元組相同。
+- **`PACK1.VFS`**（只有光碟 2）：139 MB 的填充檔，外形是一個 ARJ 封存——主標頭名為 `XXX.ARJ`、唯一成員 `ARCHIVE.RAR` 以不壓縮方式存放 139,465,923 byte、檔尾是 ARJ 結束標記——但成員內容是無法壓縮的高熵位元組，CRC32 與標頭記載的不符，也沒有 RAR 簽章，不是 VFS 容器，執行檔中沒有任何參照。
+- **`FD.EXE`**：以 Watcom C/C++32 編譯、掛 DOS/4GW stub 的 32-bit LE 執行檔（LE header 在 `0x2a50`），過場動畫播放器。由 `FDPS.LE` 的 `fdps_play_movie`（`0x30f40`）以 `spawnlp(P_WAIT, …)` 呼叫，兩片上的檔案位元組相同。
 - **`FD1.VID` / `FD1.AUD`、`FD2.VID` / `FD2.AUD`、`END.VID` / `END.AUD`**：三段過場動畫的影像與伴音，交給 `FD.EXE` 播放。兩片上的檔案位元組相同。
 - **音軌**：遊戲音樂，由 `FDPS.LE` 直接下 MSCDEX 命令播放。
 

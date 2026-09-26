@@ -2,7 +2,7 @@
 
 回答「遊戲裡的字與文字內容是什麼」。承載文字的檔案格式（`FDETXTnn.TXT` 的 offset 表與 token、`FDETXT.FON` 的字模佈局）由 [`resource_info/text.md`](../../resource_info/text.md) 擁有，這裡只寫內容。
 
-遊戲文字不是 Big5：每個 token 是 `FDETXT.FON` 的字模索引，要經過本層的字模對照表才得到字。解碼器是 [`tools/text_decode/`](../../tools/text_decode/_index.md)，讀的是本層的 `glyph_table.json`。
+遊戲文字不是 Big5：除了少數控制碼與它們後接的 operand（見 [`resource_info/text.md`](../../resource_info/text.md)），每個 token 是 `FDETXT.FON` 的字模索引，要經過本層的字模對照表才得到字。解碼器是 [`tools/text_decode/`](../../tools/text_decode/_index.md)，讀的是本層的 `glyph_table.json`。
 
 `FDETXT01`–`FDETXT30` 是各章自己的文字，內容記在各章頁 [`chapters/`](../../chapters/_index.md)。永遠不會顯示的文字不在本層列出，由 [`cut_content/`](../../cut_content/_index.md) 收錄。
 

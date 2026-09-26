@@ -4,7 +4,7 @@
 
 數值本身不寫在這裡，一律引用上層的正典檔——這裡回答「一筆 record 長什麼樣」，上層回答「裡面的數字是多少」。承載這些 record 的容器格式（VFS 之類）則屬於 `resource_info/`。
 
-一個 struct 一檔，檔名對應上層的正典檔名。
+分檔以上層的正典檔為單位、檔名相同：一個正典檔涉及的 record 全收在同一檔，一檔可以有多個 struct；沒有自己 record 的正典檔（`races.md`、`names.md`）在這裡不設檔。
 
 承載這些 record 的九個 `.DAT` 成員在容器中的位置、大小與筆數，由 [`resource_info/data_tables.md`](../../resource_info/data_tables.md) 擁有。
 

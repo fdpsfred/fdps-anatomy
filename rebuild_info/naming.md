@@ -2,7 +2,7 @@
 
 **驗證對象**：Ghidra 內的 function 與 global 符號名、`src/` 的識別字與檔名、以及 function 內部的區域變數與參數。命名的結論以此檔為唯一正典。
 
-慣例沿用前作 FD2，正典是 FD2 的 `rebuild_info/src_map.md` 與 `rebuild_info/crt/symbol_inventory.md`，只把專案代號換成 `fdps`。
+慣例沿用前作 FD2（出處是 FD2 的 `rebuild_info/src_map.md` 與 `rebuild_info/crt/symbol_inventory.md`），專案代號換成 `fdps`。與前作不同的有兩處，都寫在〈struct 型別名稱〉：遊戲的 struct 加 `fdps_` 前綴，以及不用裸 `crt_` 前綴。
 
 ## 兩條鐵則
 
@@ -14,17 +14,17 @@
 
 | 對象 | 形式 | 例 |
 | --- | --- | --- |
-| 遊戲邏輯 function | `fdps_` + snake_case | `fdps_rle_blit_sprite`、`fdps_get_item_entry` |
-| 遊戲全域資料 | `data_fdps_` + snake_case | `data_fdps_item_table` |
-| Miles AIL 全域資料 | `data_ail_` + snake_case，或上游原名 | `data_ail_mixer_state` |
+| 遊戲邏輯 function | `fdps_` + snake_case | `fdps_rle_blit_scaled`、`fdps_shop_draw_item_entry` |
+| 遊戲全域資料 | `data_fdps_` + snake_case | `data_fdps_item_effect_table_ptr` |
+| Miles AIL 全域資料 | `data_ail_` + snake_case，或上游原名 | `data_ail_mix_loop_dispatch_table` |
 | Watcom CRT 真符號 | **程式庫原名，無前綴** | `memcpy`、`_nmalloc`、`__CHK`、`IF@COS` |
-| 程式庫 object 內的 file-static | `L$N_<模組>_<用途>` | `L$1_stk_save_ss` |
-| 行為等價但比對不到程式庫 object、必須手寫的 | `crt_equivalent_` + snake_case | `crt_equivalent_get_eflags` |
+| 程式庫 object 內的 file-static | `L$N_<模組>_<用途>` | `L$1_rand_seed_ptr` |
+| 行為等價但比對不到程式庫 object、必須手寫的 | `crt_equivalent_` + snake_case | （`FDPS.LE` 沒有這類符號） |
 | Miles AIL 公開 API | `AIL_` + 上游原名，大小寫照舊 | `AIL_startup`、`AIL_set_sequence_loop_count` |
 | AIL 內部 helper 與 inner worker | `AIL_internal_` + 描述，或 `AIL_internal_<公開名>_inner` | `AIL_internal_alloc_and_commit`、`AIL_internal_start_sample_inner` |
 | AIL 混音分派表 callback | `AIL_internal_mix_finalize_<兩位十六進位 slot>` / `AIL_internal_mix_loop_<同>` | `AIL_internal_mix_finalize_01` |
-| 連結器與編譯器產物 | `binary_artifact_` + 描述 + `_<位址>` | `binary_artifact_align_nop_3d370` |
-| struct 型別名稱 | 該 pool 的前綴 + snake_case，不加 `_t` | `fdps_unit_record`、`ail_sample_state` |
+| 連結器與編譯器產物 | `binary_artifact_` + 描述 + `_<位址>` | `binary_artifact_church_menu_switch_table_35b84` |
+| struct 型別名稱 | 遊戲的用 `fdps_` + snake_case，程式庫的用原名，不加 `_t`（見〈struct 型別名稱〉） | `fdps_unit_record`、`SAMPLE` |
 
 CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒有「`crt_` 前綴」這種東西——CRT 的東西要嘛叫程式庫原名（無前綴），要嘛是 `L$N_`，要嘛是 `crt_equivalent_`，三選一。
 
@@ -32,7 +32,7 @@ CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒�
 
 資料符號沒有 function 那樣的 FID 比對可用，判準是**誰取用它**：只有 `pool_ail` 的程式碼碰得到的全域就是音效庫的，只有 `pool_crt` 碰得到的就是 CRT 的。跨 pool 取用時要判斷誰是擁有者、誰只是訪客——遊戲去戳一個 CRT 變數，那個變數仍然是 CRT 的，仍然用程式庫的名字。判定不出 CRT 程式庫符號時走 `L$N_` 或 `crt_equivalent_`，不要硬湊一個像 CRT 的名字。
 
-**字串字面值不是全域符號。** Ghidra 給的 `s_` 標籤留著就好：重建後它們是敘述句裡的字面值，不是具名全域，替它們取名等於憑空造出原版沒有的符號。指向它們的指標表則另當別論，那是實實在在的具名資料。
+**字串字面值不是全域符號。** Ghidra 給的 `s_` 標籤留著就好；取了名的字面值一律用 `binary_artifact_string_literal_<描述>_<位址>`，標明它是編譯器產物。兩種都一樣：重建後它們是敘述句裡的字面值，不是具名全域，當成全域 emit 等於憑空造出原版沒有的符號。指向它們的指標表則另當別論，那是實實在在的具名資料。
 
 ## struct 型別名稱
 
@@ -41,28 +41,28 @@ CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒�
 | 對象 | 形式 | 例 |
 | --- | --- | --- |
 | 遊戲的結構 | `fdps_` + snake_case | `fdps_unit_record` |
-| 程式庫的結構（CRT 與 AIL） | **程式庫原名，無前綴** | `tm`、`FILE`、`_iobuf`、`rt_init` |
-| 判定不出程式庫名稱、只存在於單一 object 內的結構 | `L$N_<模組>_<用途>` | `L$1_emu387_state` |
+| 程式庫的結構（CRT 與 AIL） | **程式庫原名，無前綴** | `tm`、`FILE`、`__iobuf`、`rt_init` |
+| 判定不出程式庫名稱、只存在於單一 object 內的結構 | `L$N_<模組>_<用途>` | `L$N_emu387_state` |
 
-**`crt_` 不是前綴。** 唯一合法的形式是複合前綴 `crt_equivalent_`，意思是「行為等價但比對不到程式庫 object、必須手寫的東西」。寫 `crt_tm`、`crt_file` 這種名字是錯的，理由與程式庫函式那條鐵則同源：重建後的 `.c` 是從 `<time.h>`、`<stdio.h>` 拿到這些型別的，加了前綴就會讓 Ghidra 名稱與 C 名稱對不起來。前作 FD2 全庫也只有 `crt_equivalent_`，沒有任何裸 `crt_`。
+**`crt_` 不是前綴。** 唯一合法的形式是複合前綴 `crt_equivalent_`，意思是「行為等價但比對不到程式庫 object、必須手寫的東西」。寫 `crt_tm`、`crt_file` 這種名字是錯的，理由與程式庫函式那條鐵則同源：重建後的 `.c` 是從 `<time.h>`、`<stdio.h>` 拿到這些型別的，加了前綴就會讓 Ghidra 名稱與 C 名稱對不起來。這一點與前作不同：FD2 把 `crt_` 與 `crt_equivalent_` 並列為 CRT 層前綴，庫裡也有 `crt_emu387_int7_fptan_opcode_worker_4c630` 這類裸 `crt_` 名字，本專案不沿用。
 
 「判定不出名稱」與「懶得查」是兩回事，這點與符號那條完全一樣：先去 Watcom 10.0a 的標頭找，找不到才落到 `L$N_`。
 
-前作沒有替遊戲型別加專案前綴（它叫 `runtime_char`，本專案叫 `fdps_unit_record`），所以兩邊的遊戲型別名稱不是逐字對應的關係，對應寫在該型別的 `description` 裡。程式庫型別兩邊都用原名，是逐字相同的。
+前作沒有替遊戲型別加專案前綴（它叫 `runtime_char`，本專案叫 `fdps_unit_record`），所以兩邊的遊戲型別名稱不是逐字對應的關係，對應寫在 [`program_info/data_structures.md`](../program_info/data_structures.md) 的「與前作 FD2 的對應」。程式庫型別兩邊都用原名，是逐字相同的。
 
 **唯一的無前綴豁免是 C 進入點 `main`**——Watcom CRT 的 `cmain386` 契約要求這個符號就叫 `main`。
 
 ## 兩個容易搞錯的細節
 
-**同一支 helper 被靜態連結兩次時，thunk 用原名，body 加位址後綴。** 廠商的 `.LIB` 裡同一個 helper 可能由兩個 object 各帶一份，連結後成為一個 5-byte `JMP` thunk 加一份完整 body。前作的庫就是這樣命名的（`AIL_internal_log_lock_acquire` 是 thunk，`AIL_internal_log_lock_acquire_3e724` 是 body），照抄。
+**同一支 helper 被靜態連結兩次時，thunk 用原名，body 用程式庫發佈的帶位址後綴名稱。** 廠商的 `.LIB` 裡同一個 helper 可能由兩個 object 各帶一份，連結後成為一個 5-byte `JMP` thunk 加一份完整 body。前作的庫就是這樣命名的（`AIL_internal_log_lock_acquire` 是 thunk，`AIL_internal_log_lock_acquire_3e724` 是 body），照抄：後綴是前作映像裡的位址，不是本專案的位址，本專案位於 `0x4478c` 的 body 仍叫 `AIL_internal_log_lock_acquire_3e724`。
 
-**名字要是程式庫真的有的符號。** 判定不出 PUBDEF 就不要硬湊一個像 CRT 的名字：那是 file-static（用 `L$N_`）或必須手寫的等價實作（用 `crt_equivalent_`）。可查證的公開符號清單由 [`tools/pool_triage/fid/`](../tools/pool_triage/fid/_index.md) 的 `extract_watcom_symbols.py` 從實際連結的四個程式庫產生。
+**名字要是程式庫真的有的符號。** 判定不出 PUBDEF 就不要硬湊一個像 CRT 的名字：那是 file-static（用 `L$N_`）或必須手寫的等價實作（用 `crt_equivalent_`）。可查證的公開符號清單由 [`tools/pool_triage/fid/`](../tools/pool_triage/fid/_index.md) 的 `extract_watcom_symbols.py` 從實際連結的三個 Watcom 程式庫與啟動 object `CSTRTX3S.OBJ` 產生。
 
 ## pool 分類
 
-每個符號歸 `fdps` / `crt` / `ail` / `binary_artifact` 四個 pool 之一，判定結果與依據見 [`program_info/code_pools.md`](../program_info/code_pools.md)。
+每個符號歸 `fdps` / `crt` / `ail` / `binary_artifact` 四個 pool 之一，function 的判定結果與依據見 [`program_info/code_pools.md`](../program_info/code_pools.md)，全域資料的見 [`program_info/data_structures.md`](../program_info/data_structures.md)。
 
-**不能用位址範圍判定 pool。** 前作的教訓是三類 function 在同一個 object 裡互相交錯擺放，沒有乾淨的 library／遊戲分界；本專案的 `0x3c000` 分界同樣只是概略值（見 [`program_info/memory_layout.md`](../program_info/memory_layout.md)）。可靠的依據是函式庫比對，輔以 caller/callee 關係與共用資料。逐一判定的要求見 [ADR-0002](../docs/adr/0002-no-batch-processing-per-function.md)。
+**不能用位址範圍判定 pool。** 前作的教訓是三類 function 在同一個 object 裡互相交錯擺放，沒有乾淨的 library／遊戲分界；本專案的位址分區（見 [`program_info/memory_layout.md`](../program_info/memory_layout.md)）同樣是從 pool 判定歸納出來的結果，分區之間仍有交錯，不能反過來當判定依據。可靠的依據是函式庫比對，輔以 caller/callee 關係與共用資料。逐一判定的要求見 [ADR-0002](../docs/adr/0002-no-batch-processing-per-function.md)。
 
 **名字不是 pool 的證據，pool 也不決定名字。** 兩者各自有判定依據；`0003dc2f` 那個共用 epilogue 帶著 AIL 的名字而形狀像連結產物，就是這條的實例。
 
