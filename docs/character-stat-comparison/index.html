@@ -79,8 +79,7 @@ p{margin:0}
 .promote .row{display:flex; align-items:center; gap:12px}
 .promote output{font:600 22px/1 var(--f-num); min-width:3.6em}
 .promote .hint{font-size:12px; color:var(--ink-3); max-width:32ch; line-height:1.45}
-input[type=range]{accent-color:var(--seal); width:170px}
-.theme{border:1px solid var(--rule-2); background:transparent; border-radius:3px; padding:6px 12px; font-size:13px; color:var(--ink-2); cursor:pointer}
+input[type=range]{accent-color:var(--seal); width:170px}.theme{border:1px solid var(--rule-2); background:transparent; border-radius:3px; padding:6px 12px; font-size:13px; color:var(--ink-2); cursor:pointer}
 .theme:hover{color:var(--ink); border-color:var(--ink-2)}
 .tabs{display:flex; gap:28px; margin-top:4px}
 .tab{appearance:none; background:none; border:0; border-bottom:3px solid transparent; padding:10px 0 9px;
@@ -191,6 +190,8 @@ svg.chart{display:block; width:100%; height:auto}
 .dhead .who{margin-top:6px; color:var(--ink-2); font-size:14px}
 .facts{display:grid; grid-template-columns:repeat(3,auto); gap:4px 26px; font-size:13px; color:var(--ink-2)}
 .facts b{display:block; font:600 20px/1.2 var(--f-num); color:var(--ink)}
+.pnote{font-size:12px; color:var(--ink-3); line-height:1.5; margin-top:10px}
+.joinpick .pnote{flex-basis:100%; margin-top:0; max-width:78ch}
 .joinpick{margin-top:14px; display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; font-size:13px; color:var(--ink-2)}
 .dsec{margin-top:26px}
 .dsec > h3{font-size:16px; margin-bottom:10px; display:flex; align-items:center; gap:10px}
@@ -285,6 +286,7 @@ footer{padding:22px 0 0; font-size:12.5px; color:var(--ink-3)}
       <div class="picker">
         <h2><span>選擇路線（最多 8 條）</span><button type="button" class="linkbtn" id="cmpClear">全部取消</button></h2>
         <div id="pickList"></div>
+        <p class="pnote" id="pickNote"></p>
       </div>
       <div class="plot">
         <h2 id="cmpTitle"></h2>
@@ -309,7 +311,7 @@ footer{padding:22px 0 0; font-size:12.5px; color:var(--ink-3)}
       <div>
         <h3>加入時的數值</h3>
         <p>角色建立時，AP、DP、DX ＝ 基礎值 ＋ 等級 × 最小成長，HP、MP ＝ 基礎值 ＋（等級 − 1）× 最小成長。兩組公式確實不同。</p>
-        <p>加入等級不一定是資料表的等級欄：法蓮娜、費塔加、瑪麗安在加入那一章的戰場上有同一名角色，過關時以戰場上的記錄留隊；蘭斯洛特與珊要看到場前有沒有過關，兩種等級都列出。</p>
+        <p>加入等級不一定是資料表的等級欄：法蓮娜、費塔加、瑪麗安在加入那一章的戰場上有同一名角色，過關時以戰場上的記錄留隊。蘭斯洛特與珊也有同一章戰場上的記錄，但要到第 6、第 7 回合才到場；照一般的打法他們會到場，以 LV2、LV15 加入。若在他們到場之前就過關，留下的是那一章開始時建立的名冊記錄（LV15、LV10），這兩個版本在頁面上標為「提早過關」。</p>
       </div>
       <div>
         <h3>每一級的成長</h3>
@@ -431,10 +433,25 @@ function points(b){
   return pts;
 }
 function finalRow(b){ const pts = points(b); return pts[pts.length - 1]; }
-function joinTag(b){ return b.c.joins.length > 1 ? "LV" + b.c.joins[b.ji].level + " 加入" : ""; }
+/* Two characters have a second join level that only a player who wins their
+   join chapter before they arrive ever sees: the roster record the chapter
+   start creates, which the arriving unit would otherwise replace.  Both are
+   listed everywhere, tagged, and explained once in words built from the data. */
+const isEarly = b => b.c.joins[b.ji].how === "early";
+function joinTag(b){
+  if (b.c.joins.length < 2) return "";
+  return isEarly(b) ? "提早過關" : "LV" + b.c.joins[b.ji].level + " 加入";
+}
+const EARLY_EXPLAIN = (() => {
+  const list = [];
+  CHARS.forEach(c => c.joins.forEach(j => { if (j.how === "early")
+    list.push(c.name + " LV" + j.level + "（第 " + c.chapter + " 章，第 " + j.turn + " 回合他到場之前就過關）"); }));
+  return "標「提早過關」的是" + list.join("、") + "：這時留下的是那一章開始時建立的名冊記錄，不是戰場上到場的那一筆。照一般的打法，他們會在那一回合到場，拿到的是另一個版本。";
+})();
 function buildName(b){ return b.ri < 0 ? b.c.name : b.c.name + "　" + b.c.routes[b.ri].cls; }
 function buildLong(b){
-  const t = joinTag(b);
+  const t = b.c.joins.length < 2 ? "" :
+    "LV" + b.c.joins[b.ji].level + " 加入" + (isEarly(b) ? "（提早過關）" : "");
   return (b.ri < 0 ? b.c.name + "（" + b.c.cls + "）" : b.c.name + "（" + b.c.cls + "→" + b.c.routes[b.ri].cls + "）") + (t ? " " + t : "");
 }
 function rng(lo, hi){
@@ -487,7 +504,7 @@ let rankMobileStat = "hp";
 function renderRanking(){
   document.getElementById("rankIntro").textContent =
     "每一欄依該屬性在等級上限時的數值排列：可轉職的九人每條轉職路線各一列（在 LV" + promoteAt +
-    " 轉職），蓋亞到 LV99，其餘到 LV40。淺色條是下限到上限的範圍，粗的一端是目前排序用的那一端。";
+    " 轉職），蓋亞到 LV99，其餘到 LV40。淺色條是下限到上限的範圍，粗的一端是目前排序用的那一端。" + EARLY_EXPLAIN;
   const pick = document.getElementById("rankStatPick");
   pick.innerHTML = STATS.map(s => '<button type="button" data-s="' + s + '" aria-pressed="' + (s === rankMobileStat) + '">' + LABEL[s] + '</button>').join("");
   pick.querySelectorAll("button").forEach(b => b.onclick = () => { rankMobileStat = b.dataset.s; renderRanking(); });
@@ -651,7 +668,8 @@ function buildPicker(){
   const full = selected.size >= SLOTS;
   document.getElementById("pickList").innerHTML = CHARS.map(c => {
     const chips = BUILDS.filter(b => b.c === c).map(b => {
-      const on = selected.has(b.key), label = (b.ri < 0 ? b.c.cls : b.c.routes[b.ri].cls) + (c.joins.length > 1 ? " LV" + c.joins[b.ji].level : "");
+      const on = selected.has(b.key), label = (b.ri < 0 ? b.c.cls : b.c.routes[b.ri].cls) +
+        (c.joins.length > 1 ? " LV" + c.joins[b.ji].level + (isEarly(b) ? "（提早過關）" : "") : "");
       const dot = on ? ' style="background:var(--c' + selected.get(b.key) + ')"' : '';
       return '<button type="button" class="chip" data-key="' + b.key + '" aria-pressed="' + on + '"' + (!on && full ? " disabled" : "") +
         ' title="' + esc(buildLong(b)) + '"><span class="dot"' + dot + '></span>' + esc(label) + '</button>';
@@ -734,7 +752,8 @@ function renderDetail(){
     '<div class="facts"><span>加入等級<b>LV' + j.level + '</b></span><span>等級上限<b>LV' + c.cap + '</b></span><span>移動力<b>' + c.move + '</b></span></div></div>';
   if (c.joins.length > 1){
     h += '<div class="joinpick">加入方式 <div class="seg" role="group" aria-label="加入方式">' +
-      c.joins.map((jj, i) => '<button type="button" data-j="' + i + '" aria-pressed="' + (i === curJoin) + '">LV' + jj.level + ' 加入</button>').join("") + '</div></div>';
+      c.joins.map((jj, i) => '<button type="button" data-j="' + i + '" aria-pressed="' + (i === curJoin) + '">LV' + jj.level + ' 加入' + (jj.how === "early" ? "（提早過關）" : "") + '</button>').join("") +
+      '</div><p class="pnote">' + esc(EARLY_EXPLAIN) + '</p></div>';
   }
   h += '<div class="dsec"><h3>加入時的數值</h3><div class="basegrid">' +
     STATS.map(s => '<div><div class="k">' + FULL[s] + '</div><div class="v">' + first.min[s] + '</div></div>').join("") + '</div></div>';
@@ -797,6 +816,7 @@ function levelTable(c, b){
 
 /* ---------------------------------------------------------------- start */
 defaultSelection();
+document.getElementById("pickNote").textContent = EARLY_EXPLAIN;
 {
   const want = (location.hash || "").slice(1);
   if (TABS.includes(want)) selectTab(want); else renderRanking();

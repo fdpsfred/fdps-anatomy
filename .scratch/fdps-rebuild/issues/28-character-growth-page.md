@@ -28,4 +28,4 @@
 - [x] `docs/character-stat-comparison/` 發佈檔、`docs/.nojekyll`、`docs/README.md`（含上面的公開範圍說明）；`tools/growth_table/_index.md`、`tools/_index.md`、`README.md` 同步
 - [x] 發現「照直覺寫就會與原版不同」的事寫進 `rebuild_info/pitfalls.md`；devlog 一篇——這次碰到的規則 `pitfalls.md` 都已有對應列，沒有新增；devlog `2026-09-26-character-growth-page.md`
 
-超出票面的項目（都寫在 `tools/growth_table/_index.md`）：全頁的轉職等級設定（LV20–40，前作固定 LV40）；蘭斯洛特與珊兩種加入等級都列，法蓮娜、費塔加、瑪麗安用實際留隊的等級；逐級表標出學會的法術；角色明細的小圖在轉職等級早於 40 時多一條「不轉職」；分頁記在網址、深淺色記在瀏覽器本機；比較圖可展開數值表；`verify_js.py` 另操作每個控制項。`src_replay.py` 的加入等級取自 `gen_growth.JOINS`（知識庫的輸入，不是公式），由部署記錄核對與攻略站數值測試把關。
+超出票面的項目（都寫在 `tools/growth_table/_index.md`）：全頁的轉職等級設定（LV20–40，前作固定 LV40）；蘭斯洛特與珊兩種加入等級都列（開發者決定：照一般打法拿不到的名冊版保留，但標「提早過關」並在頁面上以文字說明），法蓮娜、費塔加、瑪麗安用實際留隊的等級；逐級表標出學會的法術；角色明細的小圖在轉職等級早於 40 時多一條「不轉職」；分頁記在網址、深淺色記在瀏覽器本機；比較圖可展開數值表；`verify_js.py` 另操作每個控制項。`src_replay.py` 的加入等級取自 `gen_growth.JOINS`（知識庫的輸入，不是公式），由部署記錄核對與攻略站數值測試把關。
