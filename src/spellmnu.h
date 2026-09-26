@@ -163,7 +163,8 @@ extern int fdps_spell_list_select_loop(int unit_index,
    WHAT A SPELL'S RECORD DECIDES.  The MAGICDAT.DAT record
    (struct fdps_spell_effect) drives the whole aim: cast_range_flags is the
    reach and the shape -- 0 for a map-wide spell, up to 0x0f a radius in tiles,
-   from 0x10 up a line whose length is the low nibble -- area is the blast
+   from 0x10 up a line whose length is the byte minus 0x10 (a value compare
+   and a subtraction, not a bit mask) -- area is the blast
    radius the hit list is finally collected with, and target_side is both the
    sweep's filter and the cursor mode the aim runs in (aitarget.h, mapcur.h).
    The cursor's diamond footprint is area + 2 for the aim and back to the plain

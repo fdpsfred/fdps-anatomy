@@ -42,6 +42,10 @@ outside 段的判定裡有 19 項 Ghidra 改動：兩個參數改名（`fdps_aud
 
 它自己又留下三條組外的：`src/chinit1.h` 三處「名冊加入必須在重置之前」的註解（實際約束是在最後一次依名冊重建之前）、`src/spellmnu.c` 同樣的「低 nibble」說法、`data_structures.md` 的 `L$N_emu387_state` 與 `L$N_emu387_extended_real` 兩列（Ghidra 裡沒有套用）。用同一份請求檔再加一條、`freeze --refresh` 重新分組會讓第一批十組的判定全部對不上現行項目而變成過期，所以改成第二批一個檔、一個工作區（`kbfollowup.py --batch 2`），交 `followup2_ticket25_17.js`。
 
+第二批跑完：3 條全部修正（`chinit1.h` 只改第 1 章那處，第 2、3 章的開場過場不切地圖、原註解本來就對；`spellmnu.c` 的註解；`data_structures.md` 兩列照 Ghidra 現況改寫，Ghidra 不動，因為 `source_operand` 的 plate 已說明它刻意維持獨立物件），完整建置閘門 `game` 仍是 `pad`。
+
+O2 的第二位讀者（直接讀 `0x27c20` 的反組譯：`CMP [EBP-0xc],0xf`／`JLE`，直線分支 `SUB EAX,0x10`，全程沒有 `AND 0xf`）指出同樣的「低 nibble」說法還在 `src/spellmnu.h` 與 `src/aiact.h` 各一處，都在它的組外。這個事實已由第五段 O7 與第二批 O2 兩組獨立判定確認過，主 session 決定不再開 workflow，由票的 session 照已確認的事實直接改這兩處註解（出處：第二批 O2 的判定），改完跑完整建置閘門：`game` 為 `pad`，`ailsmoke`、`smoke` 為 `identical`，全部測試套件通過（`ail_link.run` 因本機沒有音效環境照例略過）。改的時候以 `bit 0x10`、`low nibble` 再搜一次 `src/` 與 `tests/`，找到三處同類的說法：`src/table.h` 的 `cast_range_flags` 說明寫「straight-line bit 0x10」、`tests/aiact.c` 的測試註解寫「bit 0x10 marks the shape and the low nibble is the beam's length」、`tests/table.c` 寫「the straight-line bit 0x10 over a range of 7」；另外 `src/aiscore.c`、`src/item.c`、`src/spellmnu.c` 的巨集名 `*_LINE_BIT` 本身就帶著「位元」的暗示。照主 session 的指示不再擴散，只列給主 session。
+
 ## lint 的剩餘
 
 兩段 workflow 後剩 15 筆，逐筆看過都是正當用法：README 的資料夾表列出 `workspace/`、`legacy/`、`fdps_game_files/`，詞彙表定義 devlog 這個詞，`build_gate.md` 說明基準值「不放在 `workspace/`」，`data_emit.md`／`emit_pipeline.md` 描述管線自己在 `workspace/` 的足跡與 devlog 的 commit 規則，`pitfalls.md` 範例裡的 `fdps_foo`。規則本身刻意粗，所以不改規則，改在 `kbverify.py` 加 `LINT_ACCEPTED`，每筆附理由，lint 歸零。

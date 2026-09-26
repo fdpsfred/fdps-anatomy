@@ -130,8 +130,9 @@ extern int fdps_map_actor_cast_chosen_spell(int unit_index, int side_select);
    (aitarget.h) with the use_radius byte at +0x12 as the reach and a min_dist
    of 0, and the presentation is the cursor walked to the aim tile carrying the
    radius-plus-two blast diamond.  From 0x10 up it covers a straight line: the
-   targets come from fdps_collect_targets_in_line with the low nibble as the
-   length and the actor's own tile as the origin, and the presentation is the
+   targets come from fdps_collect_targets_in_line with the byte minus 0x10 as
+   the length (a value compare and a subtraction, not a bit mask) and the
+   actor's own tile as the origin, and the presentation is the
    whole beam -- the actor turned to face the first unit found, a white flash
    ramped back to the normal palette, the cursor swept out to the beam's far
    end in the overlay mode that leaves a highlight trail behind it, eight

@@ -31,8 +31,12 @@
    hero 索爾 the cut-scene has just deployed, is given eleven turns of
    poison and 100 current HP; and the map cursor is parked on unit 0's tile.
 
-   The roster add comes first because the state rebuild deploys the map's
-   player slots out of the roster array, and the two writes on 索爾 come
+   The roster add comes before the cut-scene because every rebuild of the
+   map's player slots fills them out of the roster array and stops at the
+   roster count, and the last rebuild here is the cut-scene's own:
+   Icon00.dat's SWITCH_MAP 0x00 at script offset 0x51c resets the chapter
+   state again and rebuilds map 0.  Its place ahead of this handler's own
+   state reset is simply the original's order.  The two writes on 索爾 come
    last because the unit they land on does not exist until the cut-scene has
    deployed it.  Neither ordering is visible in any data file.
 

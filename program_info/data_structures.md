@@ -77,8 +77,8 @@ CRT 與 AIL 的結構用**程式庫原名，不加前綴**（`tm`、`FILE`、`RE
 | `tm` | 36 | `0x6145c` `__start_dst`、`0x61480` `__end_dst` | Watcom 的 `tm` 是 36 byte |
 | `miniheapblkp` | 44 | `0x60388` `__nheapbeg` | 近端堆積的區塊標頭 |
 | `rt_init` | 6 | `0x638f0`、`0x63920` | XI／YI 啟動與收尾鏈的節點 |
-| `long_double_80` | 10 | 只有型別定義，沒有套用在任何資料項、struct 欄位或函式簽章；10 byte 的浮點常數（如 `0x42c30` `L$1_trig387_two_pi`）都定義成 `byte[10]` | 80-bit extended real，與 FD2 的同名型別相同 |
-| `L$N_emu387_state` | 122 | `0x613c8` | 80x87 模擬器的完整狀態，**必須當成一塊連續記錄** |
+| `long_double_80` | 10 | 只有型別定義，沒有套用在任何資料項、struct 欄位或函式簽章；10 byte 的浮點常數（如 `0x42c30` `L$1_trig387_two_pi`）都定義成 `byte[10]` | 80-bit extended real，與 FD2 的同名型別相同。`L$N_emu387_extended_real` 與它佈局相同（dword、dword、word），只差欄位名，同樣只有定義、沒有被套用或引用 |
+| `L$N_emu387_state` | 122 | 只有型別定義，沒有套用；`0x613c8` 起的這段在 Ghidra 拆成 `L$N_emu387_control_word`、`L$N_emu387_tag_word`、`L$N_emu387_register_stack`、`L$N_emu387_source_operand` 各自的資料項 | 涵蓋 80x87 模擬器 `0x613c8` 起的 122 byte：28 byte 的保護模式環境與 `+0x1c` 八個 10 byte 暫存器（合計 `0x6c` byte，才是模擬器自己的狀態，FSAVE／FRSTOR 與 SIGFPE 包裝的保存都停在這裡）、`+0x6c` 的 scratch 運算元、`+0x76` 的精度捨入續行位址。模擬器只以 `LEA EBP,[0x613c8]` 為基底加位移存取，讀 Ghidra 時用這個型別對照 `EBP+位移`。佈局由 `EMU387.LIB` 自己的資料決定，重建直接連結該庫，C 裡不宣告 |
 | `SAMPLE` | 2196 | `0x69d30` `data_fdps_audio_sample_handle_table` 的 8 個 handle 指向它 | Miles AIL 的取樣記錄，FD2 當成不透明 handle 沒有解開 |
 | `SEQUENCE` | 1748 | `0x6a0d8` `data_ail_mdi_serve_sequence` 指向它 | 同上 |
 

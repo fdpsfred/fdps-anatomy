@@ -645,10 +645,12 @@ int fdps_spell_list_select_loop(int unit_index, unsigned char *window_buf,
 
 /* MAGICDAT.DAT's cast-range byte carries the reach and the shape together, the
    same encoding fdps_collect_targets_in_range reads (aitarget.h): up to 0x0f
-   it is a radius in tiles, and from 0x10 up it is a straight line whose length
-   is the low nibble.  The test is CMP dword ptr [EBP-0xc],0xf / JLE at
-   00027e46, so 0x0f is the last radius and the line arm is the one that falls
-   through. */
+   it is a reach of that many tiles, and from 0x10 up it is a straight line
+   whose length is the byte less 0x10.  The byte is compared as a number, not
+   masked: the test is CMP dword ptr [EBP-0xc],0xf / JLE at 00027e46, so 0x0f
+   is the last radius and the line arm is the one that falls through, and the
+   line length is SUB EAX,0x10 at 00027e64 -- CAST_RANGE_LINE_BIT is
+   subtracted, never tested as a bit or used to extract a low nibble. */
 #define CAST_RANGE_LAST_RADIUS 0x0f
 #define CAST_RANGE_LINE_BIT 0x10
 
