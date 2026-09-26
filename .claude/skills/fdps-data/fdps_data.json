@@ -28,7 +28,7 @@
   "src": "從 src/ 轉錄的說明（使用效果代碼的效果，tools/data_tables 的 USE_EFFECTS）",
   "judgement": "資料本身判斷不了的事——波次會不會部署、文字由誰顯示、為什麼不會顯示——取自章節頁的逐章判定（tools/chapter_docs/judgements/）與 cut_content 的歸屬（tools/cut_content/story.py 的 OWNERS）",
   "guide": "攻略站的說法，只出現在 discrepancies",
-  "rule": "數值出自遊戲檔，名稱出自遊戲內文字；攻略站與資料檔不一致的地方以資料檔為準，全部列在 discrepancies"
+  "rule": "數值出自遊戲檔，名稱出自遊戲內文字；攻略站與資料檔不一致的地方以資料檔為準，人物初始法術除外——攻略站列的是入隊後玩家實際拿到的法術，資料檔是入隊時的遮罩，兩邊都對；全部列在 discrepancies"
  },
  "label_checks": 3244,
  "chapter_page_gate": true,
@@ -85,7 +85,7 @@
     0
    ],
    "dump": [],
-   "note": "攻略站把業火列為劍士蘭迪斯的初始法術，資料檔的遮罩是空的"
+   "note": "攻略站的業火由第 1 章勝利處理 fdps_chapter_01_end 在名冊寫回前授予，FRIAPRDA.DAT 的遮罩本身是空的"
   },
   {
    "table": "character",
@@ -99,7 +99,7 @@
     8,
     9
    ],
-   "note": "攻略站只給費塔加冰爆術，資料檔另有 00 業火與 09 絕殺冰封（09 是他 Lv15 的習得，攻略站列他以 15 級出場）"
+   "note": "攻略站列的是 MAP07 第 19 筆 LV15 費塔加部署記錄的遮罩 08 09（09 標 Lv15），FRIAPRDA.DAT 的遮罩是 00 08 09"
   },
   {
    "table": "character",
@@ -131,7 +131,7 @@
     14,
     15
    ],
-   "note": "珊的法術，攻略站法術頁列的五個與資料檔的七個不同"
+   "note": "攻略站列的 05 06 07 0C 20 是 MAP23 第 10 筆 LV15 珊部署記錄的遮罩，FRIAPRDA.DAT 的遮罩是 00 01 05 06 0C 0E 0F"
   },
   {
    "table": "character",
@@ -141,7 +141,7 @@
    "dump": [
     6
    ],
-   "note": "蘭斯洛特的遮罩裡有奔雷彈，攻略站沒有列他"
+   "note": "MAP18 第 42 筆 LV2 蘭斯洛特部署記錄的遮罩是空的，攻略站沒列他；FRIAPRDA.DAT 的遮罩有 06 奔雷彈"
   }
  ],
  "tables": {

@@ -114,7 +114,7 @@
 
 /* Byte +4 of a .SAF frame record is its lead-in count and byte +5 its hit
    marker (src/saf.h).  Frame 0's lead-in is read out of two clips here: the
-   caster's Magic clip, where it is the frame the build-up phase ends on, and
+   caster's Magic clip, where it is the frame the opening phase ends on, and
    the spell's main clip, where it is the frame the hit phase loops back to. */
 #define SAF_FRAME_LEAD_IN_OFFSET 4
 #define SAF_FRAME_HIT_MARKER_OFFSET 5

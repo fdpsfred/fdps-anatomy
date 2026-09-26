@@ -293,7 +293,12 @@ GUIDE_CLASSES = {
     0x26: ((1, 1, 1, 1, 1, 255, 255, 255), 0x0A, 0x0A),
 }
 
-# Mismatches that have been investigated; the data file wins in every case.
+# Mismatches that have been investigated.  In the numeric fields the data file wins.  In
+# appearance.spells both sides are right: the data file holds the FRIAPRDA.DAT mask a
+# character joins with, the guide the spells the player actually ends up with -- granted
+# by chapter 1's victory handler before the roster writeback, taken from an item, or the
+# mask of the deployment record whose unit the end-of-battle writeback copies whole over
+# the roster record (assets/characters.md).
 # tools/data_skill/build.py ships this same set to the fdps-data skill as DISCREPANCIES,
 # so an entry added here has to be added there too.
 ACCEPTED = {
@@ -301,12 +306,15 @@ ACCEPTED = {
     ("spell.hit", 0x17): "攻略站的咒殺術命中率寫 50%，資料檔是 60",
     ("spell.target", 0x16): "神行術的作用對象是 3；攻略站只列了 00／01 兩個值",
     ("class", 0x18): "攻略站的機械大師第八個地形消耗寫 01，資料檔是 FF",
-    ("appearance.spells", 0x00): "攻略站把業火列為劍士蘭迪斯的初始法術，資料檔的遮罩是空的",
-    ("appearance.spells", 0x02): "攻略站只給費塔加冰爆術，資料檔另有 00 業火與 09 絕殺冰封"
-                                 "（09 是他 Lv15 的習得，攻略站列他以 15 級出場）",
+    ("appearance.spells", 0x00): "攻略站的業火由第 1 章勝利處理 fdps_chapter_01_end 在名冊寫回前"
+                                 "授予，FRIAPRDA.DAT 的遮罩本身是空的",
+    ("appearance.spells", 0x02): "攻略站列的是 MAP07 第 19 筆 LV15 費塔加部署記錄的遮罩 08 09"
+                                 "（09 標 Lv15），FRIAPRDA.DAT 的遮罩是 00 08 09",
     ("appearance.spells", 0x09): "攻略站列蓋亞有轟神砲，資料檔的遮罩是空的——那來自 A4 強化套件",
-    ("appearance.spells", 0x0A): "珊的法術，攻略站列的五個與資料檔的七個不同",
-    ("appearance.spells", 0x0B): "資料檔的遮罩有 06 奔雷彈，攻略站的法術頁沒有列蘭斯洛特",
+    ("appearance.spells", 0x0A): "攻略站列的 05 06 07 0C 20 是 MAP23 第 10 筆 LV15 珊部署記錄的"
+                                 "遮罩，FRIAPRDA.DAT 的遮罩是 00 01 05 06 0C 0E 0F",
+    ("appearance.spells", 0x0B): "MAP18 第 42 筆 LV2 蘭斯洛特部署記錄的遮罩是空的，攻略站沒列他；"
+                                 "FRIAPRDA.DAT 的遮罩有 06 奔雷彈",
 }
 
 

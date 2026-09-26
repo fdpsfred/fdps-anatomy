@@ -43,9 +43,10 @@
 #define PERCENT 100
 
 /* PROMAP.DAT row 0 is a default row, so the class record for a unit is looked
-   up at its class code PLUS ONE.  Every caller of fdps_get_class_record in the
-   image applies this bias (table.h); dropping it reads the previous class's
-   magic resistance. */
+   up at its class code PLUS ONE.  Every caller of fdps_get_class_record that
+   looks up a particular unit applies this bias except
+   fdps_map_actor_move_toward_nearest_reachable_opponent, an original defect
+   (table.h); dropping it reads the previous class's magic resistance. */
 #define CLASS_RECORD_BIAS 1
 
 /* The two ground-shock spells, the only ids this function tests for.  Names

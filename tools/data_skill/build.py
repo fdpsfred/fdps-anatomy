@@ -52,7 +52,10 @@ TABLES = {
     "class": ("PROMAP.DAT", 10),
 }
 
-# Guide values that the data file contradicts.  This list mirrors the ACCEPTED table in
+# Where the guide and the data file differ.  In the numeric fields the data file is
+# right; in initial_spells both are -- the guide lists the spells the player ends up
+# with, the dump the FRIAPRDA.DAT mask at joining (see the comment over ACCEPTED in
+# tools/guide_offsets/crosscheck.py).  This list mirrors the ACCEPTED table in
 # tools/guide_offsets/crosscheck.py, which is the gate over the fields it compares: it
 # fails on any mismatch that is not accepted there, so no new divergence in those fields
 # can appear unnoticed.  Its coverage is what bounds this list -- fields outside its
@@ -69,19 +72,22 @@ DISCREPANCIES = [
     {"table": "class", "code": 0x18, "field": "move_cost[7]", "guide": 0x01, "dump": 0xFF,
      "note": "機械大師的第八個地形消耗，攻略站寫 01"},
     {"table": "character", "code": 0x00, "field": "initial_spells", "guide": [0x00], "dump": [],
-     "note": "攻略站把業火列為劍士蘭迪斯的初始法術，資料檔的遮罩是空的"},
+     "note": "攻略站的業火由第 1 章勝利處理 fdps_chapter_01_end 在名冊寫回前"
+             "授予，FRIAPRDA.DAT 的遮罩本身是空的"},
     {"table": "character", "code": 0x02, "field": "initial_spells", "guide": [0x08],
      "dump": [0x00, 0x08, 0x09],
-     "note": "攻略站只給費塔加冰爆術，資料檔另有 00 業火與 09 絕殺冰封"
-             "（09 是他 Lv15 的習得，攻略站列他以 15 級出場）"},
+     "note": "攻略站列的是 MAP07 第 19 筆 LV15 費塔加部署記錄的遮罩 08 09"
+             "（09 標 Lv15），FRIAPRDA.DAT 的遮罩是 00 08 09"},
     {"table": "character", "code": 0x09, "field": "initial_spells", "guide": [0x1D],
      "dump": [],
      "note": "攻略站列蓋亞有轟神砲，資料檔的遮罩是空的——那來自 A4 強化套件"},
     {"table": "character", "code": 0x0A, "field": "initial_spells",
      "guide": [0x05, 0x06, 0x07, 0x0C, 0x20], "dump": [0x00, 0x01, 0x05, 0x06, 0x0C, 0x0E, 0x0F],
-     "note": "珊的法術，攻略站法術頁列的五個與資料檔的七個不同"},
+     "note": "攻略站列的 05 06 07 0C 20 是 MAP23 第 10 筆 LV15 珊部署記錄的"
+             "遮罩，FRIAPRDA.DAT 的遮罩是 00 01 05 06 0C 0E 0F"},
     {"table": "character", "code": 0x0B, "field": "initial_spells", "guide": [], "dump": [0x06],
-     "note": "蘭斯洛特的遮罩裡有奔雷彈，攻略站沒有列他"},
+     "note": "MAP18 第 42 筆 LV2 蘭斯洛特部署記錄的遮罩是空的，攻略站沒列他；"
+             "FRIAPRDA.DAT 的遮罩有 06 奔雷彈"},
 ]
 
 # 00 敵方 / 01 己方 are the two values assets/spells.md states; 03 appears on 神行術
@@ -234,9 +240,16 @@ def parse_range(cell):
 
 
 def parse_distance(cell):
-    """`直線 7` is the 0x10 bit plus the distance; anything else is a plain number."""
+    """`直線 7` is 0x10 plus the line's length; anything else is a plain number."""
     m = re.fullmatch(r"直線\s+(\d+)", cell)
-    return 0x10 | int(m.group(1)) if m else int(cell)
+    return 0x10 + int(m.group(1)) if m else int(cell)
+
+
+def split_distance(value):
+    """(is_line, length) of a distance byte.  The game compares it as a number and
+    never masks it: 0x10 and up is a straight line of value - 0x10 tiles, below
+    that the value is the distance itself."""
+    return (True, value - 0x10) if value >= 0x10 else (False, value)
 
 
 def parse_codes(cell):
@@ -309,8 +322,7 @@ def build_items(records, check):
         row = {"code": code, "code_hex": "%02X" % code, "name": names.get(code)}
         row.update(rec)
         row["hit_effect_name"] = hit_effect.get(rec["hit_effect"])
-        row["use_distance_line"] = bool(rec["use_distance"] & 0x10)
-        row["use_distance_value"] = rec["use_distance"] & 0x0F
+        row["use_distance_line"], row["use_distance_value"] = split_distance(rec["use_distance"])
         row["blank"] = code not in names
         out.append(row)
     return out, hit_effect
@@ -338,8 +350,7 @@ def build_spells(records, check):
         merged = {"code": code, "code_hex": "%02X" % code, "name": row[1]}
         merged.update(rec)
         merged["ap_multiplier"] = -rec["power"] / 100 if rec["power"] < 0 else None
-        merged["distance_line"] = bool(rec["distance"] & 0x10)
-        merged["distance_value"] = rec["distance"] & 0x0F
+        merged["distance_line"], merged["distance_value"] = split_distance(rec["distance"])
         merged["target_name"] = SPELL_TARGET.get(rec["target"])
         out.append(merged)
     return out
@@ -961,7 +972,8 @@ PROVENANCE = {
                  "（tools/cut_content/story.py 的 OWNERS）",
     "guide": "攻略站的說法，只出現在 discrepancies",
     "rule": "數值出自遊戲檔，名稱出自遊戲內文字；攻略站與資料檔不一致的地方以資料檔為準，"
-            "全部列在 discrepancies",
+            "人物初始法術除外——攻略站列的是入隊後玩家實際拿到的法術，資料檔是入隊時的遮罩，"
+            "兩邊都對；全部列在 discrepancies",
 }
 SOURCE_FILES = ("MISC.VFS", "FIELD.VFS", "FIELD1.VFS", "FIELD2.VFS", "ICONANI.VFS")
 

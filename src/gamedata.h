@@ -323,14 +323,24 @@ extern unsigned char data_fdps_map_current_move_grid_marker;
    event plane in the shipped M%02d.DTL layers uses codes 0 to 15, so no read
    reaches the neighbouring global (rebuild_info/pitfalls.md, contract B).
 
-   The writers each set one entry to 1 and then call
-   fdps_map_apply_triggered_cell_changes (src/maptile.h) to make the map show
-   it: the chest and search paths at 0001038b, 0001868b and 000188aa, the icon
-   script at 00021c8f and the chapter 30 wave event at 00039876.
+   Besides that reset and the load, three kinds of code write it.
 
-   fdps_chapter_30_event_deploy_wave_4 is the exception: it sets element 0x10 at
-   00039830 and makes no such call, because its body deploys, pans the view and
-   speaks a line and never touches a tile layer. */
+   The chest and search paths at 0001038b, 0001868b and 000188aa, and
+   fdps_chapter_30_event_deploy_wave_2 at 00039876 (element 2), set one entry
+   to 1 and then call fdps_map_apply_triggered_cell_changes (src/maptile.h) to
+   make the map show it.
+
+   The icon script's opcode 0x13 at 00021c8f stores its own operand byte,
+   script[offset + 2], into the entry script[offset + 1] names -- any value,
+   not necessarily 1 -- and then makes the same call.
+
+   The other chapter-event and post-action handlers that touch it (chevt1..
+   chevt6, chpost1..chpost3) borrow elements 0x10, 0x11 and 0x12 as one-shot
+   latches or, for chapter 8's escaped villagers, as a counter, and never make
+   that call, because those codes key no tile change; the chapter-end handlers
+   in chend1b and chend2 read the same latches.
+   fdps_chapter_30_event_deploy_wave_4, setting element 0x10 at 00039830, is
+   one of these handlers and not a lone exception. */
 extern unsigned char data_fdps_map_cell_event_triggered_flags[32];
 
 /* 00069d90.  Which chapter-event handler the battle loop still owes a call to:

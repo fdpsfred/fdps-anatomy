@@ -13,9 +13,11 @@
  * Initialised definitions come first and their order is the layout
  * (rebuild_info/data_emit.md); zero-filled ones follow. */
 
-/* 00060008. Starts at 1, so CD background music is on by default before any
-   save or the options menu touches it; the title screen also forces it back to
-   1. */
+/* 00060008. The image holds 1, but that value is never observed:
+   fdps_title_screen stores 1 here (0002a56b) after the opening movie and
+   before its menu, and every reader of the flag -- the options menu, the
+   battle system submenu, the save screen and the CD music routines -- runs
+   only after that store. */
 unsigned char data_fdps_audio_bgm_enabled_flag = 0x01;
 
 /* 00060010. Starts at 1, so battle animations are on in a new game until the
@@ -172,8 +174,9 @@ unsigned char *data_fdps_selection_bar_sheet_ptr = 0;
 /* 000643c4. Starts NULL in the image; fdps_load_global_resources stores the
    loaded text block into it at startup. Written as an explicit zero so it
    stays in the contiguous initialised run 0x64120..0x653ef at its original
-   offset, where an overrun of the floating-indicator queue (glyph and
-   unit-index stores) lands on it exactly as in the original. */
+   offset, where an overrun of the floating-indicator queue (its glyph
+   stores; the unit-index stores stop at the cursor) lands on it exactly as
+   in the original. */
 unsigned char *data_fdps_all_game_text_ptr = 0;
 
 /* 000643c8. Starts NULL in the image; fdps_load_global_resources allocates the
@@ -254,7 +257,7 @@ unsigned char *data_fdps_animation_baseani_entry_ptr = 0;
    fdps_build_palette_tables or read back from a saved 4096-byte copy. Defined
    initialised so it stays the last member of the contiguous 0x64120..0x653ef
    run: an overrun of the floating-indicator queue stores glyph bytes into its
-   first 84 bytes, exactly as in the original. */
+   first 80 bytes (0x643f0..0x6443f), exactly as in the original. */
 unsigned char data_fdps_inverse_palette_cube[4096] = { 0 };
 
 /* 0006000c. Starts at 0, the first colour row of Number.cel; every panel that

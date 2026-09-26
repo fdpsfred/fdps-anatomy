@@ -84,7 +84,7 @@ stub 模組由 `tools/code_emit/gen_stubs.py` 產生：資料照 `tools/code_emi
 
 ## emit 的 gate
 
-`python tools/build_gate/gate.py check --target emittest`。`emittest` 目標把 `src/` 的全部生產程式碼與 `tests/` 的全部測試編譯連結成一個 DOS/4G 映像並在 DOSBox-X 裡實際執行。通過的條件是 build、errors、undefined、warnings 四項判定與測試套件都過；每一項怎麼判（連結器的 redefinition 算錯誤、未解析符號只看第二次連結、警告同時比文字與摘要行的數量）以 [`build_gate.md`](build_gate.md) 的「通過的條件」為準。
+`python tools/build_gate/gate.py check --target emittest`。`emittest` 目標把 `src/` 的全部生產程式碼與 `tests/` 的全部測試編譯連結成一個 DOS/4G 映像並在 DOSBox-X 裡實際執行。通過的條件是 build、errors、undefined、warnings 四項判定與測試套件都過；每一項怎麼判（連結器的 redefinition 算錯誤、未解析符號只看最後一次連結，沒有第二次時就是第一次、警告同時比文字與摘要行的數量）以 [`build_gate.md`](build_gate.md) 的「通過的條件」為準。
 
 這個目標**不做映像等價比對**，判定欄位顯示 `not compared`，理由與其他目標的差別見 [`build_gate.md`](build_gate.md)。
 

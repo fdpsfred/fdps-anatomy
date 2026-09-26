@@ -102,10 +102,19 @@
    off an else of the victory, inverts exactly that case.
 
    The chapter's two stated lose conditions are 蘭迪斯 dying and 索爾 dying:
-   the first is the shared test's slot 0 and the second is this store.  Unlike
-   chapters 2 and 5, which carry their 索爾 condition as a death script on his
-   deployment record, chapter 1 enforces it here in code -- and it is the only
-   post-action handler in the file that speaks before it decides.
+   the first is the shared test's slot 0 and the second is this store.  索爾's
+   deployment record in map00.dat (record 21) also carries a death script,
+   opcode 5 with operand 0x0f, so a 索爾 struck down in combat has his line
+   drawn twice: fdps_run_death_scripts draws entry 0x0f and records the
+   defeat, and this handler, which looks only at his slot and never at the
+   code, draws it again at the end of the same action.  A 索爾 killed by
+   poison bypasses the death scripts -- fdps_battle_tick_status_effects
+   settles the death and calls the post-action handler directly -- so this
+   store alone ends that battle.  Chapters 2, 5 and 6 rely on the death script
+   alone (opcode 5, operand 255, no text) and chapter 4 on its post-action test
+   alone; reshaping this handler after chapter 2's and leaving the condition to
+   the death script lets a poisoned 索爾 end nothing (rebuild_info/pitfalls.md).
+   Like chapter 3's victory arm, this handler speaks before it records.
 
    Table slot 0: the dword at 0006028c, the base of the table itself, is
    0003a3b0. */
@@ -381,14 +390,17 @@ void fdps_chapter_07_post_action(void)
 
 /* The unit slot chapter 8's first defeat test asks about, PUSH 0x0 at
    0003a71c.  This handler never calls fdps_battle_check_default_end_conditions
-   (btlend.h), so unlike every other 蘭迪斯 test in this file it is the
-   chapter's own instruction and not the shared test's. */
+   (btlend.h), so like the 蘭迪斯 tests of chapters 3 and 10, and unlike the
+   rest in this file, it is the chapter's own instruction and not the shared
+   test's. */
 #define CH08_RANDIS_UNIT_INDEX 0
 
 /* The guest mage 費塔加 on this map, PUSH 0x13 at 0003a73d.  He is not in the
-   unit array when the battle opens:
-   fdps_chapter_08_event_send_guest_mage_to_cells (chevt2.h) is what deploys
-   him. */
+   unit array when the battle opens: map07.dat's single wave-1 record is
+   deployed by the DEPLOY_WAVE in Icon7-1.dat, the cut-scene
+   fdps_chapter_08_event_for_turn (chevt2.h, 000372d0) plays on turn 3.
+   fdps_chapter_08_event_send_guest_mage_to_cells only re-aims him once he is
+   there. */
 #define CH08_GUEST_MAGE_UNIT_INDEX 0x13
 
 /* The turn the 費塔加 test is armed after, CMP dword ptr [0x00069ce8],0x3 /
@@ -428,9 +440,10 @@ void fdps_chapter_07_post_action(void)
    PUSH EBX/ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 at 0003a710..0003a716 -- and
    nothing in it is ever read, so there is no local to name.
 
-   THERE IS NO CALL 0x0003a2e0 ANYWHERE IN THE BODY.  Every other handler in
-   this file either forwards to fdps_battle_check_default_end_conditions or
-   runs it first, and chapter 8 does not: emptying the enemy side is not a
+   THERE IS NO CALL 0x0003a2e0 ANYWHERE IN THE BODY.  Chapters 3 and 10 are
+   the only other handlers in this file that leave it out; the rest either
+   forward to fdps_battle_check_default_end_conditions or run it first.  So
+   emptying the enemy side is not a
    clear here, and a retired slot 0 is a defeat only because this function
    tests it itself.  Opening with the shared call by analogy with the siblings
    adds a victory condition the chapter does not have.
@@ -559,8 +572,9 @@ void fdps_chapter_08_post_action(void)
    The chapter's three stated lose conditions are 蘭迪斯, 布蘭多 or 蓋亞
    dying.  The first is the shared test's slot 0 -- chapter id 8 is neither
    0x10 nor 0x15, so the arm it takes is PUSH 0x0 at 0003a382 -- and the other
-   two are this store.  Nothing here is carried as a map death script: every
-   deployment record in map08.dat has a zero death-script opcode.
+   two are this store.  Nothing here is carried as a map death script: the
+   only non-255 death-script opcodes in map08.dat are the 0s on the two
+   enemies that drop a B6 and the 1s on the two that drop 3000 and 1000 gold.
 
    Table slot 8: the dword at 000602ac, eight entries into the table based at
    0006028c, is 0003a840. */
@@ -572,8 +586,9 @@ void fdps_chapter_09_post_action(void)
     }
 }
 
-/* 0003a8c0.  The only handler in this file that does not call the shared test:
-   an eight-slot escape count, then a defeat test, then the clear.
+/* 0003a8c0.  One of the three handlers in this file, with chapters 3 and 8,
+   that never call the shared test: an eight-slot escape count, then a defeat
+   test, then the clear.
 
    The frame is the standard four-push Watcom one -- PUSH EBX/ESI/EDI/EBP, MOV
    EBP,ESP at 0003a8c0..0003a8c4 -- over SUB ESP,0xc, and all three dwords of
@@ -802,7 +817,8 @@ void fdps_chapter_13_post_action(void)
 
 /* The three entries of the chapter's own text block this handler speaks,
    PUSH 0x16 at 0003ab90, PUSH 0x17 at 0003abb5 and PUSH 0x18 at 0003abe7.
-   FDETXT15.TXT holds twenty-nine entries, so all three are in range, and each
+   FDETXT15.TXT holds twenty-five entries, 0x00 to 0x18, so all three are in
+   range -- 0x18 being the last -- and each
    of them opens with the token pair -0x11, 0x23 -- the portrait code carrying
    character id 0x23, the challenger's -- so he speaks all three lines, the one
    for the duel he lost included. */
@@ -887,8 +903,8 @@ void fdps_chapter_14_post_action(void)
    byte takes the duel arm.
 
    THE TWO ARMS ARE EXCLUSIVE AND THE ORDER CANNOT BE REVERSED.  Writing this
-   as the shared test first and the duel test after it -- the shape every other
-   handler in this file has -- turns the duel into an instant defeat: the event
+   as the shared test first and the duel test after it -- the shape most
+   handlers in this file have -- turns the duel into an instant defeat: the event
    that raises the flag retires unit records 0..8 except 裘娜's, unit 0 among
    them, and the shared test makes a retired unit 0 a defeat.  The original
    never asks it while the flag is up, and that is what keeps the duel running.

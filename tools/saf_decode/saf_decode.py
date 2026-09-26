@@ -37,13 +37,16 @@ tables can only be reached by doing saf + *(u32 *)(saf + 0x0E / 0x18 / 0x22 /
     frame (10 bytes plus 13 per layer)
       +0x00  i16  sound to fire with this frame, -1 for none
       +0x02  i16  how many ticks the frame is held for
-      +0x04  u8   a count the caller reads for its own purposes. The player
-                  itself ignores this byte and the next one; the only readers
-                  are the attack sequence at 0x196d0 and the battle opening at
-                  0x18d60, which reach a frame through 0x140e0 rather than
-                  through the section tables.
-      +0x05  u8   the impact marker: the attack sequence counts these frames
-                  and drains the target's HP bar across them
+      +0x04  u8   a frame index the caller reads for its own purposes (only
+                  frame 0's is read). The player itself ignores this byte and
+                  the next one; the only readers are the attack sequence at
+                  0x196d0 and the spell sequence at 0x1a4c0 (both bytes), the
+                  battle opening at 0x18d60 (this byte), and the credit roll at
+                  0x1ba40 (reads this byte and never uses it). All of them
+                  reach a frame through 0x140e0 rather than through the
+                  section tables.
+      +0x05  u8   the impact marker: the attack and spell sequences count these
+                  frames and drain the target's HP bar across them
       +0x06  u16  always 0 (never read by the game)
       +0x08  i16  layer count
       +0x0A  the layers

@@ -285,7 +285,7 @@ extern void fdps_chapter_30_event_deploy_wave_3(int unit_index);
 #pragma aux fdps_chapter_30_event_deploy_wave_3 "*" parm caller [];
 
 /* Chapter 30's undead top-up, and the reason that chapter's reinforcements can
-   never be cleared out: every 死靈 (character id 0x55) and 白骨戰士
+   never be cleared out: every 白骨戰士 (character id 0x55) and 死靈
    (character id 0x6a) on the map that has been killed is put straight back on
    the battlefield at full health.
 
@@ -299,7 +299,7 @@ extern void fdps_chapter_30_event_deploy_wave_3(int unit_index);
    the 0x40 "a unit stands here" bit on the tile of every unit still in play --
    and then the whole grid is scanned row by row for the free walkable cell
    closest, in Manhattan distance, to the type's scripted spawn point in
-   map29.cod: (5, 12) for 死靈 and (15, 13) for 白骨戰士.  A cell carrying
+   map29.cod: (5, 12) for 白骨戰士 and (15, 13) for 死靈.  A cell carrying
    0x40 is skipped and a cell whose terrain movement cost is 5 or more is
    rejected.  Among cells that tie at the shortest distance THE LAST ONE IN
    ROW-MAJOR ORDER WINS, not the first (see the definition in chevt6.c).

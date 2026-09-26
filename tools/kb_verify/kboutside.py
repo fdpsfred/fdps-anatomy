@@ -55,6 +55,19 @@ REPO = kbverify.REPO
 WORK = REPO / "workspace" / "kb_outside"
 ITEMS = WORK / "items.json"
 VERDICTS = WORK / "verdicts"
+REPORT_STEM = "kb-outside"
+FIXES_SOURCE = None     # a function returning [(ref, text, context, home_doc)]; None: outside_fixes
+
+
+def use_workspace(name, report_stem, fixes_source):
+    """Run this pass's machinery (grouping, gate, rescan, landing, report) over
+    another list of fixes with its own items and verdicts (kbfollowup.py)."""
+    global WORK, ITEMS, VERDICTS, REPORT_STEM, FIXES_SOURCE
+    WORK = REPO / "workspace" / name
+    ITEMS = WORK / "items.json"
+    VERDICTS = WORK / "verdicts"
+    REPORT_STEM = report_stem
+    FIXES_SOURCE = fixes_source
 RUNS = kbverify.RUNS
 
 STATUSES = ("done_already", "fixed", "declined", "developer")
@@ -122,7 +135,7 @@ def group(fixes):
 
 
 def build_items():
-    fixes = outside_fixes()
+    fixes = (FIXES_SOURCE or outside_fixes)()
     by_ref = {f[0]: f for f in fixes}
     groups, keys = group(fixes)
     groups.sort(key=lambda g: (-len(g), g[0]))
@@ -156,8 +169,9 @@ def render(item):
         out.append("  the fix asked for: %s" % m["outside"])
         out.append("")
     out.append("The verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json "
-               "(V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>) or "
-               "workspace\\kb_refused\\verdicts\\<id>.json (F:<id>).")
+               "(V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), "
+               "workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or "
+               "workspace\\kb_outside\\verdicts\\<id>.json (O:<id>).")
     return "\n".join(out)
 
 
@@ -512,7 +526,7 @@ def main():
     if a.cmd == "report":
         s = summarize(a.stopped)
         RUNS.mkdir(parents=True, exist_ok=True)
-        written = [RUNS / ("%s-kb-outside-summary.json" % a.date)]
+        written = [RUNS / ("%s-%s-summary.json" % (a.date, REPORT_STEM))]
         written[0].write_text(json.dumps(s, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         if not a.stopped:
             archive = []
@@ -522,7 +536,7 @@ def main():
                     v, _ = kbverify._load(p)
                     if v is not None:
                         archive.append(dict(v, item=render(it)))
-            written.append(RUNS / ("%s-kb-outside-verdicts.json" % a.date))
+            written.append(RUNS / ("%s-%s-verdicts.json" % (a.date, REPORT_STEM)))
             written[1].write_text(json.dumps(archive, ensure_ascii=False, indent=1) + "\n",
                                   encoding="utf-8")
         print(json.dumps({"written": [str(p) for p in written], "complete": s["complete"],

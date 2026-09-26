@@ -9,9 +9,10 @@
  * a play command takes.
  *
  * Note on the original build flags: the request-staging routines here come
- * from the block from 0003bade to 0003c96x, which was not compiled with the
- * flag set the rest of the game was -- every function in that block opens with
- * PUSH <frame size> / CALL __CHK, the stack probe that -s removes and that no
+ * from the block from 0003bade to 0003c97b, which was not compiled with the
+ * flag set the rest of the game was -- every function in that block
+ * except the frameless leaf fdps_cd_status_is_not_busy opens with PUSH
+ * <frame size> / CALL __CHK, the stack probe that -s removes and that no
  * other game function carries.  The rebuild has one flag set for every unit
  * (rebuild_info/build_flags.md), so what it builds from this file is the same
  * code without the probe, and the probe is not written out below.

@@ -29,7 +29,7 @@
 | `analyze_ail_matches.py` | 把 AIL 查詢結果換算成涵蓋率、與 pool 判定不一致的個案、兩邊 function 數的對帳 |
 | `build_contradiction_worklist.py` | 替每個不一致的 function 攤一份證據包 |
 | `reread_contradictions.js` | 票 14.1 的 workflow：一個不一致一個 agent，重判、落地、跑 gate、回掃 |
-| `extract_watcom_symbols.py` | 用 `wlib -l` 取出實際連結的四個程式庫的全部公開符號，命名的對照基準 |
+| `extract_watcom_symbols.py` | 用 `wlib -l` 取出實際連結的三個程式庫與啟動 object `CSTRTX3S.OBJ` 的全部公開符號，命名的對照基準 |
 | `build_symbol_renames.py` | 算出哪些 function 可以直接改成程式庫的符號名，哪些要交給 agent |
 | `ApplyLibrarySymbolNames.java` | 把機械改名寫進 Ghidra，兩段式避免互換名稱時撞名 |
 | `sync_verdict_names.py` | 把改名同步回 pool 判定檔，兩邊的記錄不會分岔 |

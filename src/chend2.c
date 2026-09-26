@@ -190,9 +190,11 @@ void fdps_chapter_17_end(void)
    A LITERAL NINE, AND NOT THE LIVE UNIT COUNT (rebuild_info/pitfalls.md).  The
    neighbouring chapter-end code walks data_fdps_map_unit_count; this loop does
    not read it, has no side test and no early exit.  Those nine slots are the
-   roster in join order, 蘭迪斯 through 琴琴, which is exactly the set the
-   church will promote -- PROMOTABLE_PORTRAIT_COUNT in src/church.c is 9 as
-   well.  瑪麗安 joins in chapter 15 at slot 9 and is never inspected, so a
+   roster in join order, 蘭迪斯 through 琴琴.  That is NOT the set the church
+   will promote: the church tests portrait_id < PROMOTABLE_PORTRAIT_COUNT
+   (src/church.c), characters 0 to 8, which takes in 瑪麗安 (character 5, slot
+   9) and leaves out 蓋亞 (character 9, slot 7), who sits inside this range and
+   can never change class.  瑪麗安 joins in chapter 15 at slot 9 and is never inspected, so a
    loop written over every live unit or over the whole roster would let a
    promoted 瑪麗安 deny a 勇者徽章 the original grants. */
 #define CH18_PROMOTION_SWEEP_UNITS 9
@@ -420,9 +422,11 @@ void fdps_chapter_18_end(void)
    fdps_roster_write_back_battle_units masks the unit flags byte down to bit 0
    and skips restoring current hit points from the maximum whenever that bit
    survives, so banking the party first and healing it afterwards carries the
-   whole party into chapter 20 recorded as dead -- and after an accepted duel,
-   which stamps that bit on everyone but 裘娜, fdps_roster_revive_fallen_members
-   then bills the player for reviving all of them.
+   party into chapter 20 recorded as dead after an accepted duel, which stamps
+   that bit on everyone but 裘娜 -- every member but 裘娜 and 蘭迪斯, whom the
+   writeback skips altogether as a retired character 0, leaving his roster
+   record as it was before the battle -- and fdps_roster_revive_fallen_members
+   then bills the player for reviving them.
 
    THE SWEEP WALKS THE LIVE UNIT COUNT, data_fdps_map_unit_count, and not a
    literal: CMP EAX,[0x00060150] / JL at 0003b0cf.  The sibling at chapter 15
@@ -684,8 +688,8 @@ void fdps_chapter_21_end(void)
    THE SWEEP IS LOAD-BEARING HERE, which is what separates this handler from
    the chapter 20 and 21 ones it is otherwise a copy of.  Chapter 22's
    勝利條件 is 擊倒巫湯婆婆, one named boss and not 敵人全滅, and
-   fdps_chapter_22_post_action (chpost2.h) is the only handler in its own
-   family that does not forward to fdps_battle_check_default_end_conditions at
+   fdps_chapter_22_post_action (chpost2.h), like chapter 23's, does not
+   forward to fdps_battle_check_default_end_conditions at
    all: it declares no victory, so the clear is the scripted boss-defeat
    event's to write.  The chapter is therefore reached with the boss's minions
    -- the map's 狼人戰士, 蛇魔使, 幽魂 and 骷髏兵 groups, none of which the
@@ -962,8 +966,11 @@ void fdps_chapter_23_end(void)
    fdps_roster_write_back_battle_units masks the unit flags byte down to bit 0
    and skips restoring current hit points from the maximum whenever that bit
    survives, so banking the party first and healing it afterwards carries the
-   whole party into chapter 25 recorded as dead -- and
-   fdps_roster_revive_fallen_members then bills the player for every one.
+   party into chapter 25 recorded as dead after an accepted duel -- every
+   member but 裘娜 and 蘭迪斯, whom the writeback skips altogether as a retired
+   character 0, leaving his roster record as it was before the battle -- and
+   fdps_roster_revive_fallen_members then bills the player for every one of
+   them.
 
    THE RECOVERY ALSO RUNS BEFORE THE ENEMY SWEEP, which is where this handler
    and chapter 19's part company: chapter 19 never sweeps at all, and here

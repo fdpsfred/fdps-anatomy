@@ -299,7 +299,7 @@ extern void fdps_unit_equip_window(int unit_index);
    The two inputs are read one byte each and the rest of both records is
    ignored.  The class code is byte +0x20 of the unit record,
    fdps_unit_record's clazz, and it goes to fdps_get_class_equip_record RAW --
-   without the +1 that callers of fdps_get_class_record apply, because
+   without the +1 that the per-unit callers of fdps_get_class_record apply, because
    PROEQU.DAT has no leading default row (table.h).  The item's type is byte
    +0x00 of its ITEM.DAT record, the same field fdps_unit_find_equipped_slot
    classifies with: weapons 0x01..0x15, armour 0x16..0x27, consumables and

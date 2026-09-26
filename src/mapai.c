@@ -600,13 +600,20 @@ int fdps_map_actor_move_toward_nearest_opponent(int unit_index, int side_select)
 
 /* Bit 0x40 of the actor's behaviour byte, AND AL,0x40 at 00012c72.  It is not
    part of the behaviour nibble the dispatcher above reads; here it is the flag
-   that decides the two ties below in the physical attack's favour.  Nothing in
-   the shipped game can raise it -- every write to record byte 0x34 anywhere in
+   that decides the two ties below in the physical attack's favour.  No write
+   in the image ever raises it -- every write to record byte 0x34 anywhere in
    the image either stores an immediate with the bit clear or merges a low
-   nibble into (old & 0xf0), and across all 63 MAP*.DAT files the deployment
-   byte it is seeded from never exceeds the low nibble -- so both ties always
-   take their clear-bit arm.  It is still read here because the original reads
-   it. */
+   nibble into (old & 0xf0) -- and across all 63 MAP*.DAT files the deployment
+   byte it is seeded from never exceeds the low nibble, so for every unit built
+   from a deployment record both ties always take their clear-bit arm.  Roster
+   members are the exception: fdps_roster_add_character never writes +0x34,
+   the roster block is malloc'd and never cleared, and
+   fdps_build_map_unit_array copies roster records whole.  fdps_title_demo puts
+   the twelve roster members on side 1 under the map AI with only the low
+   nibble reset, so in the title demo the bit is whatever heap bytes the roster
+   block held -- never initialised, and already freed once a demo has run
+   (roster.c, title.h, rebuild_info/pitfalls.md).  It is read here because the
+   original reads it. */
 #define AI_BEHAVIOR_PHYSICAL_TIE_BIT 0x40
 
 /* CMP dword ptr [0x00063f90],0x12 / JGE at 00012d1b: below this spell id the
@@ -614,8 +621,9 @@ int fdps_map_actor_move_toward_nearest_opponent(int unit_index, int side_select)
    the physical damage estimate, and at it and above by the flag bit instead.
    It is not a boundary in the spell table -- plain HP powers sit on both sides
    of it -- but a literal the author chose, and its effect is that above it the
-   tie is decided by a flag that is always clear and the physical attack never
-   wins it. */
+   tie is decided by the flag bit, which is always clear for units built from
+   deployment records, so for them the physical attack never wins it (the title
+   demo's roster units are the exception described above). */
 #define MAP_AI_SPELL_POWER_TIE_LIMIT 0x12
 
 /* 00012c10.  Runs all three action searches for one AI actor and carries out

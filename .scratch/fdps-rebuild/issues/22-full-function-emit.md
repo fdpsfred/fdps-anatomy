@@ -52,7 +52,7 @@ emit 或 review 當下答不出來的等價性疑慮記進 `tools/code_emit/data
 
 - **收斂門檻有效**：疑慮從 `t22-01` 的 2.4 條／支降到約 0.3–0.7 條／支，抽驗零疑慮的 function 也沒有反向失效（票 22.1）。
 - **`same_as` 規則有效**：reviewer 撞到 emitter 記過的同一件事時，只記「emit#N」加上自己多查到的部分。
-- **旗標組不是全域統一的**：CD 模組（`0x3bade`–`0x3c93f`，32 支）是用 `-os` 編的，其餘用定案旗標組，逐 byte 判定，見 `rebuild_info/build_flags.md`。
+- **旗標組不是全域統一的**：CD 模組（`0x3bade`–`0x3c97b`，33 支，其中 32 支帶 `__CHK`）是用 `-os` 編的，其餘用定案旗標組，逐 byte 判定，見 `rebuild_info/build_flags.md`。
 - **gate 過去讀不到連結器警告**（wlink 的警告寫成 `Warning(NNNN)`），重複定義被忽略時照樣 PASS。已修，重複定義升級成錯誤。
 - **拆檔之後重抓工作清單繼續跑**，不再整批收工。本票共拆 12 次檔。
 - **進度記錄寫錯層級會讓 function 被 emit 兩次**，已加結構性防呆：`next_batch.py` 讀到 `functions` 外層有位址形狀的 key 就報錯停下。實際沒有任何一支被做兩次。

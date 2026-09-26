@@ -12,7 +12,7 @@
 | `sweep_ticket22.js` | 票 22 收尾的疑慮總掃。收拾工作區 → 凍結疑慮清單 → 一個 agent 把未決疑慮按根因分群 → 每群一個唯讀調查 agent 平行判定、寫判定檔 → 仍有未決的群再回掃一次（可讀其他群的判定檔）→ 序列落地：要改 code 的走修改、獨立審查、build gate，要改 Ghidra 的走 bookkeeper，其餘一次轉錄 → 知識庫整合。已標 `resolved` 的疑慮每個位址一群，只複查標籤不重推結論。可續跑：判定檔與落地 commit 就是進度 |
 | `sweep.py` | 總掃的檔案面，workflow 本身沒有檔案系統。`items` 凍結疑慮清單並把 `same_as` 鏡像併回它指的那筆，`check-clusters`／`check-finding` 驗分群與判定檔是否完整（判斷「做完了沒」看檔案不看 agent 自報），`plan` 讀出每群的進度，`apply` 把判定無損轉錄進 `emit_issues.json`，`handoff` 列出交給票 23／24 的，`--selftest` 驗鏡像解析、驗證與轉錄 |
 | `emit_ticket21.js` | 票 21 的版本，工作清單由 `args` 帶入、沒有拆檔段。留著當該票的紀錄，新工作用票 22 那支 |
-| `build_emit.py` | 四個子命令。`build` 先掃 `src/`／`tests/` 有沒有 Ghidra 反編譯器的預設變數名稱（有就在啟動 DOSBox 之前以 `E9001` 中止），再把兩邊全部編譯**連結兩次**成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析、兩段式連結的判定與命名掃描的雙向正確性 |
+| `build_emit.py` | 四個子命令。`build` 先掃 `src/`／`tests/` 有沒有 Ghidra 反編譯器的預設變數名稱（有就在啟動 DOSBox 之前以 `E9001` 中止），再把兩邊全部編譯、**最多連結兩次**（第一次有未定義符號才帶 stub 模組再連一次）成 `EMITTEST.EXE`；`run` 在 DOSBox-X 裡執行它並讀回測試紀錄；`all`（預設）依序跑兩者；`selftest` 不碰 DOSBox-X，驗證接線產生、紀錄解析、兩段式連結的判定與命名掃描的雙向正確性 |
 | `gen_stubs.py` | 產生第二次連結用的零填充 stub 模組。輸入是第一次連結報出的未定義符號，型別與大小取自 `data/routing.json`。`--selftest` 驗型別對應與該拒絕的三類符號 |
 | `gen_types.py` | 從 `ghidra_snapshot/data_types.txt` 產生 `src/fdpstype.h` 與 `tests/fdpstype.c`。`--check` 只驗不寫，`--selftest` 驗洞的填補與錯誤佈局的拒絕 |
 | `emit_order.py` | 從 call graph 算出 callee 先於 caller 的 emit 順序，產出 `workspace/code_emit/emit_order.json` |
@@ -29,7 +29,7 @@
 | `data/emit_state.json` | 進度的正本，進版控。續跑的唯一依據。**不記檔案落點** |
 | `data/emit_issues.json` | 等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是篩選依據，缺了就等於不存在；reviewer 與 emitter 記到同一件事時，reviewer 那則帶 `same_as` 指回去（`emit#N`），總掃據以併成一則。總掃落地後每則多一個 `sweep` 欄位（哪一群、什麼裁決），狀態多一種 `handoff`（帶 `handoff_to`：`23` 或 `24`） |
 
-`workspace/code_emit/` 下的兩個產出值得單獨提：`undefined.json` 是第一次連結報出的未定義符號，也就是票 23 的權威工作清單，每次建置重新產生；`emit_order.json` 是 callee 先於 caller 的 emit 順序，call graph 變動後重跑 `emit_order.py` 更新。
+`workspace/code_emit/` 下的兩個產出值得單獨提：`undefined.json` 是第一次連結報出的未定義符號，也就是資料 emit 的權威工作清單，每次建置重新產生（兩次連結的意義見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md)）；`emit_order.json` 是 callee 先於 caller 的 emit 順序，call graph 變動後重跑 `emit_order.py` 更新。
 
 落點的判定依據與超標處置規則由 [`rebuild_info/code_layout.md`](../../rebuild_info/code_layout.md) 擁有，本目錄只放表與產生器。
 
@@ -55,7 +55,7 @@ Workflow({ scriptPath: "tools/code_emit/emit_ticket22.js",
 
 **可重跑**：`emit_state.json` 是進度的正本，每支通過的 function 各自一個 commit，所以任何中斷最多損失飛在半空的那一支。跑完一次就再呼叫一次，它會從 `next_batch.py` 拿到接下來的一批。
 
-被 usage limit 就地殺掉也一樣：下一次呼叫的第一段（Recover）自己丟掉 `src/`／`tests/` 的殘骸、把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。`src/`／`tests/` 以外的地方髒了它會停下來報告而不是自行處理，那時才需要人。
+被 usage limit 就地殺掉也一樣：下一次呼叫的第一段（Recover）自己丟掉界線內的殘骸——界線是 pipeline 各段自己會寫的六個路徑：`src/`、`tests/`、`data/`、`ghidra_snapshot/`（這一項改為重新匯出而不是還原）、`build_routing.py` 與 `rebuild_info/code_layout.md`——把飛在半空的那一支從 `in_flight` 改成 `interrupted` 送回工作清單，不需要人先去 `git status`。界線與理由見 [`rebuild_info/emit_pipeline.md`](../../rebuild_info/emit_pipeline.md) 的「中斷復原」。界線外的地方髒了它會停下來報告而不是自行處理，那時才需要人。
 
 疑慮總掃（全部 function 落地之後）：
 
@@ -81,7 +81,7 @@ python tools/code_emit/emit_order.py
 - 原始碼暫存成兩個 guest 目錄 `C:\SRC` 與 `C:\TST`，物件檔分別落在 `OBJS\` 與 `OBJT\`。理由是測試檔與生產檔同名（`tests/menu.c` 對 `src/menu.c`），攤平在同一個目錄會互相覆蓋。
 - 暫存區每次重建。沿用舊的會讓已經從版本庫刪掉或改名的檔案繼續從殘留副本被編進去。
 - 光碟映像在時就掛、不在就不掛。測試映像沒有任何東西讀光碟，把它變成硬相依會讓「這台機器沒有光碟映像」被報成閘門失敗。
-- **兩次連結都寫 map**（`out/EMITTEST.MAP`，第二次覆蓋第一次，所以它永遠描述磁碟上那個映像）。[`tools/data_emit/check_data.py`](../data_emit/_index.md) 從它取每個全域的連結位址去與原版比對。
-- **連結跑兩次，第一次的未定義符號是預期產物而不是錯誤。** 第一次不帶 stub，報出來的就是「已 emit 的程式碼要、但還沒有人定義」的完整清單，落檔到 `workspace/code_emit/undefined.json`；第二次帶上 `gen_stubs.py` 產生的零填充模組，必須乾淨。判定用的是第二次的結果。
+- **每次連結都寫 map**（`out/EMITTEST.MAP`，有第二次連結時覆蓋第一次，所以它永遠描述磁碟上那個映像）。[`tools/data_emit/check_data.py`](../data_emit/_index.md) 從它取每個全域的連結位址去與原版比對。
+- **連結最多跑兩次，第一次的未定義符號是預期產物而不是錯誤。** 第一次不帶 stub，報出來的就是「已 emit 的程式碼要、但還沒有人定義」的完整清單，落檔到 `workspace/code_emit/undefined.json`；清單不是空的才跑第二次，帶上 `gen_stubs.py` 產生的零填充模組，必須乾淨。有第二次時判定用的是第二次的結果。
 - **stub 模組不進 `src/`。** 它每次建置重新產生，落在暫存區。放進 `src/` 就會與真的 emit 出來的定義混在一起，一百支 function 之後分不出誰是誰。
 - **`src/fdpstype.h` 與 `tests/fdpstype.c` 是產生物。** 改 struct 佈局要改 Ghidra、重匯出快照、重跑 `gen_types.py`，不手改這兩個檔。

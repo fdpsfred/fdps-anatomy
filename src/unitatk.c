@@ -119,12 +119,15 @@ unsigned char data_fdps_battle_last_hit_or_miss_flag;
    guest character and the blow pays nothing. */
 #define FIRST_ENEMY_PORTRAIT_ID 0x3c
 
-/* Portrait ids above 10 are 蘭斯洛特 and every guest or NPC unit, as opposed
-   to the eleven permanent roster characters at 0..10.  Such an attacker has 30
-   added to the level it divides the award by, which is what keeps a guest from
-   farming experience the party keeps. */
-#define LAST_PERMANENT_ROSTER_PORTRAIT_ID 10
-#define GUEST_LEVEL_PENALTY 0x1e
+/* The divisor is the attacker's own level, raised by 30 whenever its portrait
+   id is above 10.  The test is on the portrait id itself and not on whether
+   the class has been promoted: as written it catches 蘭斯洛特 (id 0x0b) as
+   well as every promoted form (0x0f and up) and the non-party portraits, so
+   writing it as "is a promoted class" would hand him more experience than the
+   original does.  assets/characters.md has twelve player characters at ids
+   00..0b, so 10 is not the line between the roster and anything else. */
+#define XP_PENALTY_PORTRAIT_ID_THRESHOLD 10
+#define XP_ATTACKER_LEVEL_PENALTY 0x1e
 
 /* Which of the unit gauge sheet's three graphics fills the target's bar, from
    CMP byte ptr [EAX+0x6],0x0 / JNZ at 0001c3c5: a side byte of 0 picks graphic
@@ -401,9 +404,10 @@ int fdps_unit_resolve_attack_hit(int attacker_unit_index,
     attacker_class = fdps_get_class_record(class_record_index);
 
     /* Both levels are copied out as BYTES and stay bytes.  The attacker's is
-       what the guest penalty is added to, with ADD byte ptr [EBP-0x8],0x1e at
-       0001ca48, so the sum wraps at 256 rather than widening -- a level 230
-       guest divides by 4 and not by 260. */
+       what the portrait-id level penalty is added to, with ADD byte ptr
+       [EBP-0x8],0x1e at 0001ca48, so the sum wraps at 256 rather than
+       widening -- a penalised attacker at level 230 divides by 4 and not
+       by 260. */
     attacker_level = attacker->level;
     target_level = target->level;
 
@@ -568,9 +572,9 @@ int fdps_unit_resolve_attack_hit(int attacker_unit_index,
         enemy = fdps_get_enemy_record(target->portrait_id -
                                       FIRST_ENEMY_PORTRAIT_ID);
 
-        if (attacker->portrait_id > LAST_PERMANENT_ROSTER_PORTRAIT_ID) {
+        if (attacker->portrait_id > XP_PENALTY_PORTRAIT_ID_THRESHOLD) {
             attacker_level = (unsigned char)
-                             (attacker_level + GUEST_LEVEL_PENALTY);
+                             (attacker_level + XP_ATTACKER_LEVEL_PENALTY);
         }
 
         /* Both levels and the reward reach the multiply and the divide as

@@ -621,8 +621,12 @@ void fdps_chapter_21_post_action(void)
    第22章 巫湯婆婆 勝利條件 擊倒巫湯婆婆, one named boss rather than 敵人全滅,
    and the clear is written by the scripted fdps_chapter_22_event_boss_defeat
    at 000388b0, whose MOV dword ptr [0x00069da0],0x2 at 00038936 sits on every
-   path out of that handler.  Adding the forward here would let the chapter
-   clear itself the moment the last minion fell, with the boss still standing.
+   path out of that handler.  The boss is herself a side-0 record, MAP21.DAT
+   record 7, so while she stands the shared sweep never clears the chapter
+   either; a forward added here changes the outcome only when she is retired
+   without her death script running -- a poison death
+   (program_info/known_bugs.md item 23) -- which the original can then never
+   clear and the forwarded version clears once every side-0 unit is down.
 
    The store carries no "only while the code is still 0" guard, unlike the two
    the shared test puts around its own writes, and copying that guard here by
@@ -709,25 +713,28 @@ void fdps_chapter_22_post_action(void)
    There is no CALL 0x0003a2e0 here and that is deliberate rather than a missing
    line.  The guide gives 第23章 死神冥河 勝利條件 擊倒死神 -- one named boss,
    not 敵人全滅 -- so the clear is the scripted fdps_chapter_23_event_boss_defeat
-   at 00038950 to write, and a forward added here would clear the chapter the
-   moment the last minion fell with the 死神 still standing.
+   at 00038950 to write.  A forward added here would not clear the chapter
+   early: the 死神 is a side-0 record, MAP22.DAT record 52, so the shared sweep
+   finds him standing until he falls.  It would lose it instead: chapter 23's
+   id, 0x16, is not one the shared test substitutes slot 3 for, so it would ask
+   about slot 0, and the 蘭迪斯 there is retired by ICON22.DAT's opening
+   RETIRE_UNIT -- the first action would record a defeat.
 
    Unit slot 3 is 法蓮娜, the first of the chapter's two stated 失敗條件: unit
    slot i is roster slot i, the roster is in join order and is never permuted,
    and chapter 23 deploys 蘭迪斯以外的所有人, so the slot 0 the shared test
-   watches in most chapters belongs to a character who is not on this map at
-   all.  fdps_chapter_23_init parking the map cursor on unit 3 is the same
+   watches in most chapters holds a 蘭迪斯 the opening cut-scene has already
+   retired.  fdps_chapter_23_init parking the map cursor on unit 3 is the same
    reading of the chapter.
 
-   Slot 0x1f is NOT a roster slot.  fdps_chapter_23_end sweeps unit indices 11
-   and up as the map's own units and leaves 0 through 10 alone as the eleven
-   player units this chapter deploys, so 0x1f is one of map22.dat's own
-   deployment records rather than a party member, and which one it is is not
-   settled here -- the deployment record format has not been decoded yet and entry 0x14
-   of FDETXT23.TXT is a stream of font glyph indices rather than readable text.
-   The chapter's second stated 失敗條件 is 蘭迪斯從戰場上方消失（二十回合）,
-   which is the only other loss the guide gives, but the identification of that
-   clause with this slot is not established.
+   Slot 0x1f is NOT a roster slot.  The eleven player slots come first and
+   map22.dat's wave-0 records 1 to 21 follow them in record order, so slot 0x1f
+   is record 21: side 1, character 0x24, AI behaviour 7 with destination
+   (24, 3), starting from MAP22.COD's (24, 24) -- the last of the column of the
+   dead walking to the gate of hell.  It retires when it reaches the gate, as
+   it does when an enemy strikes its one hit point down, and that is the
+   chapter's second stated 失敗條件, 蘭迪斯從戰場上方消失: entry 0x14 of
+   FDETXT23.TXT is 尤利安's 蘭迪斯！！！ and 法蓮娜's 不～要～～～！.
 
    The address reaches the dispatchers only as the dword at 000602e4,
    twenty-two entries into the table based at 0006028c, which is why the
@@ -737,8 +744,8 @@ void fdps_chapter_22_post_action(void)
 #define CHAPTER_23_FARLENA_UNIT_INDEX 3
 
 /* The map unit whose retirement is the chapter's second defeat, announced with
-   entry 0x14 before the code is written.  Which unit map22.dat puts there is
-   not established; see the note above. */
+   entry 0x14 before the code is written: map22.dat's deployment record 21, the
+   last of the dead walking to the gate (see the note above). */
 #define CHAPTER_23_SECOND_LOSS_UNIT_INDEX 0x1f
 
 /* Entry 0x14 of the chapter text block, the line the second defeat paints. */

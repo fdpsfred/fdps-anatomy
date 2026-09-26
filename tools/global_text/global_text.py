@@ -675,7 +675,7 @@ def render_global(texts, readers, header_readers):
     item_gap = spells.first - items.last - 1
     item_ff = items.base + 0xff
     for key, note in (
-            ("race_names", "種族代碼 0–6 各有名稱，後面三條是空字串。"),
+            ("race_names", "種族代碼 0–6 各有名稱，剛好填滿本區。表尾之後 `0x09e`–`0x0a0` 三條是空字串，再來就是職業名。"),
             ("class_names", f"職業代碼 `0x00`–`0x{classes.last - classes.base:02x}` 共 {classes.last - classes.first + 1} 個。"),
             ("item_names", f"物品編號 `0x00`–`0x{item_count - 1:02X}` 共 {item_count} 個，與 `ITEM.DAT` 有內容的範圍相同（[`assets/items.md`](../items.md)）。"
                            f"表尾之後是 {item_gap} 條空字串，再來就是法術名：照公式，物品編號 `0x{item_count:02X}`–`0x{item_count + item_gap - 1:02X}` 的名稱是空字串，"

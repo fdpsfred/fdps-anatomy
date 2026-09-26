@@ -1521,14 +1521,14 @@ static void ch28_has_no_one_shot_latch(void)
 
 /* The two character ids at record +7 that the revival accepts, and the four
    ids either side of them, which it must not. */
-#define CH30REV_WRAITH_ID    0x55
-#define CH30REV_SKELETON_ID  0x6a
+#define CH30REV_SKELETON_ID  0x55
+#define CH30REV_WRAITH_ID    0x6a
 
 /* The scripted spawn tiles the two types are measured from. */
-#define CH30REV_WRAITH_ANCHOR_X   5
-#define CH30REV_WRAITH_ANCHOR_Y   12
-#define CH30REV_SKELETON_ANCHOR_X 15
-#define CH30REV_SKELETON_ANCHOR_Y 13
+#define CH30REV_SKELETON_ANCHOR_X 5
+#define CH30REV_SKELETON_ANCHOR_Y 12
+#define CH30REV_WRAITH_ANCHOR_X   15
+#define CH30REV_WRAITH_ANCHOR_Y   13
 
 /* The staged map.  Both anchors are below its bottom row on purpose. */
 #define CH30REV_GRID_W 8
@@ -1817,7 +1817,7 @@ static void ch30rev_record_shape_matches_the_offsets(void)
 
 /* The two accepted ids are equality tests and not a range: the four ids either
    side of them are staged dead, one at a time, and none of them is touched.
-   0x54 and 0x56 straddle 死靈 and 0x69 and 0x6b straddle 白骨戰士, so an
+   0x54 and 0x56 straddle 白骨戰士 and 0x69 and 0x6b straddle 死靈, so an
    off-by-one on either compare, or a range test written across the pair, would
    show here.  Nothing runs, so this case needs no game file. */
 static void ch30rev_only_the_two_undead_ids_are_revived(void)
@@ -1845,7 +1845,7 @@ static void ch30rev_only_the_two_undead_ids_are_revived(void)
    nothing runs and no game file is needed. */
 static void ch30rev_a_living_undead_is_left_alone(void)
 {
-    static int accepted_ids[2] = {CH30REV_WRAITH_ID, CH30REV_SKELETON_ID};
+    static int accepted_ids[2] = {CH30REV_SKELETON_ID, CH30REV_WRAITH_ID};
     static int living_flags[2] = {CH30REV_FLAGS_IN_PLAY,
                                   CH30REV_FLAGS_ACTED_ONLY};
     int id;
@@ -1868,14 +1868,14 @@ static void ch30rev_a_living_undead_is_left_alone(void)
 }
 
 /* The sweep is bounded by data_fdps_map_unit_count and by nothing else: a dead
-   死靈 is staged at index 1 with the count left on 1, so the record exists and
-   qualifies but is one past the bound.  A walk that ran to the end of the array,
+   白骨戰士 is staged at index 1 with the count left on 1, so the record exists
+   and qualifies but is one past the bound.  A walk that ran to the end of the array,
    or one that used <= against the count, would revive it. */
 static void ch30rev_the_sweep_stops_at_the_unit_count(void)
 {
-    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+    ch30rev_stage(CH30REV_SKELETON_ID, 1);
     ch30rev_units[0].portrait_id = CH30REV_PORTRAIT_NO_SPRITE;
-    ch30rev_units[1].portrait_id = CH30REV_WRAITH_ID;
+    ch30rev_units[1].portrait_id = CH30REV_SKELETON_ID;
     ch30rev_units[1].flags = CH30REV_FLAGS_DEAD_AND_ACTED;
     ch30rev_units[1].pos_x = CH30REV_DEAD_START_X;
     ch30rev_units[1].pos_y = CH30REV_DEAD_START_Y;
@@ -1890,7 +1890,7 @@ static void ch30rev_the_sweep_stops_at_the_unit_count(void)
     ch30rev_unstage();
 }
 
-/* One dead 死靈 on an empty map.  Its anchor is (5, 12), the map is six rows
+/* One dead 白骨戰士 on an empty map.  Its anchor is (5, 12), the map is six rows
    deep and every cell is free and walkable, so the shortest Manhattan distance
    any cell can reach is 7 and exactly one cell reaches it: (5, 5).  That is the
    whole revival read back at once -- the tile, the cursor walked onto it, the
@@ -1902,14 +1902,14 @@ static void ch30rev_the_sweep_stops_at_the_unit_count(void)
    The DAC probe is the flash's last step: the fade runs the bias down to 0
    inclusive, so the final upload is the staged palette unbiased.  A loop that
    stopped at 1 would leave every component one higher. */
-static void ch30rev_the_wraith_lands_on_the_nearest_free_walkable_tile(void)
+static void ch30rev_the_skeleton_lands_on_the_nearest_free_walkable_tile(void)
 {
     ch30rev_ensure_archive();
     if (!ch30rev_archive_ready) {
         return;
     }
 
-    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+    ch30rev_stage(CH30REV_SKELETON_ID, 1);
 
     ch30rev_run();
 
@@ -1945,7 +1945,7 @@ static void ch30rev_a_tie_at_the_shortest_distance_keeps_the_last_cell(void)
         return;
     }
 
-    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_stage(CH30REV_SKELETON_ID, 3);
     ch30rev_set_blocker(1, 5, 5, 0);
     ch30rev_set_blocker(2, 5, 4, 2);
 
@@ -1977,7 +1977,7 @@ static void ch30rev_a_tile_over_the_terrain_limit_is_rejected(void)
         return;
     }
 
-    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_stage(CH30REV_SKELETON_ID, 3);
     ch30rev_set_blocker(1, 5, 5, 0);
     ch30rev_set_blocker(2, 5, 4, 2);
     ch30rev_set_tile_id(6, 5, CH30REV_TILE_ID_REJECTED);
@@ -1988,7 +1988,7 @@ static void ch30rev_a_tile_over_the_terrain_limit_is_rejected(void)
     CHECK_EQ((int) ch30rev_units[0].pos_x, 4);
     CHECK_EQ((int) ch30rev_units[0].pos_y, 5);
 
-    ch30rev_stage(CH30REV_WRAITH_ID, 3);
+    ch30rev_stage(CH30REV_SKELETON_ID, 3);
     ch30rev_set_blocker(1, 5, 5, 0);
     ch30rev_set_blocker(2, 5, 4, 2);
     ch30rev_set_tile_id(6, 5, CH30REV_TILE_ID_ACCEPTED);
@@ -2003,18 +2003,18 @@ static void ch30rev_a_tile_over_the_terrain_limit_is_rejected(void)
 }
 
 /* The two types measure from two different anchors, and which one is used comes
-   off the same record byte the gate tested.  A dead 白骨戰士 on the same empty
+   off the same record byte the gate tested.  A dead 死靈 on the same empty
    map is measured from (15, 13) rather than (5, 12), so the nearest free
    walkable cell is the bottom right corner (7, 5) and not (5, 5) -- the tile the
-   死靈 case above gets off the identical fixture. */
-static void ch30rev_the_skeleton_measures_from_its_own_anchor(void)
+   白骨戰士 case above gets off the identical fixture. */
+static void ch30rev_the_wraith_measures_from_its_own_anchor(void)
 {
     ch30rev_ensure_archive();
     if (!ch30rev_archive_ready) {
         return;
     }
 
-    ch30rev_stage(CH30REV_SKELETON_ID, 1);
+    ch30rev_stage(CH30REV_WRAITH_ID, 1);
 
     ch30rev_run();
 
@@ -2040,7 +2040,7 @@ static void ch30rev_a_revived_unit_is_not_revived_again(void)
         return;
     }
 
-    ch30rev_stage(CH30REV_WRAITH_ID, 1);
+    ch30rev_stage(CH30REV_SKELETON_ID, 1);
 
     ch30rev_run();
 
@@ -3171,10 +3171,10 @@ void run_chevt6_tests(void)
     RUN_TEST(ch30rev_only_the_two_undead_ids_are_revived);
     RUN_TEST(ch30rev_a_living_undead_is_left_alone);
     RUN_TEST(ch30rev_the_sweep_stops_at_the_unit_count);
-    RUN_TEST(ch30rev_the_wraith_lands_on_the_nearest_free_walkable_tile);
+    RUN_TEST(ch30rev_the_skeleton_lands_on_the_nearest_free_walkable_tile);
     RUN_TEST(ch30rev_a_tie_at_the_shortest_distance_keeps_the_last_cell);
     RUN_TEST(ch30rev_a_tile_over_the_terrain_limit_is_rejected);
-    RUN_TEST(ch30rev_the_skeleton_measures_from_its_own_anchor);
+    RUN_TEST(ch30rev_the_wraith_measures_from_its_own_anchor);
     RUN_TEST(ch30rev_a_revived_unit_is_not_revived_again);
     RUN_TEST(ch30w4_a_raised_latch_blocks_the_whole_body);
     RUN_TEST(ch30w4_deploys_wave_four_pans_and_latches);

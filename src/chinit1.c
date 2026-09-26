@@ -80,15 +80,20 @@
    THE ORDER IS THE ALGORITHM, and two steps of it are not visible in any
    data file.
 
-   The roster add runs BEFORE the state reset.  fdps_chapter_state_reset
-   deploys the map's player slots out of the roster array and stops at the
-   roster count, so the intuitive "initialise the chapter, then add the
-   character who joins it" order leaves 蘭迪斯 off chapter 1's map
-   entirely.  fdps_title_screen has just reset the roster count to 0 on the
-   new-game path, so slot 0 is where he lands.
+   The roster add runs BEFORE the state reset, but only its place ahead of the
+   cut-scene is load-bearing.  fdps_chapter_state_reset deploys the map's
+   player slots out of the roster array and stops at the roster count, yet the
+   array this handler's own reset builds does not survive: Icon00.dat opens
+   with SWITCH_MAP 0x20 at script offset 0x000, and its SWITCH_MAP 0x00 at
+   offset 0x51c calls fdps_chapter_state_reset again and rebuilds map 0 out of
+   the roster.  So an add moved behind the reset but still ahead of
+   fdps_icon_script_run puts 蘭迪斯 on the map all the same; only an add after
+   the cut-scene leaves him off chapter 1's map entirely, and the order here is
+   simply the original's.  fdps_title_screen has just reset the roster count to
+   0 on the new-game path, so slot 0 is where he lands.
 
-   The two writes on 索爾 run AFTER the cut-scene.  The state reset leaves
-   map00.dat's single player slot as the only unit in the array -- none of
+   The two writes on 索爾 run AFTER the cut-scene.  The rebuild at script
+   offset 0x51c leaves map00.dat's single player slot as the only unit in the array -- none of
    its 22 scripted deployments is tagged wave 0 -- and it is Icon00.dat that
    deploys wave 2 and then wave 1, which is what puts 索爾 at index 2.
    Performing the two stores before the script writes them into an array that
@@ -754,8 +759,9 @@ void fdps_chapter_07_init(void)
    RECORD -- MAP07.DAT's deployment 19, the LV15 費塔加 the note on
    CH08_JOINING_CHARACTER above takes apart.  It is tagged wave 1, and nothing
    this handler runs deploys wave 1 on map 7, so the record is still waiting
-   when the handler returns; the plate comment at 00037440 is the chapter's own
-   scripted event that brings him on later.  The roster record and the map
+   when the handler returns; the chapter's turn-scheduled event
+   fdps_chapter_08_event_for_turn (000372d0) brings him on later, playing
+   Icon7-1.dat on turn 3, whose DEPLOY_WAVE deploys wave 1.  The roster record and the map
    record are two different characters as far as the program is concerned.
 
    THE CUT-SCENE SPENDS ITSELF ON A DIFFERENT MAP AND PUTS THIS ONE BACK.
@@ -867,17 +873,22 @@ void fdps_chapter_08_init(void)
    the prologue and the RET is the EAX that carries the script name literal
    into the fourth call.
 
-   CHAPTER 9 IS THE FIRST CHAPTER WHERE THE ADD-BEFORE-REBUILD ORDER IS
-   OBSERVABLE.  MAP08.DAT declares EIGHT player slots -- byte +1 of the block
+   IN CHAPTER 9 THE ADDS MUST PRECEDE THE CUT-SCENE, AND THAT IS OBSERVABLE.
+   MAP08.DAT declares EIGHT player slots -- byte +1 of the block
    (src/rsrc.c) -- and the party is six members strong when the chapter opens:
    chapters 1 to 4 add one each, chapters 5 and 6 add nobody, chapter 7 adds
    裘娜 and chapter 8 adds 費塔加.  The two adds here take it to eight, which
    is exactly what the map asks for.  fdps_build_map_unit_array fills player
    slot i from roster slot i only while i is below the roster count and zeroes
-   the slot with UNIT_FLAG_RETIRED set otherwise (src/deploy.c), so a rebuild
-   that ran before these two adds would leave slots 6 and 7 as retired blanks
-   and neither 布蘭多 nor 蓋亞 would be on the map -- in a chapter whose losing
-   condition is either of them dying.  Chapters 4, 7 and 8 all put a member on
+   the slot with UNIT_FLAG_RETIRED set otherwise (src/deploy.c).  The array
+   this handler's own reset builds is not the one the battle is fought on:
+   ICON08.DAT's first SWITCH_MAP, 0x36 at script offset 4, discards it, and
+   its last, SWITCH_MAP 0x08 at offset 421 (0x1a5), calls
+   fdps_chapter_state_reset again and rebuilds map 8 out of the roster.  So the
+   adds could move behind the reset and slots 6 and 7 would still be 布蘭多
+   and 蓋亞; adds that ran after fdps_icon_script_run would leave slots 6 and 7
+   as retired blanks and neither of them on the map -- in a chapter whose
+   losing condition is either of them dying.  Chapters 4, 7 and 8 all put a member on
    the roster one slot past the last the map wanted, which is why the same
    ordering was invisible there.
 

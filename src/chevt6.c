@@ -347,9 +347,9 @@ void fdps_chapter_29_event_activate_all_enemies(int unit_index)
 
 /* The wave the ambush brings on, PUSH 0x4 at 0003978c, matched against byte
    0x15 of each 0x1a-byte deployment record of the resident MAP%02d.DAT block.
-   Four of map29.dat's records carry it: two of character id 0x55 and two of
-   character id 0x6a, all at level 0x14 -- the LV20 死靈 x2 and LV20 白骨戰士 x2
-   the guide's chapter 30 entry lists.  It is a literal and not the battle turn
+   Four of map29.dat's records carry it: two of character id 0x55 (白骨戰士)
+   and two of character id 0x6a (死靈), all at level 0x14 -- the LV20 死靈 x2
+   and LV20 白骨戰士 x2 the guide's chapter 30 entry lists.  It is a literal and not the battle turn
    counter the turn-scheduled handlers of this family push, so the same four
    arrive whenever the trigger tile is crossed. */
 #define CH30W4_WAVE 4
@@ -671,22 +671,22 @@ void fdps_chapter_30_event_deploy_wave_3(int unit_index)
 }
 
 /* The two character ids the revival accepts, out of CMP EAX,0x55 at 000107a5
-   and CMP EAX,0x6a at 000107b5.  0x55 is 死靈 and 0x6a is 白骨戰士, the two
+   and CMP EAX,0x6a at 000107b5.  0x55 is 白骨戰士 and 0x6a is 死靈, the two
    undead types map29.dat tags as chapter 30's wave 4; the assets/ tables name
    them.  Both loads are MOV AL,byte ptr [EAX+0x7] followed by AND EAX,0xff, so
    the byte is widened UNSIGNED and the compare is an equality on 0..255. */
-#define CH30_REVIVE_WRAITH_CHAR_ID   0x55
-#define CH30_REVIVE_SKELETON_CHAR_ID 0x6a
+#define CH30_REVIVE_SKELETON_CHAR_ID 0x55
+#define CH30_REVIVE_WRAITH_CHAR_ID   0x6a
 
 /* Where each type is put back, out of the four literals at 0001080f..00010826.
    They are the spawn coordinates map29.cod gives the two types' own placement
    records, and they are hard-coded here rather than read from the record the
    unit was deployed from -- a revived unit therefore heads back to the type's
    scripted corner of the map and not to where it died. */
-#define CH30_REVIVE_WRAITH_ANCHOR_X    5
-#define CH30_REVIVE_WRAITH_ANCHOR_Y    12
-#define CH30_REVIVE_SKELETON_ANCHOR_X  15
-#define CH30_REVIVE_SKELETON_ANCHOR_Y  13
+#define CH30_REVIVE_SKELETON_ANCHOR_X  5
+#define CH30_REVIVE_SKELETON_ANCHOR_Y  12
+#define CH30_REVIVE_WRAITH_ANCHOR_X    15
+#define CH30_REVIVE_WRAITH_ANCHOR_Y    13
 
 /* The movement grid's two-byte cells start after its 4-byte header, and byte 0
    of a cell carries 0x40 when a unit stands on the tile: ADD EAX,EDX / MOV
@@ -814,8 +814,8 @@ void fdps_chapter_30_revive_wave_4_undead(void)
          unit_index < data_fdps_map_unit_count;
          unit_index++) {
         unit = fdps_get_unit_record(unit_index);
-        if (unit->portrait_id != CH30_REVIVE_WRAITH_CHAR_ID
-            && unit->portrait_id != CH30_REVIVE_SKELETON_CHAR_ID) {
+        if (unit->portrait_id != CH30_REVIVE_SKELETON_CHAR_ID
+            && unit->portrait_id != CH30_REVIVE_WRAITH_CHAR_ID) {
             continue;
         }
         if (fdps_unit_is_retired(unit_index) == 0) {
@@ -834,12 +834,12 @@ void fdps_chapter_30_revive_wave_4_undead(void)
         grid_width = (int) *(short *) data_fdps_battle_move_grid_ptr;
         grid_height = (int) *(short *) (data_fdps_battle_move_grid_ptr + 2);
 
-        if (unit->portrait_id == CH30_REVIVE_WRAITH_CHAR_ID) {
-            anchor_x = CH30_REVIVE_WRAITH_ANCHOR_X;
-            anchor_y = CH30_REVIVE_WRAITH_ANCHOR_Y;
-        } else {
+        if (unit->portrait_id == CH30_REVIVE_SKELETON_CHAR_ID) {
             anchor_x = CH30_REVIVE_SKELETON_ANCHOR_X;
             anchor_y = CH30_REVIVE_SKELETON_ANCHOR_Y;
+        } else {
+            anchor_x = CH30_REVIVE_WRAITH_ANCHOR_X;
+            anchor_y = CH30_REVIVE_WRAITH_ANCHOR_Y;
         }
 
         best_distance = CH30_REVIVE_START_DISTANCE;

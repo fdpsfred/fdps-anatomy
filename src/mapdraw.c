@@ -91,7 +91,7 @@ int data_fdps_map_unit_status_icon_tick_counter;
    this list gives, so which of two equal-depth layers covers the other is
    fixed by their slot numbers.  Replacing this with qsort, which makes no
    stability promise, would reorder them silently
-   (rebuild_info/pitfalls.md).
+   (resource_info/terrain.md, and this function's plate comment).
 
    The bounds come out of the assembly's three loop tests and are not the
    obvious ones to guess: the fill loop runs while i < count (0002c236, JL),
@@ -802,7 +802,7 @@ void fdps_draw_map_units(unsigned char *scene_buf, unsigned char unused_flag)
    called several times in a single frame, once for the map and again by every
    window and animation that repaints the scene behind itself, and the layers
    must scroll one step across all of them while the picture is redrawn each
-   time (rebuild_info/pitfalls.md).
+   time (resource_info/terrain.md).
 
    A DEPTH OF EXACTLY 10 IS DRAWN BY NEITHER PASS.  The first loop takes
    strictly less and the second strictly more, so 10 parks a layer off screen

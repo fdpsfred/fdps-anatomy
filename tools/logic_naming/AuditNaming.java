@@ -10,7 +10,8 @@
 //              it yet. Expected while the ticket is in flight; the ticket is
 //              done when this reaches zero.
 //   violation  something a landed verdict got wrong: a named function that still
-//              has a param_N, a name that breaks the prefix rule, two addresses
+//              has a placeholder parameter (param_N, paramN, argN), a name that
+//              breaks the prefix rule, two addresses
 //              claiming one symbol, a named function with no plate comment, a
 //              convention this binary does not use.
 //
@@ -122,7 +123,10 @@ public class AuditNaming extends GhidraScript {
 
 			for (Parameter p : f.getParameters()) {
 				paramCount++;
-				if (p.getName().matches("param_\\d+")) {
+				// param_N is Ghidra's own default; paramN and argN are the hand-typed
+				// placeholders a verdict leaves when it never decided the argument's
+				// role. None of them says what the argument is.
+				if (p.getName().matches("(param_?|arg_?)\\d+")) {
 					violations.add("DEFAULT PARAMETER " + key + " " + name + " " + p.getName());
 				}
 			}

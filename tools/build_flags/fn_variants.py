@@ -99,8 +99,8 @@ def _chvw(read):
     end = s.index("\n}\n", start) + 3
     fn = s[start:end]
     guard = re.search(
-        r"if \(unit->portrait_id != (CH30_REVIVE_WRAITH_CHAR_ID)\s*"
-        r"&& unit->portrait_id != (CH30_REVIVE_SKELETON_CHAR_ID)\) \{\s*"
+        r"if \(unit->portrait_id != (CH30_REVIVE_SKELETON_CHAR_ID)\s*"
+        r"&& unit->portrait_id != (CH30_REVIVE_WRAITH_CHAR_ID)\) \{\s*"
         r"continue;\s*\}\s*if \(fdps_unit_is_retired\(unit_index\) == 0\) \{\s*"
         r"continue;\s*\}", fn)
     _need(guard, "the two early-continue guards in 00010760")

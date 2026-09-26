@@ -318,10 +318,11 @@ int fdps_map_actor_cast_chosen_spell(int unit_index, int side_select)
    neither checks one, so the size is a contract with them (aitarget.h). */
 #define ITEM_TARGET_BUFFER_BYTES 32
 
-/* Bit 0x10 of the ITEM.DAT use_distance byte at +0x10 is the shape: below it
-   the item covers an area and the reach is the separate use_radius byte at
-   +0x12, from it up the item covers a straight line whose length in tiles is
-   the low nibble.  CMP EAX,0xf / JLE at 00027233 picks the collector and
+/* 0x10 in the ITEM.DAT use_distance byte at +0x10 is the shape threshold,
+   compared as a number and not masked: below it the item covers an area and
+   the reach is the separate use_radius byte at +0x12, from it up the item
+   covers a straight line whose length in tiles is the byte less 0x10.
+   CMP EAX,0xf / JLE at 00027233 picks the collector and
    CMP EAX,0x10 / JGE at 000272d0 picks the presentation; the two spellings
    partition the byte the same way. */
 #define ITEM_LINE_SHAPE_BASE 0x10

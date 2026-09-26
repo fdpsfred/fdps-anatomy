@@ -31,5 +31,5 @@ python tools/cut_items/acquisition.py check   [--dump DIR]
 
 - 各章事件以常數給的物品（`GRANTS`）：每個以常數呼叫 `fdps_unit_add_item` 的地方，連同所在檔案。
 - 抽獎：三種大獎發不出來、只發藥草（`src/vilbar.c`）。
-- 神秘商店的暗號表只有 24 列（`src/village.c`），章節索引 25 的那一列讀到表外。
+- 秘密商店的暗號表只有 24 列（`src/village.c`），章節索引 25 的那一列讀到表外。
 - 入隊裝備取 `FRIAPRDA.DAT` 角色 `00`–`0B` 的 `+0x0C`–`+0x11`（`src/roster.c`）；戰鬥中的轉交只收陣營 2（`src/item.c`）。

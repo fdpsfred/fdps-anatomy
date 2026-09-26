@@ -660,17 +660,20 @@ int fdps_unit_is_ailment_immune(int unit_index)
    THE ZERO TEST IN FRONT OF THE DIVIDE IS NOT DEFENSIVE PADDING.  CMP dword ptr
    [EBP-0x4],0x0 / JZ at 0001e397 skips the CALL to rand() as well as the IDIV,
    so a pair whose two bytes are equal gains exactly the minimum AND DRAWS NO
-   NUMBER OUT OF THE SHARED rand() STREAM.  Half the pairs in FRILEVUP.DAT are
-   equal, so both halves of that are ordinary: dropping the test divides by zero,
+   NUMBER OUT OF THE SHARED rand() STREAM.  Of the 175 pairs in the 35
+   FRILEVUP.DAT rows that hold any growth, 26 are equal -- 15 of the 155 pairs
+   of the forms the party levels through, 00-0b and 0f-21, mostly the DX pair --
+   so both halves of that are ordinary: dropping the test divides by zero,
    and turning it into a rand() the result of which is thrown away shifts every
    later roll in the battle by one draw.
 
    The bound is EXCLUSIVE.  The remainder of a non-negative rand() is 0 through
-   range - 1, so the largest gain a pair can give is growth_pair[1] - 1.  The
-   growth table in assets/characters.md transcribes the file's two bytes as they
-   stand, so the upper figure printed there is one MORE than any level-up can
-   actually roll -- 蘭迪斯's AP row of 4-6 gains 4 or 5 and never 6
-   (rebuild_info/pitfalls.md).
+   range - 1, so when the two bytes differ the largest gain a pair can give is
+   growth_pair[1] - 1; an equal pair gains exactly that figure.  The growth
+   table in assets/characters.md transcribes the file's two bytes as they
+   stand, so for a pair whose bytes differ the upper figure printed there is
+   one MORE than any level-up can actually roll -- 蘭迪斯's AP row of 4-6 gains
+   4 or 5 and never 6 (rebuild_info/pitfalls.md).
 
    The figure travels through the global rather than through a register: MOV
    [0x00064038],EAX, then PUSH dword ptr [0x00064038] as fdps_draw_number's value

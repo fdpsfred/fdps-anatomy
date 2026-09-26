@@ -189,11 +189,16 @@ int fdps_collect_targets_in_line(int aim_x, int aim_y,
 
    CMP [EBP+0x20],0x10 / JGE at 00011e7a splits the two shapes and they are not
    two spellings of the same disc.  Below 0x10 the reach is whatever
-   fdps_move_grid_flood_fill_range spreads over the terrain, so an impassable
-   cell (flag bit 0x40) cuts it short; only the min_dist cut on that same call
-   is Manhattan.  From 0x10 up the reach is range_code - 0x10 tiles along the
-   centre's own row and column, no terrain is read, and the min_dist step is
-   skipped entirely (rebuild_info/pitfalls.md).
+   fdps_move_grid_flood_fill_range spreads, and in practice that is the
+   Manhattan diamond of radius range_code clipped to the map: the fill refuses
+   only a cell carrying bit 0x40, which fdps_move_grid_mark_zone_of_control
+   stamps on the tile a unit stands on, and all fifteen call sites reach here
+   on a grid fdps_map_grid_reset has cleared of both zone bits -- every routine
+   that marks zones resets again before it returns -- while the class record
+   handed to the fill (below) costs one for every terrain type.  Neither units
+   nor terrain stop it.  From 0x10 up the reach is range_code - 0x10 tiles
+   along the centre's own row and column, no terrain is read, and the min_dist
+   step is skipped entirely (rebuild_info/pitfalls.md).
 
    The flood fill is handed fdps_get_class_record(0) -- PUSH 0x0 at 00011e90 --
    which is PROMAP.DAT's leading default row and not any unit's class, so every

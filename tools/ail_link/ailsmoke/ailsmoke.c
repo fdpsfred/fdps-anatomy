@@ -14,8 +14,12 @@
  * installing the driver only proves the INI was parsed, while a sample that
  * reaches "playing" and then "done" has gone through the DMA buffers and the
  * mixer. And registering a timer callback rather than trusting the handle:
- * the timer ISR is what the game-side DPMI locking exists to protect, and
- * nothing else in the API reaches it.
+ * the game's own clock is a callback that fdps_audio_timer_install hands to
+ * AIL_register_timer, so this proves an application-registered callback is
+ * really invoked from the timer ISR. The ISR path itself is already reached
+ * by the tone: installing the DIG driver registers and starts
+ * AIL_internal_audio_mix_isr as a timer callback, so the mixer runs inside
+ * the same ISR the game-side DPMI locking exists to protect.
  *
  * Every observation goes to RESULT.TXT as key=value; the host driver reads
  * that file, not the exit status.

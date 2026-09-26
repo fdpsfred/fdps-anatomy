@@ -692,7 +692,7 @@ void fdps_chapter_07_end(void)
    THE MAP IS SWEPT FIRST, and here the sweep is the load-bearing step it is in
    chapter 3 rather than the belt-and-braces one it is in chapters 4 to 7.
    Chapter 8's verdict comes from fdps_chapter_08_post_action (chpost1.h),
-   which is the only handler of that family that neither forwards to nor opens
+   which -- like the chapter 3 and 10 handlers -- neither forwards to nor opens
    with the shared end test: it never looks at the enemy side at all, and
    records its clear -- end code 2, the value the dispatcher at 0002937f tests
    for before it reaches this table -- when all four captives at unit slots
@@ -886,7 +886,7 @@ void fdps_chapter_09_end(void)
 
    THE MAP IS SWEPT FIRST, and nowhere in the family does that first call carry
    more weight than it does here.  Chapter 10 is the escape chapter:
-   fdps_chapter_10_post_action (chpost1.h) is the only test of its family that
+   fdps_chapter_10_post_action (chpost1.h), like the chapter 3 and 8 tests,
    never calls fdps_battle_check_default_end_conditions at all, and it records
    the clear when all eight of the map's player slots have either reached the
    bottom row, pos_y 0x17, or retired.  Emptying the enemy side is not a win

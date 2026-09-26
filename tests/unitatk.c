@@ -15,7 +15,7 @@
  * EAX,0x19 for the immune class, the SAR pair that halves the defense, LEA
  * EDX,[EDX+EDX*8] with IDIV 10 for the damage, IDIV 9 for the random bonus,
  * the two JGE clamps at 0001c9ab and 0001c9e9, CMP EAX,0x2 on the side byte,
- * CMP EAX,0x3c on the portrait id, ADD byte ptr [EBP-0x8],0x1e for the guest
+ * CMP EAX,0x3c on the portrait id, ADD byte ptr [EBP-0x8],0x1e for the level
  * penalty and the two IDIVs that form the experience -- and from the record
  * layouts ticket 17 settled.  None of them is read off the emitted C.
  *
@@ -817,11 +817,10 @@ static void the_enemy_record_is_the_portrait_id_less_0x3c(void)
     CHECK_EQ(data_fdps_battle_pending_xp_credit, 60);
 }
 
-/* A portrait id above 10 is a guest, and 30 is added to the level the award is
-   divided by: 10 * 60 / 35 is 17 where the same blow from portrait 10 pays
-   120.  The test is > 10 and not >= 10, so portrait 10 is still permanent
-   roster. */
-static void a_guest_attacker_divides_by_thirty_more(void)
+/* An attacker whose portrait id is above 10 has 30 added to the level the award
+   is divided by: 10 * 60 / 35 is 17 where the same blow from portrait 10 pays
+   120.  The comparison is > 10 and not >= 10, so portrait 10 is unpenalised. */
+static void a_portrait_id_above_ten_divides_by_thirty_more(void)
 {
     stage();
     make_it_an_enemy_kill_setup();
@@ -1985,7 +1984,7 @@ void run_unitatk_tests(void)
     RUN_TEST(a_kill_pays_the_whole_award);
     RUN_TEST(a_survivor_pays_the_award_in_proportion);
     RUN_TEST(the_enemy_record_is_the_portrait_id_less_0x3c);
-    RUN_TEST(a_guest_attacker_divides_by_thirty_more);
+    RUN_TEST(a_portrait_id_above_ten_divides_by_thirty_more);
     RUN_TEST(no_award_unless_a_player_unit_struck_an_enemy);
     RUN_TEST(each_index_selects_its_own_record);
 

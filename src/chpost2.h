@@ -230,11 +230,16 @@ extern void fdps_chapter_21_post_action(void);
    data_fdps_chapter_event_or_battle_end_code (gamedata.h) -- a 1 when unit
    slot 3 has retired, and whatever the code already held when it has not.
 
-   This is the only handler in this file that does not forward to
-   fdps_battle_check_default_end_conditions (btlend.h), so it declares no
-   victory: chapter 22's 勝利條件 is 擊倒巫湯婆婆, one named boss rather than
-   敵人全滅, and the clear is the scripted boss-defeat event's to write.  A
-   forward added here would clear the chapter as soon as the last minion fell.
+   It is one of the two handlers in this file, with chapter 23's, that do not
+   forward to fdps_battle_check_default_end_conditions (btlend.h), so it
+   declares no victory: chapter 22's 勝利條件 is 擊倒巫湯婆婆, one named boss
+   rather than 敵人全滅, and the clear is the scripted boss-defeat event's to
+   write.  The boss is herself a side-0 record (MAP21.DAT record 7), so a
+   forward added here would not clear the chapter while she stands either; it
+   changes the outcome only when she is retired without her death script
+   running -- a poison death (program_info/known_bugs.md item 23) -- which the
+   original can then never clear and the forwarded version clears once every
+   side-0 unit is down.
 
    The defeat store is unguarded, so it outranks a clear the boss event
    recorded earlier in the same action: the code is written, never read.
@@ -261,8 +266,12 @@ extern void fdps_chapter_22_post_action(void);
    Like chapter 22's handler it does not forward to
    fdps_battle_check_default_end_conditions (btlend.h), so it declares no
    victory: chapter 23's 勝利條件 is 擊倒死神, one named boss rather than
-   敵人全滅, and the clear is the scripted boss-defeat event's to write.  A
-   forward added here would clear the chapter as soon as the last minion fell.
+   敵人全滅, and the clear is the scripted boss-defeat event's to write.  The
+   死神 is a side-0 record (MAP22.DAT record 52), so a forward would not clear
+   the chapter while he stands; and chapter 23's id, 0x16, is not one the shared
+   test substitutes slot 3 for, so a forward would ask about slot 0 -- 蘭迪斯,
+   whom ICON22.DAT retires at the opening -- and record a defeat on the first
+   action.
 
    THE SECOND TEST IS THE FIRST ONE'S ELSE.  With slot 3 already retired the
    handler declares the defeat in silence and never looks at slot 0x1f, so
@@ -273,16 +282,17 @@ extern void fdps_chapter_22_post_action(void);
    recorded earlier in the same action: the code is written, never read.
 
    Unit slot 3 is 法蓮娜, the chapter's 失敗條件 法蓮娜死亡.  Chapter 23 deploys
-   蘭迪斯以外的所有人, so the slot 0 the shared test would have watched is not on
-   the map at all, and fdps_chapter_23_init opens the map cursor on slot 3 for
-   the same reason.
+   蘭迪斯以外的所有人, so the slot 0 the shared test would have watched holds a
+   蘭迪斯 the opening cut-scene has already retired, and fdps_chapter_23_init
+   opens the map cursor on slot 3 for the same reason.
 
    Unit slot 0x1f is one of the map's own deployed units rather than a roster
-   member -- fdps_chapter_23_end treats indices 11 and up as the map's and 0
-   through 10 as this chapter's eleven player units.  Which unit it is has not
-   been established; the chapter's second stated 失敗條件 is 蘭迪斯從戰場上方
-   消失（二十回合）, the only other loss the guide gives, but nothing here ties
-   that clause to this slot.
+   member: the eleven player slots come first and MAP22.DAT's wave-0 records 1
+   to 21 follow them in record order, so slot 0x1f is record 21 -- side 1,
+   character 0x24, AI behaviour 7 with destination (24, 3), starting from
+   MAP22.COD's (24, 24).  It is the last of the column of the dead walking to
+   the gate of hell, and its reaching the gate and retiring is the chapter's
+   second stated 失敗條件, 蘭迪斯從戰場上方消失.
 
    The message drawn on that second path is entry 0x14 of
    data_fdps_current_chapter_text_ptr (gamedata.h), painted straight onto the

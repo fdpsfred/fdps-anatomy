@@ -480,11 +480,12 @@ void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index)
 
    THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
    000393cc is the seed of the 0..6 counter, which the original keeps in its own
-   argument slot; the value fdps_run_death_scripts pushed -- the index of the
-   unit that made the killing action, not that of the dead unit whose script is
-   running -- is spent by that store and nothing loads the slot before it.  The
-   counter is emitted as a local of its own here; nothing observes the
-   difference.
+   argument slot; the value fdps_run_death_scripts pushed -- its own first
+   argument, the acting unit when the player acts and
+   data_fdps_battle_ai_best_physical_target_idx when the map AI acts, not in
+   general the dead unit whose script is running -- is spent by that store and
+   nothing loads the slot before it.  The counter is emitted as a local of its
+   own here; nothing observes the difference.
 
    ONE VALUE IS USED AFTER A CALL.  fdps_unit_is_retired's answer comes back in
    EAX and is tested by the TEST EAX,EAX at 000393f2 that follows the ADD ESP
@@ -674,11 +675,12 @@ void fdps_chapter_26_event_wave_2_defeated_line(int unit_index)
 
    THE INCOMING ARGUMENT IS NEVER READ.  MOV dword ptr [EBP+0x14],0x0 at
    00039460 is the seed of the 0..3 counter, which the original keeps in its own
-   argument slot; the value fdps_run_death_scripts pushed -- the index of the
-   unit that made the killing action, not that of the dead general whose script
-   is running -- is spent by that store and nothing loads the slot before it.
-   The counter is emitted as a local of its own here; nothing observes the
-   difference.
+   argument slot; the value fdps_run_death_scripts pushed -- its own first
+   argument, the acting unit when the player acts and
+   data_fdps_battle_ai_best_physical_target_idx when the map AI acts, not in
+   general the dead general whose script is running -- is spent by that store
+   and nothing loads the slot before it.  The counter is emitted as a local of
+   its own here; nothing observes the difference.
 
    TWO VALUES ARE USED AFTER A CALL.  fdps_unit_is_retired's answer comes back in
    EAX and is tested by the TEST EAX,EAX at 00039486 that follows the ADD ESP

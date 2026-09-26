@@ -19274,10 +19274,10 @@
      "status": "never_shown",
      "readers": [],
      "owner": {
-      "id": "S4",
-      "title": "寫好卻沒被顯示的對白",
-      "category": "殘留內容",
-      "page": "cut_content/story.md"
+      "id": "S13b",
+      "title": null,
+      "category": "排除清單",
+      "page": "cut_content/_index.md"
      }
     },
     {

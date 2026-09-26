@@ -122,10 +122,11 @@ extern void fdps_chapter_26_event_deploy_waves_2_and_3(int unit_index);
    MAP25.DAT's single wave-3 ally, so the line is the guest hero's.
 
    unit_index is the handler table's shared parameter.  The dispatcher that
-   reaches this slot, fdps_run_death_scripts, forwards the index of the unit
-   that made the killing action rather than that of the dead unit whose script
-   is running, and this handler reads neither: the incoming value is stored over
-   on entry.
+   reaches this slot, fdps_run_death_scripts, forwards its own first
+   argument -- the acting unit when the player acts and
+   data_fdps_battle_ai_best_physical_target_idx when the map AI acts, not in
+   general the dead unit whose script is running -- and this handler never
+   reads it: the incoming value is stored over on entry.
 
    Table slot 42 at 0006026c. */
 extern void fdps_chapter_26_event_wave_2_defeated_line(int unit_index);
@@ -176,10 +177,12 @@ extern void fdps_chapter_26_event_wave_2_defeated_line(int unit_index);
    the chapter's boss, so the line is the Mage King's own.
 
    unit_index is the handler table's shared parameter.  The dispatcher that
-   reaches this slot, fdps_run_death_scripts, forwards the index of the unit that
-   made the killing action rather than that of the dead unit whose script is
-   running, and this handler reads neither: the incoming value is stored over
-   before anything else in the guarded block happens.
+   reaches this slot, fdps_run_death_scripts, forwards its own first
+   argument -- the acting unit when the player acts and
+   data_fdps_battle_ai_best_physical_target_idx when the map AI acts, not in
+   general the dead unit whose script is running -- and this handler never
+   reads it: the incoming value is stored over before anything else in the
+   guarded block happens.
 
    Table slot 43 at 00060270. */
 extern void fdps_chapter_27_event_deploy_wave_1(int unit_index);

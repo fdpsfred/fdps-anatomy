@@ -983,17 +983,20 @@ int fdps_move_path_trace(int goal_x, int goal_y, unsigned char *out_path,
    not finish on.  fdps_battle_system_menu pushes a literal 1 at 00014cf5 for a
    player unit; the four AI entries forward their own second argument.
 
-   THE GRID IS REBUILT FOUR TIMES AND THE ROUNDS ARE NOT INTERCHANGEABLE.
+   THE GRID IS REBUILT UP TO FIVE TIMES AND ONLY TWO OF THE ROUNDS MATCH.
 
    Round 1 (00011a5a) is the only one that does NOT reset the grid first: it
    marks and floods over whatever the caller left in it.  Round 2, the relaxed
    retry (00011aaa), resets and then floods WITHOUT marking any zone of
    control, which is what lets it find a route through the tiles round 1
-   refuses.  Rounds 3 (00011bc6) and 4 (00011cef) are the full sequence --
-   reset, mark, flood -- and round 3 alone also calls
-   fdps_move_grid_block_occupied_tiles, because it is the only round whose
-   result is read out as a list of tiles the unit may finish on.  Collapsing
-   any two of them into one shared setup changes which tiles the walk may use.
+   refuses.  When that retry finds a route, the retarget rebuild (00011af4)
+   resets, marks and floods with the unit's real allowance before the probe
+   reads the grid -- the same setup as round 4.  Rounds 3 (00011bc6) and 4
+   (00011cef) are the full sequence -- reset, mark, flood -- and round 3 alone
+   also calls fdps_move_grid_block_occupied_tiles, because it is the only
+   round whose result is read out as a list of tiles the unit may finish on.
+   The retarget rebuild and round 4 aside, collapsing any two of them into
+   one shared setup changes which tiles the walk may use.
 
    THE RETARGET REPLAY WALKS THE PATH FORWARDS AND SO INVERTS EVERY CODE.
    fdps_move_path_trace is called with the unit's tile as the goal and the
@@ -1008,9 +1011,9 @@ int fdps_move_path_trace(int goal_x, int goal_y, unsigned char *out_path,
    fed to fdps_map_load_tile_info purely so that
    data_fdps_map_current_move_grid_marker republishes that cell's flood-fill
    cost, and the tile is kept when the cost is anything but the 0xff
-   unreachable sentinel.  Round 1's flood used the unit's REAL allowance, so
-   what the loop does is slide the request back along the blocked route to the
-   furthest tile the unit can pay for.  Every step is tested and the LAST one
+   unreachable sentinel.  The retarget rebuild flooded with the unit's REAL
+   allowance, so what the loop does is slide the request back along the
+   blocked route to the furthest tile the unit can pay for.  Every step is tested and the LAST one
    that passes wins, not the first.
 
    ABS IS CALLED FIVE TIMES A TILE AND THE TWO EXPRESSIONS SHARE NOTHING.

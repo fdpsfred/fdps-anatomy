@@ -1,0 +1,1994 @@
+[
+ {
+  "id": "F1",
+  "item_sha1": "43ed70857106e8f69a4581eeba44be3775ad06a8",
+  "verdict": "consistent",
+  "conclusion": "`fdps_chapter_state_reset`（`0x22750`）是進入處理函式骨架的第 2 步，後面還有開場過場、標題卡與游標，不是章節進入的尾巴；除章節進入外，過場腳本 `SWITCH_MAP` 與展示關 `fdps_title_demo` 也呼叫它。chapter.md 驗證對象現寫「章節進入共用的狀態重置 `0x22750`」，已去掉錯誤的「尾巴」說法，也不宣稱只有章節進入使用，與被拒的修正意思相同。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md 第 3 行（驗證對象）",
+    "observation": "現文為「章節進入共用的狀態重置 `0x22750` 與標題卡 `0x20c60`（`src/chapter.c`）」，「共用尾巴」已被另一筆修正改掉。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md「進入章節」五步骨架",
+    "observation": "第 2 步是 `fdps_chapter_state_reset`，第 3–5 步是開場過場、標題卡、游標，與「不是尾巴」一致。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md reset 步驟列表後一段",
+    "observation": "明寫同一支 reset 也是 `SWITCH_MAP` 的實作，展示關 `fdps_title_demo`（`0x2ac10`）也呼叫它，涵蓋「不只章節進入使用」。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P13 (propagation) settled on: `fdps_chapter_state_reset`（`0x22750`）是進入處理函式骨架的第 2 步，不是尾巴；呼叫它的有三十支章節進入處理函式、展示關 `fdps_title_demo` 與過場腳本 `SWITCH_MAP`（`fdps_icon_script_run`），共 32 處。其餘頁面只說「每章進入都呼叫它」或「SWITCH_MAP 用它」，都成立；唯一沿用錯誤說法的是 chapter.md 驗證對象的「章節進入的共用尾巴」。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/chapter.md\n  why the edit was made: reset 是進入骨架的第 2 步，後面還有過場、標題卡與游標，不是尾巴，也不只章節進入使用。\n  old: 章節進入的共用尾巴 `0x22750` 與標題卡 `0x20c60`\n  new: 章節狀態重置 `0x22750` 與標題卡 `0x20c60`\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/chapter.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F2",
+  "item_sha1": "fa96522bb1abaf3b13d1f1e973252357a1a91b72",
+  "verdict": "fixed",
+  "conclusion": "fdps_play_movie（0x30f40）以 spawnlp(P_WAIT) 叫起光碟上的 FD.EXE；叫起前依序 AIL_shutdown、卸下鍵盤中斷、清空鍵盤緩衝、停 CD 音軌、把 DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並以 25 Hz 重新初始化音效。pitfalls 目前那一列已把呼叫名稱改成 spawnlp，但仍寫「只負責」叫起它，漏掉重建必須保留的前後收拾。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/title.c:115-156",
+    "observation": "fdps_play_movie 依序呼叫 AIL_shutdown、fdps_uninstall_keyboard_isr、kbhit/getch 清緩衝、fdps_cd_stop_audio、fdps_set_palette_range 調黑、spawnlp(P_WAIT, ...)，之後 memset 清 VGA、fdps_set_palette_range 還原、fdps_install_keyboard_isr、fdps_audio_init(25)。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 「影片播放不在重建範圍」那一列",
+    "observation": "現文為「FDPS.LE 只負責以 spawnlp 呼叫它」，名稱已正確，但收拾部分遺失。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/cd_audio.md:11",
+    "observation": "擁有者頁已寫明 spawnlp 以及呼叫前後關閉再重開音效與鍵盤中斷、調黑再還原調色盤。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責以 `spawnlp` 呼叫它 |",
+    "new": "三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 負責以 `spawnlp` 叫起它，以及叫起前後的收拾：先關掉 AIL、卸下鍵盤中斷、清空鍵盤緩衝、停 CD 音軌、把 DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並重新初始化音效。這些收拾不能因為播放不在範圍內就省掉 |",
+    "why": "現文只說叫起 FD.EXE，漏掉重建必須保留的音效、鍵盤與調色盤的關閉重開。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查 src/title.c:115-156：fdps_play_movie 依序 AIL_shutdown、fdps_uninstall_keyboard_isr、kbhit/getch 清緩衝、fdps_cd_stop_audio、fdps_set_palette_range 調黑，再 spawnlp(P_WAIT, fd.exe ...)，回來後 memset 清 VGA、還原調色盤、fdps_install_keyboard_isr、fdps_audio_init(25)。pitfalls.md:295 現文為「只負責以 spawnlp 呼叫它」，呼叫名已被另一筆修正改對，但「只負責」仍與擁有者 program_info/cd_audio.md:11（呼叫前後關閉再重開音效與鍵盤中斷、調黑再還原調色盤）矛盾，也漏掉重建最容易省略的前後收拾。verdict 的 old 逐字存在於現頁，new 的每一步都與原始碼順序一致，並保留連回擁有者的欄位，擁有權不變。確認。",
+   "edits": []
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P30 (propagation) settled on: fdps_play_movie（0x30f40）以 spawnlp 叫起光碟上的 FD.EXE，叫起前依序 AIL_shutdown、卸下鍵盤中斷、清空鍵盤緩衝、Stop Audio、把 DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並以 25 Hz 重新初始化音效。清單上三處 0xa0000 都是 fdps_draw_text 的畫筆起點，與此無關；說影片外呼「只負責 spawnv」的 pitfalls 那一列與 cd_audio.md 開頭都少了前後的收拾，pitfalls 還寫錯了 CRT 呼叫名稱。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 原句說只負責 spawnv，漏掉重建必須保留的音效與鍵盤的關閉重開，且實際呼叫的是 spawnlp。\n  old: 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責 `spawnv` |\n  new: 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 負責以 `spawnlp` 叫起它，以及叫起前後的收拾：先關掉 AIL、卸下鍵盤中斷、停 CD 音軌、把 DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並重新初始化音效。這些收拾不能因為播放不在範圍內就省掉 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F3",
+  "item_sha1": "627eea7bb8834058332eefb3fb4d3f733e68299d",
+  "verdict": "consistent",
+  "conclusion": "遊戲側要替 AIL 庫提供的是 `00044dc0` 加上 `0003ca49`–`0003cbaa` 六支 DPMI 服務常式共七個符號，六支 DPMI 常式屬 `fdps`、定義在 `src/dpmi.c`。code_pools.md 現行句子已改成「`00044dc0` 與六支已改判成 `fdps` 的 DPMI 常式」，同批落地的修改也刪掉了把三支 DPMI 常式列在「庫裡沒有本體」那一批的句子，事實與 ail_link.md 的七個符號一致。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md（「重建時這一批不會隨 `ailv3.lib` 進來」段）",
+    "observation": "現行文字：要另外提供的只有 `00044dc0` 與六支已改判成 `fdps` 的 DPMI 常式；原先把 `0003cb6e`、`0003cb93`、`0003cbaa` 列入沒有本體那一批的句子已刪，該批改為 13 個。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/ail_link.md「遊戲要給的七個符號」",
+    "observation": "表列 `0003ca49`–`0003cbaa` 六支 DPMI 常式在 `src/dpmi.c`，`00044dc0` 在 `src/ailflags.asm`，共七個。"
+   },
+   {
+    "source": "src",
+    "location": "src/dpmi.c:21,78,104,146,201,224",
+    "observation": "六支 fdps_dpmi_* 常式（alloc/free DOS memory、lock/unlock region、lock/unlock size）都定義在此檔。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P40 (propagation) settled on: `0003ca49`–`0003cbaa` 六支 DPMI 服務常式全部屬 `fdps`，定義在 `src/dpmi.c`，由 AIL 以 EXTDEF 參照，不屬於「ailv3.lib 裡沒有本體的 13 個 ail function」那一批。遊戲側要替庫提供的是這六支加上 `00044dc0` 共七個符號。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/code_pools.md\n  why the edit was made: 三支 DPMI 常式屬 fdps、不在這一批，且遊戲側要提供的是全部六支，原句與 ail_link.md 的七個符號矛盾並帶改判的過程用語。\n  old: 要另外提供的只有 `00044dc0` 與三支已改判成 `fdps` 的 DPMI 常式，做法見\n  new: 這一批裡要另外提供的只有 `00044dc0`，它與六支 DPMI 常式一起由遊戲側提供，做法見\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/code_pools.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F4",
+  "item_sha1": "0f7d210fb91e143214aa8291c568fb56ceb6df55",
+  "verdict": "consistent",
+  "conclusion": "code_pools.md 現在已不再說 memory_layout.md 以 0003c000 為程式庫起點，而是寫「memory_layout.md 的分區界線是從各 function 的 pool 判定歸納出來的結果，不能反過來拿位址判定任何一個 function」，與被拒的修正要表達的事實相同。memory_layout.md 的位址分區表也確實以 0x3cbc0／0x3cbc1／0x56799 為界，並註明界線取自各 function 的 pool 判定。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md「位址範圍不算證據」段末句",
+    "observation": "現行文字：[`memory_layout.md`](memory_layout.md) 的分區界線是從各 function 的 pool 判定歸納出來的結果，不能反過來拿位址判定任何一個 function。舊的 0003c000 說法已移除。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/memory_layout.md「位址空間各區的內容」表與其下說明",
+    "observation": "分區為 0x10000–0x3cbc0 遊戲、0x3cbc1–0x56798 程式庫、0x56799–0x57c5f 遊戲手寫組語；並寫「上表的界線取自各 function 的 pool 判定」，不再有 0x3c000。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P57 (propagation) settled on: 依 pool 標籤，遊戲 C 程式碼到 0x3cbc0 為止（其中 0x10000 的 trap stub 屬 CRT、0x3c984–0x3ca48 五支屬 AIL），程式庫區是 0x3cbc1–0x56798，0x56799 起又是遊戲的手寫組語模組；知識庫裡以 0x3c000 當遊戲與程式庫分界、或說 memory_layout.md 以 0x3c000 為概略界線的句子都已過時。位址分區是從逐一的 pool 判定歸納出來的，仍不能反過來當判定依據。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/code_pools.md\n  why the edit was made: memory_layout.md 已不再以 0x3c000 描述程式庫區，改成引用它現在的寫法。\n  old: [`memory_layout.md`](memory_layout.md) 說 `0003c000` 之後以程式庫為主，那只是描述密度，不能拿來判定任何一個 function。\n  new: [`memory_layout.md`](memory_layout.md) 的位址分區是從這裡的逐一判定歸納出來的結果，不能反過來拿來判定任何一個 function。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/code_pools.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F5",
+  "item_sha1": "3b4485798caa5ed5c29db0410a667116bc4a058d",
+  "verdict": "consistent",
+  "conclusion": "rebuild_info/naming.md 現行文字已不再以 0x3c000 為分界，改寫為 memory_layout.md 的位址分區是從 pool 判定歸納出的結果、分區仍有交錯、不能反過來當判定依據，與被拒的修正所要陳述的事實相同。memory_layout.md 的分區（遊戲到 0x3cbc0、程式庫 0x3cbc1–0x56798、0x56799 起遊戲手寫組語，內有 0x10000 CRT 與 0x3c984–0x3ca48 AIL 兩處穿插）與 pool 標籤一致。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "rebuild_info/naming.md 〈pool 分類〉「不能用位址範圍判定 pool」段",
+    "observation": "現行文字：本專案的位址分區（見 memory_layout.md）同樣是從 pool 判定歸納出來的結果，分區之間仍有交錯，不能反過來當判定依據；0x3c000 已移除。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/memory_layout.md 位址分區表與其下說明",
+    "observation": "界線取自各 function 的 pool 判定，範圍內只有兩處穿插：0x10000 trap stub 屬 CRT、0x3c984–0x3ca48 五支 AIL。"
+   },
+   {
+    "source": "ghidra",
+    "location": "ghidra_snapshot/functions.txt 00010000、0003c984、0003cbc1、00056799",
+    "observation": "00010000 為 pool_crt，0003c984 為 pool_ail，0003cbc1 為 pool_ail（程式庫區起點），00056799 為 pool_fdps（fdps_keyboard_scancode_ptr），與分區描述一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P57 (propagation) settled on: 依 pool 標籤，遊戲 C 程式碼到 0x3cbc0 為止（其中 0x10000 的 trap stub 屬 CRT、0x3c984–0x3ca48 五支屬 AIL），程式庫區是 0x3cbc1–0x56798，0x56799 起又是遊戲的手寫組語模組；知識庫裡以 0x3c000 當遊戲與程式庫分界、或說 memory_layout.md 以 0x3c000 為概略界線的句子都已過時。位址分區是從逐一的 pool 判定歸納出來的，仍不能反過來當判定依據。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/naming.md\n  why the edit was made: 0x3c000 已不是知識庫記載的分界，memory_layout.md 的界線改為取自 pool 判定。\n  old: 本專案的 `0x3c000` 分界同樣只是概略值（見 [`program_info/memory_layout.md`](../program_info/memory_layout.md)）。\n  new: 本專案 [`program_info/memory_layout.md`](../program_info/memory_layout.md) 的位址分區是從逐一的 pool 判定歸納出來的，區內仍有穿插，不能反過來當判定依據。\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/naming.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F6",
+  "item_sha1": "cab21e7402ed7cfeb777b998f2fc781adbbbe0df",
+  "verdict": "consistent",
+  "conclusion": "architecture.md 現行文字已寫成「這六個群集全部落在 `0003cbc1`–`00056798` 的程式庫區」，與被拒的修正逐字相同；六個群集的位址範圍（最低 0x3d50a、最高 0x5670a）都落在 memory_layout.md 的程式庫區 0x3cbc1–0x56798 之內。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/architecture.md 「呼叫圖走不到的部分」一節",
+    "observation": "現行句子為「這六個群集全部落在 `0003cbc1`–`00056798` 的程式庫區」，表列六個群集範圍介於 0003d50a 與 0005670a 之間。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/memory_layout.md 位址分區表",
+    "observation": "0x3cbc1–0x56798 為 Watcom CRT、Miles AIL、80x87 浮點模擬器的程式庫區，0x56799 起為遊戲手寫組語模組。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P57 (propagation) settled on: 依 pool 標籤，遊戲 C 程式碼到 0x3cbc0 為止（其中 0x10000 的 trap stub 屬 CRT、0x3c984–0x3ca48 五支屬 AIL），程式庫區是 0x3cbc1–0x56798，0x56799 起又是遊戲的手寫組語模組；知識庫裡以 0x3c000 當遊戲與程式庫分界、或說 memory_layout.md 以 0x3c000 為概略界線的句子都已過時。位址分區是從逐一的 pool 判定歸納出來的，仍不能反過來當判定依據。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/architecture.md\n  why the edit was made: 程式庫區的界線依 memory_layout.md 是 0x3cbc1–0x56798，六個群集都在其中。\n  old: 這六個群集全部落在 `0003c000` 以上的程式庫區。\n  new: 這六個群集全部落在 `0003cbc1`–`00056798` 的程式庫區。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/architecture.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F7",
+  "item_sha1": "9037a22b803b3dadf18a66f2f7fc65c66e5a02fc",
+  "verdict": "fixed",
+  "conclusion": "遊戲 C 程式碼一路到 0x3cbc0 為止；0x3bade 起的 CD 模組、夾在其中的 AIL 五支與 DPMI 六支都以 ESP 定址，整段 0x3bade–0x3cbc0 沒有任何 [EBP±n] 運算元，所以 2,587 個推送點的分佈就是整個遊戲 C 程式碼的分佈。現行文字只寫「0x10000–0x3c000 這一段」，沒有說明涵蓋全部遊戲 C 程式碼，需改成到 0x3cbc0。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "search_instructions(operand_pattern=\"[EBP +\", limit=50000) over FDPS.LE",
+    "observation": "16,540 筆、truncated=false，位址範圍 0x1001c–0x57c23；落在 0x3bade–0x3cbc0 的筆數為 0，0x3c000–0x3cbc0 內的 PUSH [EBP±n] 為 0。"
+   },
+   {
+    "source": "ghidra",
+    "location": "disassemble_function 0003c892 (fdps_cd_play_track_range)",
+    "observation": "PUSH 0x14 / CALL __CHK 後以 [ESP + n] 讀參數，沒有 EBP 框架，CD 模組的推送不經 [EBP±n]。"
+   },
+   {
+    "source": "kb",
+    "location": "ghidra_snapshot/functions.txt",
+    "observation": "0x3c000–0x3c984 是 pool_fdps 的 CD function，0x3c984–0x3ca48 五支 pool_ail，0x3ca49–0x3cbc0 六支 DPMI（pool_fdps），0x3cbc1 起是 pool_ail。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/build_flags.md「旗標組不是全域統一的」一節",
+    "observation": "頁面已寫明 CD 模組在 0x3bade–0x3c97b、DPMI 模組在 0x3ca49–0x3cbc0 且沒有 EBP 框架；推送點那一句卻仍以 0x3c000 為止，沒有交代其後的遊戲程式碼。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/build_flags.md",
+    "old": "遊戲 C 程式碼的 `0x10000`–`0x3c000` 這一段逐指令掃過一遍，2,587 個推送點的分佈是：",
+    "new": "遊戲 C 程式碼（`0x10000`–`0x3cbc0`）逐指令掃過一遍，2,587 個推送點的分佈是（`0x3bade` 起的 CD 模組與 DPMI 模組以 ESP 定址，沒有 `[EBP±n]` 推送點）：",
+    "why": "遊戲 C 程式碼到 0x3cbc0 為止，0x3bade 之後沒有任何 [EBP±n] 運算元，所以這份分佈涵蓋全部遊戲 C 程式碼，範圍要寫到真正的終點。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "頁面現行第 197 行是另一筆落地後的「遊戲 C 程式碼的 `0x10000`–`0x3c000` 這一段逐指令掃過一遍」，字面不錯，但讀起來像只掃了遊戲 C 程式碼的一部分，沒有交代 0x3c000–0x3cbc0（functions.txt：CD 模組尾段、AIL 五支、DPMI 六支）。自查：Ghidra search_instructions PUSH + [EBP 全程式 202 筆，遊戲部分最後一筆在 0x3973b，0x3c000–0x3cbc0 為 0；另以 capstone 從 FDPS.LE 逐 function 反組譯 0x3bfa5–0x3cbc1 共 873 條指令，[EBP±n] 記憶體運算元 0 筆（唯一含 ebp 的是 AIL 0x3c998 mov ebp,[esp+0x20]，基底是 ESP）；0x3c0c8 的 CD function 以 [ESP+n] 定址、沒有 EBP 框架。所以 2,587 個推送點的分佈就是 0x10000–0x3cbc0 整段的分佈，第一位的改寫與括號說明都成立，old 與頁面逐字相符，擁有者仍是 build_flags.md 本頁。確認照原 edits 落地。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item P57 (propagation) settled on: 依 pool 標籤，遊戲 C 程式碼到 0x3cbc0 為止（其中 0x10000 的 trap stub 屬 CRT、0x3c984–0x3ca48 五支屬 AIL），程式庫區是 0x3cbc1–0x56798，0x56799 起又是遊戲的手寫組語模組；知識庫裡以 0x3c000 當遊戲與程式庫分界、或說 memory_layout.md 以 0x3c000 為概略界線的句子都已過時。位址分區是從逐一的 pool 判定歸納出來的，仍不能反過來當判定依據。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/build_flags.md\n  why the edit was made: 遊戲 C 程式碼到 0x3cbc0 為止，而 0x3c000–0x3cbc0 沒有任何 [ebp±n] 參照，推送點分佈不變。\n  old: 遊戲段（`0x10000`–`0x3c000`）逐指令掃過一遍\n  new: 遊戲段（`0x10000`–`0x3cbc0`）逐指令掃過一遍\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/build_flags.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F8",
+  "item_sha1": "6c2f37f612a010b24d73d1edcaa7210c2bd6759a",
+  "verdict": "consistent",
+  "conclusion": "FRILEVUP.DAT 每項成長的兩個 byte 不同時，升級取 min + rand() % (max - min)，實際範圍是前一個值到後一個值減 1；兩值相同時不抽亂數、固定成長前一個值。assets/characters.md 成長表後的說明現在已寫明兩值不同時上限減 1、兩值相等時固定成長這個值，涵蓋了這筆被拒修正要補的事實；與攻略站範圍的對照由正典 assets/tables/characters.md 擁有，本頁連過去即可。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-701",
+    "observation": "min_gain = growth_pair[0]; gain_range = growth_pair[1] - min_gain; 只有 gain_range != 0 才取 rand() % gain_range，所以兩值不同時上限是 growth_pair[1] - 1，兩值相同時固定加 min 且不抽亂數。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/characters.md 成長表後的說明段",
+    "observation": "現行文字：「表中的範圍是檔案裡兩個 byte 的原值：兩值不同時每級實際的成長上限是後一個值減 1，兩值相等時每級固定成長這個值」——已補上兩值相同的情況，這是一致性項目 X13 指出的缺口。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/tables/characters.md:41",
+    "observation": "正典已寫明每級成長落在 *_min 到 *_max 減 1、攻略站列的成長範圍上限就是這個 byte 減 1，兩者相等時固定成長 *_min、攻略站列的就是這個 byte 本身；本頁連到這裡，攻略站對照不需在本頁重複。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X13 (conflict) settled on: FRILEVUP.DAT 每項成長是兩個 byte（min、max）：兩值不同時升級取 min + rand() % (max - min)，實際範圍是 min 到 max 減 1，攻略站印的就是這個範圍（0F 劍聖 AP 原值 06 09、攻略站 06-08）；兩值相同時固定成長 min。assets/characters.md 的成長表列的是原始 byte，表後的說明已經講了，但只寫「後一個值減 1」、漏了兩值相同的情況，program_info/village.md 也把「比攻略站多 1」寫成沒有例外；兩處都補上兩值相同的情況，正典仍是 assets/tables/characters.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/characters.md\n  why the edit was made: 原句漏了上下限相同時固定成長、不減 1 的情況，並補上與攻略站範圍的對照，讓讀者不會把原始 byte 當成攻略站的範圍。\n  old: 表中的範圍是檔案裡兩個 byte 的原值，每級實際的成長上限是後一個值減 1（[`tables/characters.md`](tables/characters.md)）。\n  new: 表中的範圍是檔案裡兩個 byte 的原值，不是每級實際拿得到的範圍：兩值不同時每級成長落在前一個值到後一個值減 1，攻略站印的就是這個範圍（`0F` 劍聖 AP 的 6-9 在攻略站是 06-08）；兩值相同時每級固定成長這個值（[`tables/characters.md`](tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/characters.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F9",
+  "item_sha1": "c33ca7530e281fc8f51fb0eec162f0e883c924dc",
+  "verdict": "fixed",
+  "conclusion": "教會轉職的候選條件、路線選擇、徽章消耗與加值是程式行為，擁有者是 program_info/village.md 的「教會：轉職」；assets/characters.md 先落地的修正只改了徽章那一條，其餘三條仍是重述。把四條縮成一句連結，保留讀表需要的兩點：「—」是路線 3 的全 0 填充（勇者徽章只對蘭迪斯有效），以及型態與「無徽章」格相同的徽章格子轉職後徽章留著。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "assets/characters.md 「轉職路線 RANKUP.DAT」表後的四條列點",
+    "observation": "先落地的 D2 只把「徽章什麼時候被用掉」改成讀表句加連結；「誰能轉職」「走哪一條」「轉職的加值」三條仍逐項重述教會程式的行為。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/village.md 「教會：轉職」",
+    "observation": "候選條件（level >= 20 且肖像編號 < 9）、路線表（勇者限肖像 0、光、暗、無）、徽章只在路線非 0 且型態與路線 0 不同時消耗、新型態 FRILEVUP.DAT 最大值原始 byte 的加值與等級歸 1 都在這一節完整擁有。"
+   },
+   {
+    "source": "src",
+    "location": "src/church.c:1006-1018, 1069-1086",
+    "observation": "fdps_church_promote_loop 依序分派 HERO／LIGHT／DARK／NO_BADGE 路線，並只在 chosen_route != PROMOTE_ROUTE_NO_BADGE 且型態與路線 0 不同時 fdps_unit_remove_item，與兩頁敘述相符，事實本身無爭議。"
+   },
+   {
+    "source": "kb",
+    "location": "workspace kb_consist 項目 D2 的判定",
+    "observation": "D2 刻意把徽章消耗改成以表格讀法表述（型態與「無徽章」格相同者徽章留著），這句是讀表輔助，新文字予以保留。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "assets/characters.md",
+    "old": "教會（`fdps_church_promote_loop`，`0x345a0`，`src/church.c`）決定走哪一條：\n\n- **誰能轉職**：等級 20 以上、而且肖像編號小於 9 的名冊成員。轉職後的型態肖像編號都在 `0F` 以上，所以每人只能轉職一次；蓋亞、珊、蘭斯洛特沒有路線。\n- **走哪一條**：由身上的徽章決定，一人只會被提供一條——肖像編號 `00`（蘭迪斯）身上有 `DB` 勇者徽章走路線 3；否則有 `E0` 光之徽章走路線 1；否則有 `E1` 暗之徽章走路線 2；都沒有走路線 0。勇者徽章在其他人身上不起作用，他們的路線 3 是全 0 的填充，表中以「—」表示。\n- **徽章什麼時候被用掉**：上表中型態與「無徽章」那一格相同的徽章格子（如蘭迪斯的光之徽章、費塔加的暗之徽章）轉職後徽章留在身上，其餘才會用掉；消耗規則見 [`program_info/village.md`](../program_info/village.md) 的「教會：轉職」。\n- **轉職的加值**：移動力加上路線的加值；AP、DP、DX、HP 上限與 MP 上限各加上**新型態** `FRILEVUP.DAT` 那一列的最大值 byte（原值，不減 1），HP、MP 的現值也一起加；等級歸 1。",
+    "new": "誰能轉職、走哪一條路線、徽章何時被用掉與轉職的加值由教會的程式決定，見 [`program_info/village.md` 的「教會：轉職」](../program_info/village.md#教會轉職)。讀表時要知道兩件事：勇者徽章只對蘭迪斯有效，其他人的路線 3 是全 0 的填充，表中以「—」表示；型態與「無徽章」那一格相同的徽章格子（如蘭迪斯的光之徽章、費塔加的暗之徽章）轉職後徽章留在身上，其餘才會用掉。",
+    "why": "四條中有三條仍重述 village.md 擁有的教會程式行為，縮成一句連結，只留解釋表中「—」與哪些格子不耗徽章的讀表說明。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "逐字比對 assets/characters.md 第 226–231 行，edit 的 old 與頁面現況一致（D2 已先把徽章那一條改成讀表句，本 edit 以此為底）。src/church.c:995-1019 確認候選條件 level >= PROMOTE_MIN_LEVEL 且 portrait_id < 9、路線依勇者（限肖像 0）、光、暗、無依序決定；church.c:1069-1086 確認徽章只在路線非 0 且新肖像與路線 0 的不同時移除，事實無爭議。program_info/village.md「教會：轉職」完整擁有候選、路線表、徽章消耗與 FRILEVUP 加值、等級歸 1，characters.md 的「誰能轉職」「走哪一條」「轉職的加值」三條是重述，縮成連結正確；新文字保留的兩項讀表說明（「—」是路線 3 的全 0 填充、型態與無徽章格相同的格子徽章留著）與原始碼相符，蘭迪斯勇者格 21≠0F 會消耗也與「其餘才會用掉」一致。錨點 #教會轉職 符合 GitHub 去除全形冒號的 slug 規則。同意落地。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X14 (conflict) settled on: 兩頁對教會轉職的敘述內容一致且與 src/church.c 相符：等級 20 以上且肖像編號小於 9 才是候選，勇者（限肖像 0）、光、暗、無徽章依序決定路線 3、1、2、0，徽章只在路線非 0 且型態與路線 0 不同時移除，加值取新型態 FRILEVUP.DAT 那一列的原始最大值 byte、等級歸 1。這是程式行為，擁有者是 program_info/village.md 的「教會：轉職」；assets/characters.md 的四條重述縮成一句連結，只留下解釋表中「—」所需的路線 3 說明，assets/classes.md 的指向同步改連 village.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/characters.md\n  why the edit was made: 這四條是教會的程式行為，擁有者是 program_info/village.md，這裡縮成一句連結，只留解釋表中「—」的說明。\n  old: 教會（`fdps_church_promote_loop`，`0x345a0`，`src/church.c`）決定走哪一條：\n\n- **誰能轉職**：等級 20 以上、而且肖像編號小於 9 的名冊成員。轉職後的型態肖像編號都在 `0F` 以上，所以每人只能轉職一次；蓋亞、珊、蘭斯洛特沒有路線。\n- **走哪一條**：由身上的徽章決定，一人只會被提供一條——肖像編號 `00`（蘭迪斯）身上有 `DB` 勇者徽章走路線 3；否則有 `E0` 光之徽章走路線 1；否則有 `E1` 暗之徽章走路線 2；都沒有走路線 0。勇者徽章在其他人身上不起作用，他們的路線 3 是全 0 的填充，表中以「—」表示。\n- **徽章什麼時候被用掉**：只有在選到的路線不是 0、而且它的型態與路線 0 不同時才移除那枚徽章。蘭迪斯拿光之徽章、費塔加拿暗之徽章這類「徽章給的就是免費路線」的情況，徽章留在身上。\n- **轉職的加值**：移動力加上路線的加值；AP、DP、DX、HP 上限與 MP 上限各加上**新型態** `FRILEVUP.DAT` 那一列的最大值 byte（原值，不減 1），HP、MP 的現值也一起加；等級歸 1。\n  new: 誰能轉職、走哪一條路線、徽章何時被用掉與轉職的加值由教會的程式決定，見 [`program_info/village.md` 的「教會：轉職」](../program_info/village.md#教會轉職)。勇者徽章只對蘭迪斯有效，其他人的路線 3 是全 0 的填充，表中以「—」表示。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/characters.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F10",
+  "item_sha1": "e02f29c44b86dfce9354e42ba96ff721e2e0296f",
+  "verdict": "consistent",
+  "conclusion": "assets/classes.md 現在的段落已照 X17 的分工縮成一句連結：「`27` 是沒有人使用的表尾列，見同頁的 U10」，判定交給 cut_content/units.md 的 U10 擁有。27 的數值（與 24 那一列相同）、空名稱、沒有 PROEQU record 仍留在本頁的全表、來源段與可裝備類型段，與被拒的修改要表達的事實相同。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "assets/classes.md「誰是這個職業」表後的段落",
+    "observation": "現行文字為「`1C`、`1E`、`23` 沒有任何單位使用，見 cut_content/units.md 的 U05；`27` 是沒有人使用的表尾列，見同頁的 U10。」——已是連到 U10 的一句話，舊的 PROMAP／PROEQU 細節已移除，與被拒修改的 new 同義；另指向 U10 而非 U05，已表達它與 U05 不是同一類。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/classes.md 全表前說明、`27` 列、可裝備類型段、來源段",
+    "observation": "「資料在攻略站的代碼表之後還有一筆 `27`，內容與 `24` 的「？？」相同」、表列 `27`（空白）FF×8／0／0%、「`24`–`27` 沒有 record」、`27` 的條目是空字串——數值與空名稱仍在本頁。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/units.md U10 第四點",
+    "observation": "職業 `27` 是 PROMAP.DAT 41 列的最後一列，內容與 `24` 相同（FF×8、暴擊 0、魔抗補數 0x64），沒有名稱，PROEQU.DAT 只到 `23`，沒有任何單位使用，沒有做好的內容，不是殘留內容——擁有者已完整記載。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X17 (conflict) settled on: 兩頁對職業 27 的說法一致且正確：它是 PROMAP.DAT 41 列（410 byte）的最後一列，與職業 24 那一列逐 byte 相同（FF×8、暴擊 0、魔抗補數 0x64），PROEQU.DAT 只有 36 筆（到 23），沒有單位使用，不是殘留內容。這個判定由 cut_content/units.md 的 U10 擁有，classes.md 改為一句連結，數值留在 classes.md 的全表。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/classes.md\n  why the edit was made: 依 cut_content/_index.md 的分工，痕跡的判定由 U10 擁有，classes.md 只留一句連結；27 的數值、空名稱與沒有 PROEQU record 已在本頁全表與可裝備類型段落。\n  old: `27` 不是同一類：它是 `PROMAP.DAT` 41 列的最後一列，內容與 `24` 那一列逐 byte 相同，沒有名稱，`PROEQU.DAT` 只到 `23` 所以也沒有可裝備類型——是沒有人使用的表尾列。\n  new: `27` 不是同一類，是沒有內容、也沒有人使用的表尾列，見 [`cut_content/units.md`](../cut_content/units.md) 的 U10。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/classes.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F11",
+  "item_sha1": "a0b96be121828ac448bf8a0f39b7f941afdc2423",
+  "verdict": "consistent",
+  "conclusion": "rebuild_info/pitfalls.md 的村莊暗號表那一列現已把兩處都寫成「秘密商店」（「秘密商店也有貨」「所以那座秘密商店照常玩進不去」），頁面上已無「神秘商店」；先落地的修改另外補了「（索引 24）」，事實與遊戲自己的稱呼一致，被拒的修改已被涵蓋。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md line 41",
+    "observation": "現行文字為「章節索引 25（第 26 章之前）有村莊、秘密商店也有貨，取到的第 25 列（索引 24）卻落在表外……所以那座秘密商店照常玩進不去」；整頁搜尋「神秘商店」零筆。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X30 (conflict) settled on: 遊戲自己把村莊的第五個場所叫「秘密商店」：常駐文字 0x202 是「歡迎來到秘密的商店，需要什麼嗎？」，各章村莊對白也一律寫「秘密商店」，遊戲文字裡沒有「神秘商店」；「神秘商店」是攻略站的叫法。知識庫統一用「秘密商店」，只有逐字引用攻略站的地方保留原文。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 遊戲自己的稱呼是「秘密商店」（常駐文字 0x202「歡迎來到秘密的商店」與各章村莊對白），「神秘商店」是攻略站的叫法，統一用遊戲的名稱。\n  old: 神秘商店也有貨，取到的第 25 列卻落在表外：前 4 byte 是這支函式自己還沒寫入的回傳值槽，後 4 byte 是存起來的 EBP，兩半都是看板選單的框架位址，所以那座神秘商店\n  new: 秘密商店也有貨，取到的第 25 列卻落在表外：前 4 byte 是這支函式自己還沒寫入的回傳值槽，後 4 byte 是存起來的 EBP，兩半都是看板選單的框架位址，所以那座秘密商店\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F12",
+  "item_sha1": "4b65c88d30ab3c34c5394a80d5e2bdd025b942bc",
+  "verdict": "fixed",
+  "conclusion": "距離欄位 0 表示不瞄準、以施法者所在格為中心取範圍，0x01–0x0F 是距離，0x10 以上是直線、長度為值減 0x10；編碼的擁有者是 assets/tables/spells.md。已落地的文字交代了直線與連結，但漏了拒收修正要補的距離 0 的意義，而全表中裂地術、封神裂震的距離正是 0，故補上一句。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/spellmnu.c:831-869",
+    "observation": "cast_range_flags 為 0 時走不瞄準的全圖分支（從游標所在處掃描），大於 CAST_RANGE_LAST_RADIUS 時以 cast_range - CAST_RANGE_LINE_BIT 為長度收直線目標，其餘為半徑。"
+   },
+   {
+    "source": "src",
+    "location": "src/spellmnu.h:163-168",
+    "observation": "註解寫明 cast_range_flags：0 為不瞄準、至 0x0f 為格數半徑、0x10 以上為直線。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/tables/spells.md 偏移 0x03 列",
+    "observation": "擁有者頁已完整寫出 00 不瞄準、0x01–0x0F 距離、0x10 以上直線且長度為值減 0x10。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/spells.md 全表說明段與 0A、0B 列",
+    "observation": "現行文字只寫 0x10 以上表示直線並連到擁有者頁，沒有說明距離 0；全表 0A 裂地術、0B 封神裂震的距離為 0。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "assets/spells.md",
+    "old": "距離欄位 `0x10` 以上表示直線，長度是值減去 `0x10`（見 [`tables/spells.md`](tables/spells.md)）。",
+    "new": "距離 `0` 表示不瞄準、以施法者所在格為中心；距離欄位 `0x10` 以上表示直線，長度是值減去 `0x10`，表中已解成「直線 N」（編碼見 [`tables/spells.md`](tables/spells.md)）。",
+    "why": "已落地的文字漏了距離 0 的意義，全表卻有距離 0 的法術，補上並維持連到擁有者頁。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "amend",
+   "why": "查 git diff 14a5e44 -- assets/spells.md：同一段先落地的是 X31 的修正（位元說法改為「0x10 以上直線、長度值減 0x10」並連到擁有者），與程式相符（src/spellmnu.c:833、848-856 以 cast_range > 0x0F 走直線並傳 cast_range - 0x10；cast_range 為 0 時走 865-876 的不瞄準分支，從游標所在處以 area 掃描、選取模式固定）。被拒收的 F12 修正要補的是「距離 0 的意義與去處」與「表中直線已解成『直線 N』」，現行頁面兩者都沒有，而全表 0A 裂地術、0B 封神裂震的距離正是 0，讀者會誤讀成距離 0，所以問題是真的。第一位的新文字事實都對，但多重述了擁有者 tables/spells.md 才講的「以施法者所在格為中心」，這不在原修正內，也與 X32『數值頁只留連結』的分工相違；改為只點出 0 是不瞄準、直線的解法與表中寫法，細節交給擁有者連結，擁有者仍唯一是 assets/tables/spells.md。",
+   "edits": [
+    {
+     "doc": "assets/spells.md",
+     "old": "距離欄位 `0x10` 以上表示直線，長度是值減去 `0x10`（見 [`tables/spells.md`](tables/spells.md)）。",
+     "new": "距離 `0` 表示不瞄準；距離欄位 `0x10` 以上表示直線，長度是值減去 `0x10`，表中已解成「直線 N」（編碼見 [`tables/spells.md`](tables/spells.md)）。",
+     "why": "已落地的文字漏了距離 0 的意義，全表卻有距離 0 的法術（0A、0B）；補上並說明表中直線的寫法，其餘細節留給擁有者頁。"
+    }
+   ]
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X32 (conflict) settled on: 兩頁對距離欄位的編碼沒有事實矛盾：0 不瞄準、以施法者所在格為中心且命中清單只收敵方，0x01–0x0F 是距離，0x10 以上是直線、長度為值減 0x10（出貨資料最大 0x1F，等於低 4 位）。擁有者是 assets/tables/spells.md，assets/spells.md 全表說明段的重述改成一句連結。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/spells.md\n  why the edit was made: 距離欄位編碼的擁有者是 record 佈局頁，數值頁只留連結，避免重複且補上距離 0 的去處。\n  old: 此處已換算。距離欄位設了 `0x10` 這個位元時表示直線，低 4 位是實際距離。\n  new: 此處已換算。距離欄位的編碼（`0` 不瞄準、直線型）見 [`tables/spells.md`](tables/spells.md)，直線型在表中已解成「直線 N」。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/spells.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F13",
+  "item_sha1": "8b511b427527af4a4e1b5de4ad30958562b554b1",
+  "verdict": "consistent",
+  "conclusion": "教會轉職加的是新型態那一列 *_max 的原始 byte；此 byte 只在上下限不同時比攻略站印的最大成長值多 1，上下限相同時就是攻略站印的值。現行 village.md 已加上這個限定並連回 characters.md，事實與被拒的修正相同。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/village.md 第 257 行",
+    "observation": "現行文字為「原始 byte（零延伸），上下限不同的項目比攻略站印的最大成長值多 1，上下限相同的項目就是攻略站印的值」並連 assets/tables/characters.md，已不再無條件宣稱多 1。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/tables/characters.md 第 41 行",
+    "observation": "擁有 byte 語意的正典：*_max 大於 *_min 時是最大成長值加 1，相等時每級固定成長、攻略站列的就是 byte 本身，與 village.md 現行限定一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X35 (conflict) settled on: 教會轉職加的是新型態 FRILEVUP.DAT 那一列的 *_max 原始 byte，不減 1。這個 byte 只有在上下限不同時才比每級成長的最大值（也是攻略站印的上限）多 1；上下限相同時每級固定成長就是這個 byte，攻略站印的也是它本身，所以「比攻略站多 1」「實際上限是後一個值減 1」「上限擲不到」三種說法都只在上下限不同時成立。byte 的語意由 assets/tables/characters.md 擁有，其他頁改為加上限定或只連過去。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/village.md\n  why the edit was made: 「比攻略站印的最大成長值多 1」對上下限相等的組不成立，改為只陳述原始 byte 並連回擁有 byte 語意的正典。\n  old: - 加的是新型態那一列的 `*_max` **原始 byte**（零延伸），也就是比攻略站印的最大成長值多 1 的那個數（[`assets/tables/characters.md`](../assets/tables/characters.md)）。\n  new: - 加的是新型態那一列的 `*_max` **原始 byte**（零延伸），不減 1；這個 byte 與每級成長值的關係見 [`assets/tables/characters.md`](../assets/tables/characters.md)。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/village.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F14",
+  "item_sha1": "804cff86887649185063ccb52177e26699deada5",
+  "verdict": "consistent",
+  "conclusion": "升級成長從兩個 byte 取值：兩值不同時是下限加上 rand() % (上限 − 下限)，所以最多只到後一個值減 1；兩值相等時不呼叫 rand()，固定成長這個值。assets/characters.md 目前那句已寫成「兩值不同時每級實際的成長上限是後一個值減 1，兩值相等時每級固定成長這個值」，與被拒的修正說的是同一件事。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-701",
+    "observation": "gain_range = growth_pair[1] - min_gain；只有 gain_range != 0 才做 rand() % gain_range，相等時 offset 為 0，成長固定為 min_gain（等於兩值）。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/characters.md，FRILEVUP.DAT 成長表下方那段",
+    "observation": "現文為「表中的範圍是檔案裡兩個 byte 的原值：兩值不同時每級實際的成長上限是後一個值減 1，兩值相等時每級固定成長這個值（tables/characters.md）」，涵蓋被拒修正的兩種情形。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X35 (conflict) settled on: 教會轉職加的是新型態 FRILEVUP.DAT 那一列的 *_max 原始 byte，不減 1。這個 byte 只有在上下限不同時才比每級成長的最大值（也是攻略站印的上限）多 1；上下限相同時每級固定成長就是這個 byte，攻略站印的也是它本身，所以「比攻略站多 1」「實際上限是後一個值減 1」「上限擲不到」三種說法都只在上下限不同時成立。byte 的語意由 assets/tables/characters.md 擁有，其他頁改為加上限定或只連過去。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/characters.md\n  why the edit was made: 原句對 2-2、3-3 這類相等的組會算成少 1，補上相等時的情形。\n  old: 表中的範圍是檔案裡兩個 byte 的原值，每級實際的成長上限是後一個值減 1（[`tables/characters.md`](tables/characters.md)）。\n  new: 表中的範圍是檔案裡兩個 byte 的原值；兩值不同時每級實際的成長上限是後一個值減 1，兩值相同時每級固定成長這個值（[`tables/characters.md`](tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/characters.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F15",
+  "item_sha1": "e472696b3cfada1660863aee40cf0e54bf0c6e65",
+  "verdict": "consistent",
+  "conclusion": "FRILEVUP.DAT 每組成長配對在兩值不同時取 min + rand() % (max - min)，每級上限是後一個值減 1；兩值相等時跳過 rand()，固定成長該值。assets/characters.md 目前的文字已分成這兩種情況陳述，與被拒收的修正所要表達的事實一致。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:694-703",
+    "observation": "gain_range = growth_pair[1] - min_gain；僅在 gain_range != 0 時 gain_offset = rand() % gain_range，否則 offset 為 0，成長值即 min。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/characters.md 成長表下方說明段",
+    "observation": "現文為「表中的範圍是檔案裡兩個 byte 的原值：兩值不同時每級實際的成長上限是後一個值減 1，兩值相等時每級固定成長這個值」，涵蓋了被拒收修正的全部內容。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X36 (conflict) settled on: FRILEVUP.DAT 的 *_max 只在大於 *_min 時是「最大成長值加 1」（升級取 min + rand() % (max - min)，上限不含）；兩者相等時跳過 rand()、固定成長 min，攻略站列的也就是這個 byte 本身。assets/tables/characters.md 與 rebuild_info/pitfalls.md 現已一致，但 assets/characters.md 與 program_info/village.md 仍把「減 1／多 1」寫成一律適用，改為只限上下限不同的項目。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/characters.md\n  why the edit was made: 上下限相同的 26 組配對固定成長該值，不是減 1。\n  old: 表中的範圍是檔案裡兩個 byte 的原值，每級實際的成長上限是後一個值減 1（[`tables/characters.md`](tables/characters.md)）。\n  new: 表中的範圍是檔案裡兩個 byte 的原值；兩值不同時每級實際的成長上限是後一個值減 1，兩值相同時每級固定成長該值（[`tables/characters.md`](tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/characters.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F16",
+  "item_sha1": "9dc0697f8de3bd40f2fdc0d6ba996e0882d0a813",
+  "verdict": "consistent",
+  "conclusion": "轉職加的是新型態 FRILEVUP.DAT 列的 *_max 原始 byte；升級時取 min + rand() % (max - min)，上限不含，上下限相同時跳過 rand()，所以只有上下限不同的項目，原始 byte 才比攻略站印的最大成長值多 1，上下限相同時就是攻略站印的值。program_info/village.md 目前的文字已逐字寫出這個區分（只差「那個值」與「的值」），不需要再改。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/village.md 轉職的結果第一項",
+    "observation": "現行文字：「上下限不同的項目比攻略站印的最大成長值多 1，上下限相同的項目就是攻略站印的值」，與被拒的修正同義。"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-703",
+    "observation": "gain_range = max - min；gain_range != 0 才取 rand() % gain_range，否則增量固定為 min。"
+   },
+   {
+    "source": "src",
+    "location": "src/church.c:929, 1116-1173",
+    "observation": "轉職把 growth->ap_max／dp_max／dx_max／hp_max／mp_max 的原始 byte 加到記錄上。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X36 (conflict) settled on: FRILEVUP.DAT 的 *_max 只在大於 *_min 時是「最大成長值加 1」（升級取 min + rand() % (max - min)，上限不含）；兩者相等時跳過 rand()、固定成長 min，攻略站列的也就是這個 byte 本身。assets/tables/characters.md 與 rebuild_info/pitfalls.md 現已一致，但 assets/characters.md 與 program_info/village.md 仍把「減 1／多 1」寫成一律適用，改為只限上下限不同的項目。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/village.md\n  why the edit was made: 轉職型態裡有上下限相同的項目（如機械伯爵 DX 3-3），攻略站印的就是原 byte。\n  old: 也就是比攻略站印的最大成長值多 1 的那個數（[`assets/tables/characters.md`](../assets/tables/characters.md)）。\n  new: 上下限不同的項目比攻略站印的最大成長值多 1，上下限相同的項目就是攻略站印的那個值（[`assets/tables/characters.md`](../assets/tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/village.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F17",
+  "item_sha1": "f06741bbe9c28456edb28f0c9fda7239d0b5db59",
+  "verdict": "consistent",
+  "conclusion": "FRILEVUP.DAT 每組成長值的兩個 byte 不同時，升級取 min + rand() % (max - min)，實際上限是後一個值減 1；兩值相等時不抽亂數，每級固定成長該值。assets/characters.md 現行文字已寫明兩值不同與相等兩種情況，與被拒的修正同義。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-698",
+    "observation": "min_gain = growth_pair[0]; gain_range = growth_pair[1] - min_gain; gain_offset 預設 0，range 為 0 時不呼叫 rand()，成長固定為 min。"
+   },
+   {
+    "source": "src",
+    "location": "src/unitstat.h:308-323",
+    "observation": "註解確認第二個 byte 是不含上限，兩值相等的組不抽亂數、固定成長最小值。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/characters.md:166",
+    "observation": "現行文字：「表中的範圍是檔案裡兩個 byte 的原值：兩值不同時每級實際的成長上限是後一個值減 1，兩值相等時每級固定成長這個值」，與被拒修正的意思相同，只差「相同／相等」「該值／這個值」用字。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X37 (conflict) settled on: FRILEVUP.DAT 的 `*_max` 只在大於 `*_min` 時是「最大成長值加 1」（升級取 `min + rand() % (max - min)`，上限不含）；兩者相等時不抽亂數、每級固定成長 `*_min`，表上印的上限就是實際成長。pitfalls.md 與 tables/characters.md 已寫明這個例外，但 assets/characters.md 與 program_info/battle.md 仍無條件說「上限減 1、實際擲不到」，而成長表有大量 2-2、0-0、1-1 這類相等的列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: assets/characters.md\n  why the edit was made: 相等的列（如 2-2、0-0、1-1）不減 1，原句對它們不成立。\n  old: 表中的範圍是檔案裡兩個 byte 的原值，每級實際的成長上限是後一個值減 1（[`tables/characters.md`](tables/characters.md)）。\n  new: 表中的範圍是檔案裡兩個 byte 的原值：兩值不同時每級實際的成長上限是後一個值減 1，兩值相同時每級固定成長該值（[`tables/characters.md`](tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- assets/characters.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F18",
+  "item_sha1": "b3d1e59d0c5a0a2cdbff209a7a5901d8d37cbd9f",
+  "verdict": "consistent",
+  "conclusion": "升級成長只在 max 與 min 不同時才抽 min + rand() % (max - min)，max 為不含的上界；兩者相等時不呼叫 rand()，每級固定成長 min。program_info/battle.md 現行文字（虛擬碼 gain = min、「max 與 min 不同時是不含的上界」、「max == min 時不呼叫 rand()」）已完整表達這個例外；FRILEVUP.DAT 沒有 max < min 的組，所以「不同時」與「大於時」在實際資料上等價。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-700",
+    "observation": "min_gain = growth_pair[0]; gain_range = growth_pair[1] - min_gain; gain_offset 預設 0，只有 gain_range != 0 時才 rand() % gain_range。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「升級時的屬性成長」",
+    "observation": "現行文字：虛擬碼 gain = min、if max - min != 0 才抽亂數；條列「max 與 min 不同時是不含的上界」與「max == min 時不呼叫 rand()，不消耗亂數」，第 211 行也寫「上下限不同時實際擲不到」。"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/MISC/FRILEVUP.DAT@0x000-0x293（60 筆 × 11 byte，每筆前 10 byte 為五組 min,max，以 python 逐組比較）",
+    "observation": "相等的組 151 個，max < min 的組 0 個。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X37 (conflict) settled on: FRILEVUP.DAT 的 `*_max` 只在大於 `*_min` 時是「最大成長值加 1」（升級取 `min + rand() % (max - min)`，上限不含）；兩者相等時不抽亂數、每級固定成長 `*_min`，表上印的上限就是實際成長。pitfalls.md 與 tables/characters.md 已寫明這個例外，但 assets/characters.md 與 program_info/battle.md 仍無條件說「上限減 1、實際擲不到」，而成長表有大量 2-2、0-0、1-1 這類相等的列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/battle.md\n  why the edit was made: 不含上界只在兩值不同時成立，相等時成長固定為 min。\n  old: - `max` 是**不含**的上界：可能的成長是 `min`..`max − 1`。\n  new: - `max > min` 時 `max` 是**不含**的上界：可能的成長是 `min`..`max − 1`。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/battle.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F19",
+  "item_sha1": "9b80058413d54bffb74a4bc13496ae8a3e1e818e",
+  "verdict": "consistent",
+  "conclusion": "升級成長取 min + rand() % (max - min)，上下限不同時 max 是不含的上界、實際擲不到；上下限相同時不呼叫 rand()、每級固定成長 min（即表上印的上限）。program_info/battle.md 現行文字以虛擬碼 gain = min、「max 與 min 不同時是不含的上界」與「max == min 時不呼叫 rand()」三處加上括號內「上下限不同時實際擲不到」完整涵蓋這個事實。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:694-703",
+    "observation": "gain_range = max - min；gain_offset 預設 0，只在 gain_range != 0 時取 rand() % gain_range；成長為 min_gain + gain_offset，相等時就是 min。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「升級時的屬性成長」",
+    "observation": "虛擬碼 gain = min / if max - min != 0: gain = min + rand() % (max - min)，條列「max 與 min 不同時是不含的上界：可能的成長是 min..max − 1」「max == min 時不呼叫 rand()」，結尾括號「上下限不同時實際擲不到」；相等時成長即 min＝上限已由虛擬碼與條列表達。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X37 (conflict) settled on: FRILEVUP.DAT 的 `*_max` 只在大於 `*_min` 時是「最大成長值加 1」（升級取 `min + rand() % (max - min)`，上限不含）；兩者相等時不抽亂數、每級固定成長 `*_min`，表上印的上限就是實際成長。pitfalls.md 與 tables/characters.md 已寫明這個例外，但 assets/characters.md 與 program_info/battle.md 仍無條件說「上限減 1、實際擲不到」，而成長表有大量 2-2、0-0、1-1 這類相等的列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/battle.md\n  why the edit was made: 與 src 及 tables/characters.md 的相等例外一致。\n  old: （表上印的上限是檔案原值，實際擲不到）\n  new: （表上印的上限是檔案原值，上下限不同時實際擲不到，相同時就是每級的成長）\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/battle.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F20",
+  "item_sha1": "eca2c69fd1d0d0f9ab5bd1690fca6c56eab07814",
+  "verdict": "consistent",
+  "conclusion": "轉職加的 `*_max` 原始 byte 在上下限不同時比攻略站印的最大成長值多 1，上下限相同時就是攻略站印的值，也就是每級固定成長量（相等時升級不抽亂數、只加 `*_min`）。village.md 現行文字已涵蓋這個例外，與被拒的修正說的是同一件事。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:693-701",
+    "observation": "fdps_level_up_apply_stat_gain 以 max - min 為範圍，範圍為 0 時不呼叫 rand、偏移為 0，成長固定為 min；範圍非 0 時取 min + rand() % (max - min)，上限不含。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/village.md 轉職的結果第一條",
+    "observation": "現行文字：「上下限不同的項目比攻略站印的最大成長值多 1，上下限相同的項目就是攻略站印的值」，已區分兩種情況。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/tables/characters.md:41",
+    "observation": "兩者相等時每級固定成長 `*_min`，攻略站列的也就是這個 byte 本身；與 village.md 現行文字一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X37 (conflict) settled on: FRILEVUP.DAT 的 `*_max` 只在大於 `*_min` 時是「最大成長值加 1」（升級取 `min + rand() % (max - min)`，上限不含）；兩者相等時不抽亂數、每級固定成長 `*_min`，表上印的上限就是實際成長。pitfalls.md 與 tables/characters.md 已寫明這個例外，但 assets/characters.md 與 program_info/battle.md 仍無條件說「上限減 1、實際擲不到」，而成長表有大量 2-2、0-0、1-1 這類相等的列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/village.md\n  why the edit was made: 轉職目標列有 2-2、3-3 等相等的項目，原句「多 1」對它們不成立；與 src/unitstat.c 的相等分支及 tables/characters.md 一致。\n  old: 也就是比攻略站印的最大成長值多 1 的那個數（[`assets/tables/characters.md`](../assets/tables/characters.md)）。\n  new: 上下限不同時是比最大成長值多 1 的那個數，上下限相同時就是每級固定的成長量（[`assets/tables/characters.md`](../assets/tables/characters.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/village.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F21",
+  "item_sha1": "a356dcda6ef12d12dd5d7dbde8f2ba0dba560812",
+  "verdict": "consistent",
+  "conclusion": "ch06 現行文字已把中毒致死不跑死亡腳本縮成一句話，說明單位照常倒下退場但死亡腳本不執行，成因連到 known_bugs 第 23 條，函式名與位址已移出章節頁，正是被拒修正要表達的事實。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "chapters/ch06.md 「中毒致死不跑死亡腳本」段",
+    "observation": "現行文字：陣營階段開始時被中毒扣血打死的單位照常倒下、退場，但它的死亡腳本不執行（原版 bug，成因見 known_bugs.md 第 23 條連結）。本章因此有兩個後果；不再列 fdps_battle_tick_status_effects 等函式名。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md ## 23. 中毒致死不執行死亡腳本",
+    "observation": "標題產生的錨點 #23-中毒致死不執行死亡腳本 與 ch06 的連結一致；現象段同樣寫「照常倒下、退場」，成因段擁有函式層級的說明。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X51 (conflict) settled on: 兩頁的函式名並不矛盾：死亡腳本的收集函式有兩支，`fdps_collect_death_scripts`（`0x26180`，攻擊、我方施法、道具）與 `fdps_collect_death_script_events`（`0x274e0`，AI 施法，只收 opcode 2..5），`fdps_battle_tick_status_effects`（`0x1fa30`）兩支都不呼叫。這條 bug 的成因由 known_bugs 第 23 條擁有，ch06 改成一句話加連結，只留本章的後果。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: chapters/ch06.md\n  why the edit was made: 成因由 known_bugs 第 23 條擁有，章節頁只留一句話與連結，避免同一事實兩處各寫一份。\n  old: **中毒致死不跑死亡腳本**：陣營階段開始時的中毒扣血由 `fdps_battle_tick_status_effects`（`0x1fa30`）結算，它把 HP 歸 0 的單位直接交給 `fdps_play_death_animation_and_mark_dead`（`0x1d6c0`）標成退場，沒有經過收集死亡腳本的 `fdps_collect_death_scripts`（`0x26180`）或 `fdps_collect_death_script_events`（`0x274e0`）。本章因此有兩個後果：\n  new: **中毒致死不跑死亡腳本**：陣營階段開始時被中毒扣血打死的單位不執行死亡腳本（原版 bug，成因見 [`known_bugs.md` 第 23 條](../program_info/known_bugs.md#23-中毒致死不執行死亡腳本)）。本章因此有兩個後果：\n\nSee what happened to that passage: git diff 14a5e44 -- chapters/ch06.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F22",
+  "item_sha1": "8100066336c5b78d5f1e9500af4c56e43df7f91a",
+  "verdict": "fixed",
+  "conclusion": "過場腳本的 SWITCH_MAP 先改寫章節索引再呼叫同一支 fdps_chapter_state_reset，依名冊重建單位陣列，所以決定上場名單的是最後一次重建。第 1 章的開場過場 ICON00.DAT 一開頭就切走、在 0x051c 切回地圖 0 重建，跟第 9 章一樣，加入只要在開場過場之前，排在 reset 之前或之後都一樣；現行文字把第 1 章跟第 2、3、11 章歸成「加入得晚就變成空位」的一類，這是錯的。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:1053-1058",
+    "observation": "case SCRIPT_OP_SWITCH_MAP: data_fdps_chapter_current_chapter_id = script[offset+1]; fdps_chapter_state_reset(); -- SWITCH_MAP 會依名冊重建一次單位陣列"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:815",
+    "observation": "SCRIPT_OP_SWITCH_MAP 的 opcode 是 0x11"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/ICONANI/ICON00.DAT@0x0000, @0x051c",
+    "observation": "0x0000 是 11 20（SWITCH_MAP 32，也就是腳本第一條指令），0x051c 是 11 00（SWITCH_MAP 0），所以第 2 步 reset 建出的陣列在任何單位操作之前就被換掉，戰場陣列由 0x051c 依名冊重建"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/ICONANI/ICON06.DAT@0x0002,@0x00d2; ICON07.DAT@0x0002,@0x00a0; ICON08.DAT@0x0004,@0x01a5",
+    "observation": "11 2f / 11 06、11 30 / 11 07、11 36 / 11 08：第 7、8、9 章的開場過場也在單位操作前切走，最後切回本章地圖；第 7、8 章的 slot 在加入前本來就已填滿，不影響結論"
+   },
+   {
+    "source": "src",
+    "location": "src/chinit1.c:111-113",
+    "observation": "fdps_chapter_01_init 依序執行 roster add、state reset、icon script run（Icon00）"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch01.md「進入」第 2 步; chapters/ch02.md, ch03.md, ch11.md",
+    "observation": "地圖 0 只有 1 個我方 slot，入隊前名冊人數是 0；第 2、3、11 章的頁面沒有任何 SWITCH_MAP，開場過場不重建，所以 init 裡的 reset 就是最後一次重建"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "program_info/chapter.md",
+    "old": "**名冊加入排在 reset 之前，新成員才坐得上本章地圖的我方 slot。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），slot i 只在 i 小於名冊人數時從名冊第 i 位取人，否則歸零成退場的空 slot。所以只有地圖的我方 slot 數多於入隊前名冊人數的章節，順序才決定結果：第 1、2、3、11 章加入得晚，新成員那一格就變成退場的空位；第 9 章的兩人只需在開場過場以 `SWITCH_MAP` 重建地圖 8 之前加入。",
+    "new": "**名冊加入排在最後一次依名冊重建單位陣列之前，新成員才坐得上本章地圖的我方 slot。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），slot i 只在 i 小於名冊人數時從名冊第 i 位取人，否則歸零成退場的空 slot；過場腳本的 `SWITCH_MAP` 走的是同一支 reset，所以開場過場最後切回本章地圖的章，決定上場名單的是過場裡的那次重建。所以只有地圖的我方 slot 數多於入隊前名冊人數的章節，順序才決定結果：第 2、3、11 章的開場過場不切地圖，加入排在第 2 步之後，新成員那一格就變成退場的空位；第 1 章（`0x051c` 切回地圖 0）與第 9 章（`0x01a5` 切回地圖 8）的開場過場以 `SWITCH_MAP` 重建本章地圖，加入排在第 2 步之前或之後都一樣，只要在第 3 步之前。",
+    "why": "第 1 章的開場過場跟第 9 章一樣，會以 SWITCH_MAP 依名冊重建戰場，現行文字把它跟開場過場不切地圖的第 2、3、11 章歸在同一類是錯的，標題句也漏掉了 SWITCH_MAP 這次重建。"
+   }
+  ],
+  "outside": "src/chinit1.c:83-88 的 fdps_chapter_01_init 註解寫著：把加入排在 reset 之後，蘭迪斯就完全不會出現在第 1 章的地圖上。實際上 Icon00.dat 在 0x051c 會以 SWITCH_MAP 0 依名冊重建地圖 0，所以只要加入在 fdps_icon_script_run 之前，他還是會上場；這段註解要改成順序只相對於過場之前才有意義（保留原版順序只是因為原版就是這樣排）。",
+  "confidence": "high",
+  "open_question": "chapters/ch01.md「進入」第 1 步寫「這一步必須在下一步之前，否則地圖的我方 slot 取不到人」，與同一頁第 3 步的 0x051c 重建互相矛盾，應該改成必須在第 3 步之前；這一處不在本項的範圍內，交給負責 ch01.md 的項目處理。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查了 src/icon.c:1053-1058（SWITCH_MAP 改寫章節索引後呼叫 fdps_chapter_state_reset）、src/chapter.c:275-293（reset 依目前章節索引呼叫 fdps_build_map_unit_array 重建單位陣列）、src/chinit1.c:111-113 與 83-88 的註解；讀了 ICON00.DAT（1488 byte，@0x0000 = 11 20、@0x051c = 11 00）與 ICON08.DAT（@0x01a5 = 11 08），與 chapters/ch01.md 第 547 行、ch09.md 第 318 行的指令表一致；ch02、ch03、ch11 的開場過場標示「切換地圖 無」。所以第 1 章跟第 9 章同屬開場過場最後切回本章地圖、由過場裡那次重建決定上場名單的一類，現行頁面把第 1 章歸進第 2、3、11 章一類是錯的。edit 的 old 逐字取自目前頁面第 63 行，new 的「第 2 步／第 3 步」對應同頁第 55-57 行的步驟編號，後半句第 4、7、8、15、19、24 章那段保持不動；rebuild_info/pitfalls.md 第 236 行已寫成「開場過場不切回本章地圖的章」才會出錯，與新文字一致，所有權不變。outside 對 src/chinit1.c:83-88 註解的修正也正確：只要加入在 fdps_icon_script_run 之前，0x051c 的重建就會把蘭迪斯放上地圖 0。確認。",
+   "edits": []
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X55 (conflict) settled on: 過場腳本的 SWITCH_MAP 先把章節索引改成目標地圖、再呼叫同一支 fdps_chapter_state_reset 依名冊重建單位陣列，所以決定上場名單的是最後一次重建。有加入者的章之中，第 1、7、8、9 章的開場過場最後切回本章地圖，加入排在 reset 之前或之後結果相同、只要在過場之前；第 2、3、4、11、15、19 章的開場過場不切地圖，加入必須在 reset 之前。chapter.md 把「加入必須在 reset 之前」寫成無例外的規則是過度一般化，ch09.md 正確。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/chapter.md\n  why the edit was made: SWITCH_MAP 也會依名冊重建單位陣列，原句把只對開場過場不切地圖的章成立的條件寫成無例外的規則，與 ch09.md 的正確敘述衝突。\n  old: **名冊加入必須在 reset 之前。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），加入得晚，新成員就不會出現在本章的地圖上，那一格變成歸零、退場的空 slot。第 24 章之所以可以反過來\n  new: **名冊加入必須在最後一次依名冊重建單位陣列之前。**reset 會依名冊重建地圖上的我方 slot（見「部署與援軍波次」），加入得晚，新成員就不會出現在本章的地圖上，那一格變成歸零、退場的空 slot。過場腳本的 `SWITCH_MAP` 走的是同一支 reset，所以開場過場最後切回本章地圖的章，決定上場名單的是過場裡那次重建：有加入者的章之中，第 1、7、8、9 章屬於這一類，加入排在第 2 步之前或之後結果相同，只要在第 3 步之前；第 2、3、4、11、15、19 章的開場過場不切地圖，加入必須在第 2 步之前。原版除第 24 章外一律排在第 2 步之前。第 24 章之所以可以反過來\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/chapter.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F23",
+  "item_sha1": "4583c5dac9138feb20ef583fe4cf937702253fd8",
+  "verdict": "consistent",
+  "conclusion": "少了 fdps_chapter_15_init 的那次清除，開場過場行動過的光束砲座會帶著已行動旗標直到 fdps_battle_advance_turn 在敵方字卡後的清除：這段期間畫成已行動的影格、戰鬥選單的存檔反灰，但砲座照常在第一個敵方階段開火，沒有誰停擺。pitfalls.md 過場直譯器那一列現在的文字已完整陳述這件事，與擁有者 ch15.md 一致，不需再改。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/btlturn.c:841-868",
+    "observation": "fdps_battle_advance_turn 的順序是友軍事件與友軍階段、敵方字卡、fdps_units_clear_status_bit7、敵方階段、回合數加一、我方字卡、第二次清 bit 7；所以少了第 15 章那次清除時，旗標從第 1 回合我方階段留到敵方字卡後才被清，砲座照常行動。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 過場直譯器那一列",
+    "observation": "現文為「刪掉第 15 章那次會讓腳本裡行動過的砲座整個第一個玩家階段都帶著已行動旗標，畫成已行動的影格、戰鬥選單的存檔也反灰（敵方階段前的清除仍讓它照常開火）」，已去掉「停擺」，涵蓋影格、存檔反灰與照常開火三點。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch15.md 〈要塞砲的射擊〉與第 39 行",
+    "observation": "擁有者頁面用同樣的說法；本章戰鬥開始時唯一的友軍步兵已在開場過場被打倒，友軍階段沒有單位，refused edit 多寫的「友軍階段」在本章沒有可見差別。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X60 (conflict) settled on: 開場過場以 0x62 讓光束砲座（陣營 0，敵方）行動時設上 bit 7；fdps_chapter_15_init 少了自己那次清除，砲座只會在第 1 回合我方與友軍階段畫成已行動的影格、系統選單的存檔反灰，敵方回合字卡後 fdps_battle_advance_turn 本來就會清 bit 7，砲座照常在第一個敵方階段開火。ch15.md 兩處與 cutscene.md 現在已是這個說法；pitfalls.md 仍寫成「在第一個玩家回合停擺」，已改正，ch15 進入步驟的重述縮成一句加連結。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 砲座是敵方單位，少了這次清除不會讓誰停擺，只有影格與存檔反灰，敵方階段前本來就會清掉。\n  old: 刪掉第 15 章那次會讓腳本裡行動過的單位在第一個玩家回合停擺\n  new: 刪掉第 15 章那次會讓開場腳本行動過的砲座在第 1 回合我方與友軍階段畫成已行動的影格、戰鬥選單的存檔反灰\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F24",
+  "item_sha1": "0037de587712491b84257c3db4ab414c709bf526",
+  "verdict": "consistent",
+  "conclusion": "刪掉 fdps_chapter_15_init 在開場過場後的那次清除，只會讓過場裡行動過的光束砲座整個第一個玩家階段帶著已行動旗標（畫成已行動的影格、戰鬥系統選單的存檔反灰）；fdps_battle_advance_turn 在敵方字卡後會清一次，它照常開火，沒有單位停擺。pitfalls.md 目前那一列已經寫成這個事實。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 過場直譯器那一列",
+    "observation": "現行文字為「刪掉第 15 章那次會讓腳本裡行動過的砲座整個第一個玩家階段都帶著已行動旗標，畫成已行動的影格、戰鬥選單的存檔也反灰（敵方階段前的清除仍讓它照常開火）」，與被拒的修正內容相同；相鄰新增的存檔反灰那一列也點名陣營 0 的光束砲座。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlturn.c:851-860",
+    "observation": "fdps_battle_advance_turn 在播放 EnyPhase.saf 後立刻呼叫 fdps_units_clear_status_bit7，之後才執行 fdps_battle_enemy_turn_phase，所以砲座在第一個敵方階段前已行動旗標就被清掉。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X61 (conflict) settled on: ICON14 裡以 0x62 行動過的只有光束砲座（陣營 0）；少了 fdps_chapter_15_init 的那次清除，它整個第一個玩家階段都帶著已行動位元，地圖上畫成已行動的影格、戰鬥系統選單的存檔反灰，但 fdps_battle_advance_turn 在敵方回合字卡後本來就會清一次，所以它在第一個敵方階段照常開火，沒有任何單位停擺。ch15.md 與 cutscene.md 的說法正確，pitfalls.md 的「停擺」是錯的。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 砲座是敵方單位，原本就不在玩家階段行動，少了這次清除的後果是影格與存檔反灰，不是停擺。\n  old: 刪掉第 15 章那次會讓腳本裡行動過的單位在第一個玩家回合停擺\n  new: 刪掉第 15 章那次會讓過場裡行動過的光束砲座整個第一個玩家階段帶著已行動旗標：畫成已行動的影格、戰鬥選單的存檔反灰（敵方階段前的清除仍讓它照常開火）\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F25",
+  "item_sha1": "549d4aa5f6adf4b542320b7c09babc8ca47a4317",
+  "verdict": "fixed",
+  "conclusion": "少了 fdps_chapter_15_init 在開場過場後的那次清除，行動過的光束砲座會在第 1 回合的我方階段與友軍階段都帶著已行動旗標：畫成已行動的影格，我方階段戰鬥系統選單的「存檔」反灰；「敵方回合」字卡之後的清除會放掉旗標，所以砲座在敵方階段照常行動。現行文字只寫了「第一個玩家階段」，漏掉友軍階段，因為我方與友軍階段之間沒有任何清除。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/btlturn.c:840-868",
+    "observation": "fdps_battle_advance_turn 的順序是先跑友軍階段（fdps_battle_npc_turn_phase），接著播敵方階段字卡、呼叫 fdps_units_clear_status_bit7，再跑敵方階段；我方階段與友軍階段之間沒有清除，敵方階段前才清"
+   },
+   {
+    "source": "src",
+    "location": "src/btlmenu.c:548-554",
+    "observation": "戰鬥系統選單只要有任何一個未退場的單位帶著已行動旗標（0x80），就把存檔項目反灰，不看陣營"
+   },
+   {
+    "source": "src",
+    "location": "src/mapdraw.c:660,681",
+    "observation": "地圖單位只要帶著已行動旗標就畫成已行動影格（陰影也是），不看目前是誰的階段，所以友軍階段裡的砲座也會畫成已行動"
+   },
+   {
+    "source": "src",
+    "location": "src/btlmenu.c:440, src/chinit1b.c:557, src/icon.c:906",
+    "observation": "其他清除點分別在全員行動完畢後的 advance_turn 之後、第 15 章 init 過場之後、過場直譯器一進入時；都不在我方與友軍階段之間"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 過場直譯器那一列",
+    "observation": "現行文字寫成「整個第一個玩家階段都帶著已行動旗標」，少了友軍階段"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "刪掉第 15 章那次會讓腳本裡行動過的砲座整個第一個玩家階段都帶著已行動旗標，畫成已行動的影格、戰鬥選單的存檔也反灰（敵方階段前的清除仍讓它照常開火）",
+    "new": "刪掉第 15 章那次會讓開場過場裡行動過的光束砲座在第 1 回合的我方與友軍階段一直帶著已行動旗標，畫成已行動的影格、戰鬥系統選單的「存檔」也反灰（「敵方回合」字卡後的清除仍讓它在敵方階段照常開火）",
+    "why": "我方與友軍階段之間沒有清除，旗標要到敵方階段前才放掉，現行文字只寫第一個玩家階段，漏了友軍階段。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查了 src/btlturn.c:841-868：fdps_battle_advance_turn 先跑友軍階段（846），之後才播 EnyPhase.saf 並呼叫 fdps_units_clear_status_bit7（851-852），我方與友軍階段之間沒有清除；砲座是陣營 0（ENEMY_PHASE_SIDE 0，btlturn.c:149），在敵方階段前旗標已被放掉。src/mapdraw.c:660,681 只看 UNIT_FLAG_ACTED 就畫已行動影格，不分階段；src/btlmenu.c:548-554 任一未退場單位帶旗標就停用存檔。正典 program_info/cutscene.md:32 也寫砲座在我方與友軍階段以已行動影格畫出。pitfalls.md 現行文字只寫「整個第一個玩家階段」，漏了友軍階段；edit 的 old 逐字在頁面上，新文字與正典一致且為結論式，pitfalls 只是摘要並已連回 cutscene.md，擁有者不變。確認。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X62 (conflict) settled on: fdps_chapter_15_init 在開場過場後那次清除的作用，是讓以 0x62 行動過的光束砲座在第一個玩家階段不帶「已行動」位元：少了它，砲座畫成已行動的影格、戰鬥選單的存檔反灰；砲座本來就不在玩家階段行動，敵方階段前 fdps_battle_advance_turn 會再清一次，所以它照常開火。chapters/ch15.md 與 program_info/cutscene.md 的寫法正確；src 註解「would sit out the first player phase」與 pitfalls.md「在第一個玩家回合停擺」不正確。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 砲座是陣營 0，不在我方階段行動，敵方階段前的清除本來就會放掉 bit 7；少了第 15 章那次清除的實際差別只有我方與友軍階段的已行動影格與存檔反灰（src/btlturn.c:846-860、src/btlmenu.c:548-554、src/mapdraw.c:660,681）。\n  old: 刪掉第 15 章那次會讓腳本裡行動過的單位在第一個玩家回合停擺\n  new: 刪掉第 15 章那次會讓開場過場裡行動過的光束砲座在第 1 回合的我方與友軍階段一直帶著已行動旗標，畫成已行動的影格、系統選單的「存檔」反灰（它在敵方階段照常行動，因為「敵方回合」字卡後本來就會再清一次）\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F26",
+  "item_sha1": "997e14b327f658ab98f9ab1328f690f4481de00b",
+  "verdict": "consistent",
+  "conclusion": "中毒致死不執行死亡腳本，已知受影響的地方包括第 6、8、12（連帶第 16）、13 章，以及過關只由魔王死亡腳本寫入的第 22 章巫湯婆婆與第 23 章死神——兩者若毒死這一局就無法過關。known_bugs 第 23 條現行文字已完整列出這些章節與連結；被拒的修正另提的「拿不到死神契約、換不到反禁制器」是無法過關的附帶結果，而且毒死沒有擊殺者可比對，不需另列。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 第 23 條「現象」段",
+    "observation": "現行文字已列第 8 章第 18 筆守衛、第 13 章中央暗魔導士、第 22 章巫湯婆婆與第 23 章死神毒死即無法過關，連結 ch06/ch08/ch12/ch13/ch16/ch22/ch23 齊全。"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt4.c:918-954",
+    "observation": "fdps_chapter_23_event_boss_defeat 無條件寫結束碼 2；反禁制器交換只在同一個死亡腳本內、擊殺者為法蓮娜且帶死神契約時發生。"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt4.c:791-815",
+    "observation": "fdps_chapter_22_event_boss_defeat 在每條路徑寫結束碼 2，死神契約只在此死亡腳本內依擊殺者發放。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost2.c:655-660, 747-759",
+    "observation": "第 22、23 章的行動後處理只判敗北、不呼叫共用結束判定，過關只能來自魔王死亡腳本。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X71 (conflict) settled on: 第 23 章死神若在敵方階段開始時被中毒扣血打死，死亡腳本不執行，而本章過關只由死神的死亡腳本寫入，這一局無法過關，法蓮娜也換不到反禁制器；死神（職業 20 妖魔、肖像 48）不在異常免疫的範圍內。known_bugs 第 23 條只列三處受影響的地方，漏了第 23 章（以及同樣連回本條的第 8 章與第 13 章），已補齊。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/known_bugs.md\n  why the edit was made: 受影響清單漏了第 8、13、22、23 章；第 22、23 章過關只由魔王死亡腳本寫入，毒死就無法過關，與連回本條的章節頁與 pitfalls 不一致。\n  old: 已知會影響遊戲的有三處：第 6 章第 7 筆騎兵若是毒死，他死亡時才部署的波次 2 援軍永遠不會出場；第 6 章的索爾若是毒死，他的敗北死亡腳本不執行，戰鬥照常繼續；第 12 章被選中的守護獸若是毒死，這一局拿不到牠身上的神兵（`58` 修佩魯、`59` 雷德、`5A` 亞德尼恩），前兩把連帶讓第 16 章流浪工匠的交易做不成（[`../chapters/ch06.md`](../chapters/ch06.md)、[`../chapters/ch12.md`](../chapters/ch12.md)、[`../chapters/ch16.md`](../chapters/ch16.md)）。\n  new: 已知會影響遊戲的有：第 6 章第 7 筆騎兵若是毒死，他死亡時才部署的波次 2 援軍永遠不會出場；第 6 章的索爾若是毒死，他的敗北死亡腳本不執行，戰鬥照常繼續；第 8 章牢籠下方留下的守衛若是毒死，費塔加不會改去開牢門；第 12 章被選中的守護獸若是毒死，這一局拿不到牠身上的神兵（`58` 修佩魯、`59` 雷德、`5A` 亞德尼恩），前兩把連帶讓第 16 章流浪工匠的交易做不成；第 13 章那名暗魔導士若是毒死，全軍永遠不會轉為進攻；第 22 章的巫湯婆婆與第 23 章的死神若是毒死，這兩章的過關只由牠們的死亡腳本寫入，這一局就無法過關，法蓮娜也分別拿不到死神契約、換不到反禁制器（[`../chapters/ch06.md`](../chapters/ch06.md)、[`../chapters/ch08.md`](../chapters/ch08.md)、[`../chapters/ch12.md`](../chapters/ch12.md)、[`../chapters/ch13.md`](../chapters/ch13.md)、[`../chapters/ch16.md`](../chapters/ch16.md)、[`../chapters/ch22.md`](../chapters/ch22.md)、[`../chapters/ch23.md`](../chapters/ch23.md)）。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/known_bugs.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F27",
+  "item_sha1": "086b999807615834f36e5e5472c0c236c8e0722f",
+  "verdict": "consistent",
+  "conclusion": "中毒致死不執行死亡腳本，受影響的不只敗北判定，第 22、23 章的過關也只由魔王的死亡腳本寫入。known_bugs 第 23 條的摘要列現在已寫成「不下勝敗判定」，與被拒的修正要表達的事實一致，不需再改。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 摘要表第 23 列",
+    "observation": "現行文字為「毒死的單位不掉寶、不觸發援軍與章節事件、不下勝敗判定」，已涵蓋被拒修正要改成的「勝敗判定」。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 第 23 節「現象」段",
+    "observation": "寫明第 22 章巫湯婆婆、第 23 章死神若是毒死，這兩章的過關只由其死亡腳本寫入，這一局無法過關，與摘要列的「勝敗判定」一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X71 (conflict) settled on: 第 23 章死神若在敵方階段開始時被中毒扣血打死，死亡腳本不執行，而本章過關只由死神的死亡腳本寫入，這一局無法過關，法蓮娜也換不到反禁制器；死神（職業 20 妖魔、肖像 48）不在異常免疫的範圍內。known_bugs 第 23 條只列三處受影響的地方，漏了第 23 章（以及同樣連回本條的第 8 章與第 13 章），已補齊。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/known_bugs.md\n  why the edit was made: 第 22、23 章受影響的是過關判定，摘要列只寫敗北不完整。\n  old: 毒死的單位不掉寶、不觸發援軍、不下敗北判定\n  new: 毒死的單位不掉寶、不觸發援軍、不下勝敗判定\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/known_bugs.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F28",
+  "item_sha1": "39f31bccdbee855a5405cb06c4e62139e0d24628",
+  "verdict": "fixed",
+  "conclusion": "第 24 章提早清場後接受決鬥，判定問的單位 0x52 在陣列之外，fdps_unit_is_retired 讀陣列之後堆積內容當旗標 byte，bit 0 為 1 才走裘娜獲勝分支；bit 0 為 0 時兩人都算在場、什麼都不寫、決鬥繼續。這個 byte 不固定，因為 fdps_relocate_unit_array 每次搬移前先配置 rand() % 0x400 + 1 byte 的墊塊，而共用亂數被計時器中斷持續消耗。現行頁面已把讀值寫成條件，但缺了不固定的原因與 bit 0 為 0 的後果。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unit.c:73-79",
+    "observation": "fdps_unit_is_retired 只取 fdps_get_unit_record(unit_index)->flags & 1，沒有邊界檢查。"
+   },
+   {
+    "source": "src",
+    "location": "src/unit.c:754-780",
+    "observation": "fdps_relocate_unit_array 先 malloc(rand() % 0x400 + 1) 的墊塊再配置新陣列，墊塊大小 1..0x400，陣列落點隨之變動。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost2.c:956-985",
+    "observation": "決鬥旗標設起後，只有單位 4 或 0x52 任一被判退場才寫文字與結束碼 2；0x52 判退場走收 A6 給 A7 分支；兩者都未退場時不寫任何東西。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md#共用亂數",
+    "observation": "計時器中斷每秒 25 次各消耗一個 rand()，單位陣列搬移每次消耗 1 個。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 第 13 條",
+    "observation": "現行成因已寫成「bit 0 為 1 時就表現為已退場」的條件，但沒寫這個 byte 為何不固定，也沒寫 bit 0 為 0 的後果；現象段又說「見成因」。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "program_info/known_bugs.md",
+    "old": "於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。",
+    "new": "於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2；bit 0 為 0 時兩人都算在場，這一回合什麼都不寫，決鬥繼續。這個 byte 不是固定值：`fdps_relocate_unit_array`（`0x2df90`）每次搬移單位陣列都先配置一塊亂數大小（1–`0x400` byte）的墊塊，陣列的落點隨之變動，而亂數又持續被計時器中斷消耗（[`battle.md` 的共用亂數](battle.md#共用亂數)）。",
+    "why": "現行條件式寫法保留，補上現象段指向成因卻沒寫的「byte 為何不固定」與 bit 0 為 0 的後果。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "amend",
+   "why": "查 src/chpost2.c:956-985：旗標設起後只在單位 4 或 0x52 任一判退場時才寫文字與結束碼 2，0x52 判退場走收 A6 給 A7 的分支；src/unit.c:73-79 的 fdps_unit_is_retired 取 flags & 1、不檢查索引；src/unit.c:754-780 的 fdps_relocate_unit_array（functions.txt 0x2df90）先 malloc(rand() % 0x400 + 1) 的墊塊再配置新陣列；battle.md 共用亂數記計時器中斷每 tick 抽一個 rand()。頁面現行成因已寫成 bit 0 為 1 的條件，但沒寫 byte 為何不固定、也沒寫 bit 0 為 0 的後果，現象段卻說「見成因」，補寫是對的。但新文字有兩處不準：(1)「這一回合什麼都不寫」錯了單位——chapter.md 記行動後處理函式每回合被呼叫多次（每個單位行動後、狀態結算後各一次），bit 0 為 0 時是這一次呼叫不寫，下一次呼叫重讀，而陣列在兩次呼叫之間可能已經搬移，所以同一場決鬥之後仍可能翻成裘娜獲勝；(2)「兩人都算在場」預設了裘娜未退場，bit 0 為 0 但裘娜退場時走的是落敗分支。改寫這一句，其餘保留。",
+   "edits": [
+    {
+     "doc": "program_info/known_bugs.md",
+     "old": "於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。",
+     "new": "於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2；bit 0 為 0 而裘娜也未退場時，這一次呼叫什麼都不寫，決鬥繼續，下一次行動後處理再重讀一次（呼叫時機見 [`chapter.md`](chapter.md)）。這個 byte 不是固定值：`fdps_relocate_unit_array`（`0x2df90`）每次搬移單位陣列都先配置一塊亂數大小（1–`0x400` byte）的墊塊，陣列的落點隨之變動，而亂數又持續被計時器中斷消耗（[`battle.md` 的共用亂數](battle.md#共用亂數)）。",
+     "why": "現行條件式寫法保留，補上現象段指向成因卻沒寫的「byte 為何不固定」與 bit 0 為 0 的後果；後果以每次行動後處理的呼叫為單位，並限定裘娜未退場。"
+    }
+   ]
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X75 (conflict) settled on: 第 24 章提早清場後接受決鬥時，判定問的單位 0x52 在單位陣列之外，fdps_unit_is_retired 讀的是陣列之後的堆積內容；那一格旗標 byte 的 bit 0 為 1 才會走裘娜獲勝的分支，攻略站記載的自動認輸就是這個結果。這不是程式保證的固定表現：fdps_relocate_unit_array 每次搬移陣列前先配置 rand() % 0x400 + 1 byte 的墊塊，而共用亂數又被 25 Hz 計時器中斷持續消耗，陣列落點與其後內容因此不固定。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/known_bugs.md\n  why the edit was made: 原句把陣列之外的讀值寫成固定表現為已退場，但搬移時的亂數墊塊讓讀到的內容不固定，改寫成條件；bit 0 為 0 的後果照原始碼直述。\n  old: 讀到的堆積內容表現為「已退場」，於是走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。\n  new: 讀的是單位陣列之後的堆積內容；那一格旗標 byte 的 bit 0 為 1 時就走裘娜獲勝的分支：收走 `A6`、給 `A7`、結束碼寫 2。這個 byte 不是固定值：`fdps_relocate_unit_array`（`0x2df90`）每次搬移單位陣列都先配置一塊亂數大小（1–`0x400` byte）的墊塊，陣列的落點隨之變動，而亂數又持續被計時器中斷消耗（[`battle.md` 的共用亂數](battle.md#共用亂數)）。bit 0 為 0 時兩人都算在場，這一回合什麼都不寫，決鬥繼續。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/known_bugs.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F29",
+  "item_sha1": "f480ee3428fb231eea43b4b00c79aa119c70af2c",
+  "verdict": "consistent",
+  "conclusion": "第 24 章提早清場後判定問的 0x52 在單位陣列之外，讀到的是陣列之後的堆積內容，挑戰者第一回合自動認輸是攻略站記載的觀察結果而非程式保證的表現。program_info/chapter.md 現行文字已寫成「攻略站記載……表現為挑戰者在第一回合自動認輸」，把認輸歸為攻略站的記載，成因與不固定性由 known_bugs.md 擁有，與被拒修正要表達的事實一致。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md 「挑戰者是寫死的單位索引」段",
+    "observation": "現行文字為「第 24 章的挑戰者倖存，但判定問的是陣列之外的 `0x52`，攻略站記載第 7 回合之前過關時表現為挑戰者在第一回合自動認輸」，已把認輸標示為攻略站記載的結果，並連到 known_bugs.md。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 第 24 章決鬥條目的成因與重建段",
+    "observation": "成因段寫明 fdps_unit_is_retired 無邊界檢查、讀陣列之後的堆積內容，bit 0 為 1 時才走裘娜獲勝分支；重建段寫明堆積佈局一變認輸與否跟著變，不固定性由此頁擁有。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X75 (conflict) settled on: 第 24 章提早清場後接受決鬥時，判定問的單位 0x52 在單位陣列之外，fdps_unit_is_retired 讀的是陣列之後的堆積內容；那一格旗標 byte 的 bit 0 為 1 才會走裘娜獲勝的分支，攻略站記載的自動認輸就是這個結果。這不是程式保證的固定表現：fdps_relocate_unit_array 每次搬移陣列前先配置 rand() % 0x400 + 1 byte 的墊塊，而共用亂數又被 25 Hz 計時器中斷持續消耗，陣列落點與其後內容因此不固定。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/chapter.md\n  why the edit was made: 陣列之外的讀值不固定，認輸是觀察到的結果而非必然表現，成因由 known_bugs 擁有。\n  old: 判定問的是陣列之外的 `0x52`，表現為挑戰者在第一回合自動認輸。\n  new: 判定問的是陣列之外的 `0x52`，攻略站記載的結果是挑戰者在第一回合自動認輸。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/chapter.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F30",
+  "item_sha1": "b86d034692ad40d3b6c813ba88af2e7c66c777bd",
+  "verdict": "consistent",
+  "conclusion": "第 24 章決鬥判定問的是寫死的單位 0x52，只有第 15 回合敵方階段前的波次 5 出場後挑戰者才落在這一格；在那之前清場，判定讀的是單位陣列之外的堆積內容。攻略站記載的是第 7 回合之前清場時狂戰士自動認輸，第 7 回合到波次 5 出場之間清場的結果沒有查證。known_bugs 第 13 條現行的現象段與成因段已完整表達這些事實，與 ch24.md 一致。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chpost2.c:773-795",
+    "observation": "CHAPTER_24_CHALLENGER_UNIT_INDEX 定義為 0x52，註解說明只有陣列正好有 0x52 筆時挑戰者才落在該索引，單位較少時 fdps_unit_is_retired(0x52) 讀陣列最後一筆之後的位置。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch24.md 第 50、177、277 行",
+    "observation": "波次 5 在第 15 回合敵方階段前出場；0x52 是五個回合波次與珊全部出場後的單位數，波次 5 出場前過關讀陣列之外，第 7 回合起到波次 5 出場前的結果沒有查證。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/known_bugs.md 第 13 條",
+    "observation": "現象段已寫明攻略站記載第 7 回合之前的結果、程式不保證每次如此、取決於陣列之外的 byte、第 7 回合到第 15 回合波次 5 出場前是否認輸沒有查證；成因段已寫明第 15 回合敵方階段前的波次 5 出場之前清場時 0x52 在陣列之外。被拒的修正要表達的範圍與「結果由堆積內容決定」都已涵蓋。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X76 (conflict) settled on: 第 24 章決鬥判定問的是寫死的單位 0x52（82），只有五個回合波次與珊全部出場（第 15 回合波次 5 之後）陣列才正好有 82 筆；在波次 5 出場之前的任何清場，挑戰者都附加在較小的索引，判定讀的是陣列之外的記錄。known_bugs 第 13 條寫的「第 7 回合之前」只是攻略站描述的情形，範圍應是第 15 回合波次 5 出場之前。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/known_bugs.md\n  why the edit was made: 寫死的 0x52 要到第 15 回合波次 5 出場後才落在陣列內，bug 的範圍要與 ch24.md、chapter.md 一致；認輸只在攻略站的第 7 回合之前情形有觀察，其餘範圍的結果取決於堆積內容，不能寫成同一個現象。\n  old: **現象**：在第 7 回合之前清完敵人，接受狂戰士的決鬥後，第一回合我方結束時狂戰士就被判落敗，裘娜不戰而勝、妖刀村正換成妖刀正宗。攻略站記載相同。\n  new: **現象**：在第 15 回合波次 5 出場之前清完敵人並接受狂戰士的決鬥，勝負判定讀的是單位陣列之外的記錄。攻略站記載第 7 回合之前清場的結果：第一回合我方結束時狂戰士就被判落敗，裘娜不戰而勝、妖刀村正換成妖刀正宗。第 7 回合到波次 5 出場之間清場時，陣列之外讀到的是另一種單位數下的堆積內容，挑戰者會不會認輸由它決定。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/known_bugs.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F31",
+  "item_sha1": "06e24e38602b126db7b4c0ff6ea484ce8403ed46",
+  "verdict": "consistent",
+  "conclusion": "地圖載入依序讀 fdetxt(nn+1)、map%02d.dat、M%02d.dtl、dsc%02d.dat，缺檔即結束程式；地圖 31 在讀 dsc31.dat 時結束，地圖 33 在讀 map33.dat 時就結束。resource_info/map.md 現行文字已分開寫明「地圖 31 缺 DSC、地圖 33 連 MAP33.DAT 都沒有」，不再把地圖 33 的結束歸於缺 DSC，並連到 terrain.md，而 terrain.md 再連到擁有者 cut_content/story.md S2，被拒的修正所要表達的事實已完整涵蓋。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/rsrc.c:299-325",
+    "observation": "fdps_field_load_chapter_resources 依序以 fdps_vfs_load_entry 載入 fdetxt%02d.txt（章節+1）、map%02d.dat、M%02d.dtl、dsc%02d.dat，所以缺 MAP33.DAT 會在 DSC 之前就失敗。"
+   },
+   {
+    "source": "kb",
+    "location": "resource_info/map.md「命名與載入」段",
+    "observation": "現行文字：「地圖 31 與 33 即使被切過去也載入不了：地圖 31 缺 `DSC`，地圖 33 連 `MAP33.DAT` 都沒有，載入常式讀到缺檔就結束程式，見 terrain.md。」與 X87 的結論一致。"
+   },
+   {
+    "source": "kb",
+    "location": "resource_info/terrain.md:32",
+    "observation": "terrain.md 只留缺檔事實，並把「在哪個檔結束與兩張地圖的內容」連到 cut_content/story.md S2，擁有者鏈完整。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X87 (conflict) settled on: 地圖載入依序讀 fdetxt(nn+1)、map%02d.dat、M%02d.dtl、dsc%02d.dat，缺檔即在 fdps_vfs_load_entry 結束程式，所以地圖 31 在讀 dsc31.dat 時結束，地圖 33 更早在讀 map33.dat 時結束；story.md S2 與 terrain.md 目前的文字都正確。這條「永遠不會被載入的資源」由 cut_content/story.md S2 擁有，terrain.md 只留缺檔事實與連結，map.md 的括號改為不把地圖 33 的結束點歸於缺 DSC。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: resource_info/map.md\n  why the edit was made: 地圖 33 是在讀 map33.dat 時結束而非缺 DSC，括號改為不歸因於 DSC，並連到擁有者。\n  old: 地圖 31 與 33 即使被切過去也載入不了（缺 `DSC`，程式結束），見 [`terrain.md`](terrain.md)。\n  new: 地圖 31 與 33 即使被切過去也載入不了（缺檔，程式結束），見 [`cut_content/story.md` S2](../cut_content/story.md#s2-地圖-31-與-33第-1-章開場場景的兩塊獨立版本)。\n\nSee what happened to that passage: git diff 14a5e44 -- resource_info/map.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F32",
+  "item_sha1": "7a8b52f932c8c9fb3e1255b389954046774ffa25",
+  "verdict": "consistent",
+  "conclusion": "`fdps_chapter_state_reset`（`0x22750`）是章節狀態重置：三十支進入處理函式都呼叫它，另外兩個呼叫端是過場腳本的 `SWITCH_MAP` 與展示關 `fdps_title_demo`。chapter.md 第 3 行現已寫成「章節進入共用的狀態重置 `0x22750`」，不再稱為共用尾巴，展示關呼叫端也已補在 reset 小節末尾，被拒的修正要表達的事實已涵蓋。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chinit1.c:112",
+    "observation": "進入處理函式呼叫 fdps_chapter_state_reset()；chinit1.c、chinit1b.c、chinit2.c、chinit2b.c 四檔共 30 處（10+5+9+6），三十支進入處理函式各一次。"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:543",
+    "observation": "展示關 fdps_title_demo 呼叫 fdps_chapter_state_reset()。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1056",
+    "observation": "過場腳本（SWITCH_MAP）另有一處呼叫。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md 第 3 行",
+    "observation": "現行文字為「章節進入共用的狀態重置 `0x22750` 與標題卡」，已去掉「共用尾巴」的錯誤稱呼。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md reset 小節末段",
+    "observation": "已寫明同一支 reset 是 SWITCH_MAP 的實作，且展示關 fdps_title_demo（0x2ac10）也呼叫它。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X91 (conflict) settled on: `fdps_chapter_state_reset`（`0x22750`）是章節狀態重置，不是進入處理的尾巴：三十支進入處理函式都在第 2 步（加入名冊之後、開場過場之前）呼叫它，另外兩個呼叫端是過場腳本的 `SWITCH_MAP` 與標題畫面的展示關 `fdps_title_demo`。chapter.md 是它的正典，改正第 3 行的稱呼並補上展示關這個呼叫端；architecture.md 與各章頁面的寫法本來就正確。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/chapter.md\n  why the edit was made: 它在進入處理函式的第 2 步被呼叫，後面還有開場過場與標題卡，且另有兩個非進入處理的呼叫端，不是共用尾巴。\n  old: 章節進入的共用尾巴 `0x22750` 與標題卡\n  new: 章節狀態重置 `0x22750` 與標題卡\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/chapter.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F33",
+  "item_sha1": "b8ec544e9893a8582dfe585bd1791d5eeb762b2b",
+  "verdict": "consistent",
+  "conclusion": "`fdps_chapter_state_reset`（`0x22750`）除了三十支進入處理函式之外，另有過場腳本 `SWITCH_MAP` 與標題畫面展示關 `fdps_title_demo`（`0x2ac10`）兩個呼叫端；展示關在設好章節索引、名冊加入 12 人之後呼叫它建立戰場。chapter.md 現行文字已寫出這兩個呼叫端，被拒的修正要補的事實已涵蓋。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md 「同一支 reset 也是過場腳本 `SWITCH_MAP` 的實作」一段",
+    "observation": "現行文字：同一支 reset 也是過場腳本 `SWITCH_MAP` 的實作……；展示關 `fdps_title_demo`（`0x2ac10`）把章節索引設成展示關、組好名冊後也呼叫它建立戰場。已列出展示關這個呼叫端。"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:526-543",
+    "observation": "fdps_title_demo 先把 data_fdps_chapter_current_chapter_id 設為 DEMO_CHAPTER_ID、名冊歸零後加入 12 人，再呼叫 fdps_chapter_state_reset()。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1056",
+    "observation": "過場腳本直譯器內呼叫 fdps_chapter_state_reset()（SWITCH_MAP）；其餘呼叫端都是 chinit*.c 的三十支進入處理函式。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X91 (conflict) settled on: `fdps_chapter_state_reset`（`0x22750`）是章節狀態重置，不是進入處理的尾巴：三十支進入處理函式都在第 2 步（加入名冊之後、開場過場之前）呼叫它，另外兩個呼叫端是過場腳本的 `SWITCH_MAP` 與標題畫面的展示關 `fdps_title_demo`。chapter.md 是它的正典，改正第 3 行的稱呼並補上展示關這個呼叫端；architecture.md 與各章頁面的寫法本來就正確。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/chapter.md\n  why the edit was made: 正典頁要列全呼叫端，補上 architecture.md 已提到而本頁漏掉的展示關。\n  old: 同一支 reset 也是過場腳本 `SWITCH_MAP` 的實作，所以腳本切換地圖時回合計數器、事件旗標與單位陣列一起重來。\n  new: 同一支 reset 另有兩個呼叫端：過場腳本 `SWITCH_MAP` 的實作，所以腳本切換地圖時回合計數器、事件旗標與單位陣列一起重來；以及標題畫面的展示關 `fdps_title_demo`（`0x2ac10`），在名冊放入 12 人之後以它建立戰場。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/chapter.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F34",
+  "item_sha1": "fe63da6596bc853f8d9d8f734ccea30fc60a50d7",
+  "verdict": "consistent",
+  "conclusion": "`_cstart_` 是 `00043298` 那條 2 byte 的 `JMP`，`00043310` 是它跳去的啟動主體 `L$1_cstrt386_start_body`（0x217 byte），`00043527` 起是 `__exit`。code_pools.md 現行句子已改為「它的 body 一路吃到啟動主體之後的收尾段」，不再提 `_cstart_`，不會被讀成 `_cstart_` 位於 `00043310`，拒收修正要表達的事實已涵蓋。",
+  "evidence": [
+   {
+    "source": "ghidra",
+    "location": "00043298 / 00043310 / 00043527 (ghidra_snapshot/functions.txt)",
+    "observation": "00043298 size 0x2 _cstart_ thunk->00043310；00043310 size 0x217 L$1_cstrt386_start_body；00043527 __exit"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md:21",
+    "observation": "現行文字：邊界只有 `00043310` 一處錯：它的 body 一路吃到啟動主體之後的收尾段，切開後 `00043527` 才是 `CSTRT386.ASM` 放 `__exit` 標籤的地方。已不含「`_cstart_` 之後」的誤導措辭。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X94 (conflict) settled on: `_cstart_` 是 LE 進入點 `00043298`，只有一條 2 byte 的 `JMP`；`00043310` 是它跳去的主體 `L$1_cstrt386_start_body`（0x217 byte，止於 `00043527`），`00043527` 起是 `__exit`。architecture.md 已正確；code_pools.md 那句把主體之後的收尾段寫成「`_cstart_` 之後」，易被讀成 `_cstart_` 在 `00043310`，改為指名主體。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/code_pools.md\n  why the edit was made: 原句易被讀成 `_cstart_` 位於 `00043310`，與 Ghidra 及 architecture.md 的 `00043298` 牴觸，改為明指主體。\n  old: 邊界只有 `00043310` 一處錯：它的 body 一路吃到 `_cstart_` 之後的收尾段，切開後\n  new: 邊界只有 `00043310` 一處錯：這個 `_cstart_` 的主體（`L$1_cstrt386_start_body`，`_cstart_` 本身是 `00043298` 那條 `JMP`）的 body 一路吃到主體之後的收尾段，切開後\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/code_pools.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F35",
+  "item_sha1": "bfde8b969c7581f2e5b309ab0ea689b20bf5ed4b",
+  "verdict": "fixed",
+  "conclusion": "行為 7 到達目的地時的退場，是在 fdps_map_actor_behavior_step 內以內嵌的整 byte 指派把旗標 byte 寫成 1，與 fdps_unit_mark_retired（0x138f0）同形，原版映像中沒有任何指令呼叫它。map_ai.md 現行文字已正確陳述這件事，只缺連回擁有者 battle.md 的連結，補上即可。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/mapai.c:111-118",
+    "observation": "註解寫明 0001049b..000104b8 的寫入是 fdps_unit_mark_retired（000138f0）的內嵌展開，重建版改寫成呼叫（src/mapai.c:282）。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md:328",
+    "observation": "擁有者頁面寫明 fdps_unit_mark_retired 在原版映像中沒有任何引用，各處都是內嵌寫法，包括行為 7。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/map_ai.md:48",
+    "observation": "現行文字：退場（內嵌的整 byte 指派把旗標 byte 整個寫成 1，與 fdps_unit_mark_retired（0x138f0）同形，原版映像中沒有呼叫它），事實與被拒編修一致，但沒有連回 battle.md。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "program_info/map_ai.md",
+    "old": "原版映像中沒有呼叫它）",
+    "new": "原版映像中沒有呼叫它，見 [`battle.md`](battle.md)）",
+    "why": "退場旗標的寫法由 battle.md 擁有，補上連回擁有者的連結。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "Ghidra get_xrefs_to 0x138f0 回傳沒有任何引用，確認原版沒有呼叫 fdps_unit_mark_retired；src/mapai.c:111-118 註解寫明 0001049b..000104b8 是它的內嵌展開，重建版在 src/mapai.c:282 改寫成呼叫。map_ai.md:48 現行文字已寫明內嵌整 byte 指派、同形、原版沒有呼叫，事實與被拒編修相同；缺的只有 X104 結論要求的連回擁有者 battle.md（battle.md:328 擁有退場旗標與 fdps_unit_mark_retired 無引用這件事）。old 字串在頁面上只出現一次，補連結的編修成立。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X104 (conflict) settled on: 原版映像中沒有任何指令呼叫 fdps_unit_mark_retired（0x138f0），它是 -oe 展開後留下的零呼叫本體；行為 7 到達目的地時的退場是在 fdps_map_actor_behavior_step 內以同樣的整 byte 指派內嵌寫成。battle.md 的敘述正確，map_ai.md 的行為 7 表列改為不暗示有呼叫，並連回 battle.md 這個擁有者。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/map_ai.md\n  why the edit was made: 原版沒有任何呼叫 fdps_unit_mark_retired 的指令，行為 7 的退場是內嵌的整 byte 指派，原句讀起來像有呼叫。\n  old: 然後退場（`fdps_unit_mark_retired`（`0x138f0`）把旗標 byte **整個寫成 1**） |\n  new: 然後退場：就地把旗標 byte **整個寫成 1**，與 `fdps_unit_mark_retired`（`0x138f0`）同一種寫法，但原版是內嵌、沒有呼叫它（見 [`battle.md`](battle.md)） |\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/map_ai.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F36",
+  "item_sha1": "5d3900697442e592605574ed8cb243e23add009c",
+  "verdict": "fixed",
+  "conclusion": "前作庫裡沒有本體的 ail function 是 13 個（3,811 byte），其中只有 00044dc0 要由重建版補；六支 DPMI 常式是遊戲自己定義、由 AIL 以 EXTDEF 參照的程式碼，不在這 13 個裡。現行 pitfalls.md 那一列已寫成 13 個、1 個要補，事實正確，只剩「已改判成」的流水帳措辭與缺少指向 DPMI 那一列的交叉引用。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md「FDPS 有而前作沒有的 13 個」",
+    "observation": "剩下 13 個在 ailv3.lib 裡真的沒有本體，合計 3,811 byte。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md「前作的庫裡沒有本體的那 13 個 ail function」那一列",
+    "observation": "已寫 13 個、只有 1 個要補（00044dc0）、另外 12 個不必；DPMI 常式以「連同六支已改判成遊戲程式碼的 DPMI 常式」帶過，措辭是過程敘述且無交叉引用。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md「AIL 會反過來呼叫遊戲自己寫的 DPMI 服務常式」那一列",
+    "observation": "六支 INT 31h 包裝由庫以 EXTDEF 指向遊戲，要由重建版自己定義並連進去。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "連同六支已改判成遊戲程式碼的 DPMI 常式——少了這七個連結解不掉",
+    "new": "連同六支屬於遊戲程式碼、不在這 13 個裡的 DPMI 常式（見「AIL 會反過來呼叫遊戲自己寫的 DPMI 服務常式」那一列）——少了這七個連結解不掉",
+    "why": "去掉「已改判成」的過程敘述，並補上被拒修正原本要加的、DPMI 常式不在這 13 個裡的說明與交叉引用。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查了 pitfalls.md 現行第 291 行：已寫 13 個、只有 1 個要補（00044dc0），事實已對齊 code_pools.md「FDPS 有而前作沒有的 13 個」（13 個、3,811 byte）；functions.txt 確認 0003ca49／0003cad2／0003cb01／0003cb6e／0003cb93／0003cbaa 皆為 pool_fdps、定義在 src/dpmi.c，00044dc0 為 pool_ail。剩下的「已改判成」是過程敘述，第一位的修正改為結論式並補上指向 DPMI 那一列（第 289 行）的交叉引用，old 逐字存在於頁面，新文字正確。確認。",
+   "edits": []
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X117 (conflict) settled on: 0003cb6e／0003cb93／0003cbaa 與 0003ca49／0003cad2／0003cb01 同屬 pool_fdps，是 src/dpmi.c 定義、由 AIL 以 EXTDEF 參照的遊戲側 DPMI 常式，不是 ail。前作庫裡沒有本體的 ail function 因此是 13 個（3,811 byte），其中只有 00044dc0 要由重建版補；code_pools.md 已照此寫，pitfalls.md 那一列仍以 16 個、4 個要補計算，改為 13 個、1 個要補。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 三支 DPMI 常式屬 pool_fdps，前作庫裡沒有本體的 ail function 是 13 個、要補的 ail 只有 00044dc0，與 code_pools.md 對齊；交叉引用指向真正講 DPMI 常式歸屬的那一列。\n  old: | 前作的庫沒有的那 16 個 `ail` function 裡，**只有 4 個要補、另外 12 個不必** | 看到「16 個沒有對應」就整批去重抽或手寫。要補的是 `00044dc0`（存 EFLAGS 的 4 byte）與三支已改判成遊戲程式碼的 DPMI 常式——少了它們連結解不掉。另外 12 個不必補：\n  new: | 前作的庫沒有的那 13 個 `ail` function 裡，**只有 1 個要補、另外 12 個不必** | 看到「13 個沒有對應」就整批去重抽或手寫。要補的只有 `00044dc0`（存 EFLAGS 的 4 byte）——少了它連結解不掉；六支 DPMI 常式是遊戲程式碼，不在這 13 個裡（見上面「AIL 會反過來呼叫遊戲自己寫的 DPMI 服務常式」那一列）。另外 12 個不必補：\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F37",
+  "item_sha1": "2f8bd5aada7cb4ef763f16b91a9767b30988211e",
+  "verdict": "consistent",
+  "conclusion": "fdps_battle_move_unit_toward 最多做五輪 flood fill：第 2 輪只在第 1 輪找不到路時跑，第 2b 輪只在第 2 輪有路時跑，第 2b 輪與第 4 輪設定相同。movement.md 正文現在寫「最多把網格重建五次，只有第 2b 輪與第 4 輪設定相同」，兩輪的執行條件寫在緊接的表格裡，已涵蓋被拒修正要表達的事實。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/movegrid.c:1107-1130",
+    "observation": "第 1 輪不 reset、標控制區、用自己的 move；step_count == -1 才進第 2 輪（reset、不標控制區、MOVE_UNLIMITED_ALLOWANCE）；第 2 輪 step_count != -1 才進第 2b 輪（reset、標控制區、自己的 move）。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/movement.md「朝目標移動」段首與表格",
+    "observation": "正文為「它最多把網格重建五次，只有第 2b 輪與第 4 輪設定相同，其餘各不相同」；表格第 2 輪註明「只在第 1 輪回 -1 時跑」，第 2b 輪註明「第 2 輪有路時」，第 2b 與第 4 輪欄位相同。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X137 (conflict) settled on: fdps_battle_move_unit_toward 最多呼叫五次 flood fill（第 1、2、2b、3、4 輪），第 2 與 2b 輪只在第 1 輪找不到路時才跑、2b 只在第 2 輪有路時才跑，且 2b 與第 4 輪設定相同。movement.md 的表格與 pitfalls.md「最多重建五次」正確，movement.md 正文「重建四次，四輪各有不同」錯，已改正。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/movement.md\n  why the edit was made: 原始碼有五個 flood fill 呼叫且 2b 與 4 設定相同，正文「四次、四輪各有不同」與同頁表格及原始碼矛盾。\n  old: 它把網格重建四次，四輪各有不同：\n  new: 它最多把網格重建五次，第 2、2b 輪只在前一輪的條件成立時才跑，第 2b 輪與第 4 輪設定相同，其餘各輪各有不同：\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/movement.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F38",
+  "item_sha1": "23f06111a96f8a98d434e96c9e3a37b44ebaa5eb",
+  "verdict": "consistent",
+  "conclusion": "神之祝福 buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）套上，公式的擁有者是 battle.md 的「狀態計時器：效果、持續與解除」。spell.md 現行文字已不再指向本檔的重複公式、改連 battle.md，裝備一節也只連回 battle.md；三個槽的效果（×1.15、DX +15）仍由本檔的狀態效果表列出，「乘在基礎＋裝備總和上」與截尾細節由 battle.md 擁有，被拒的修正要表達的事實已完整涵蓋。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/spell.md「狀態效果」一節末段",
+    "observation": "現行文字：buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）在重算戰鬥數值時套上，公式見 battle.md 的「狀態計時器：效果、持續與解除」——已改連擁有者，不再引用本檔「裝備」一節。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/spell.md「狀態效果」表",
+    "observation": "槽 0／1 攻擊力、防禦力 ×1.15，槽 2 DX +15（命中與閃避都加），效果摘要仍在本頁。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/spell.md「裝備」一節",
+    "observation": "只寫重算 AP、DP、HIT、EV，公式、1.15 截尾與名冊版差別見 battle.md，沒有重複公式。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「狀態計時器：效果、持續與解除」",
+    "observation": "列出 0x24d70 的公式：AP/DP 先加裝備再乘 double 1.15 截尾，dx 基礎加 15；並註明 buff 乘在「基礎 + 裝備」總和上。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X141 (conflict) settled on: `fdps_unit_recompute_combat_stats`（`0x24d70`）的公式由 program_info/battle.md 擁有：它是戰鬥衍生數值的重算，呼叫者遍及部署、商店、教會、村莊選單、章節事件與回合倒數，不是只為法術與道具服務，battle.md 的驗證對象也列有 `0x24d70`。pitfalls.md 那一列連到 battle.md 是對的；錯的是 spell.md 同時宣告擁有它並重寫了一份公式，改為連結 battle.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/spell.md\n  why the edit was made: 公式的擁有者是 battle.md，改指向它而不是本檔的重複公式。\n  old: buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）在重算戰鬥數值時套上（見「裝備」一節的公式）：槽 0／1 是在裝備加總**之後**乘上 double 常數 1.15 再向零截斷，槽 2 是在 DX 基礎值上加 15。\n  new: buff 的數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）在重算戰鬥數值時套上：槽 0／1 是在裝備加總**之後**乘上 double 常數 1.15 再向零截斷，槽 2 是在 DX 基礎值上加 15。公式見 [`battle.md`](battle.md) 的「狀態計時器：效果、持續與解除」。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/spell.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F39",
+  "item_sha1": "a2529159f2e73e9397ba6bd4cd1596ab6d766153",
+  "verdict": "consistent",
+  "conclusion": "spell.md 已不再重寫 `fdps_unit_recompute_combat_stats`（`0x24d70`）的公式，裝備一節只留一句「重算 AP、DP、HIT、EV」並把裝備中的判定、公式、1.15 截尾與名冊版的差別連到 battle.md 的「狀態計時器：效果、持續與解除」。名冊版 `fdps_roster_recompute_combat_stats`（`0x23ac0`）不套 buff 的事實已由 battle.md 擁有，與原始碼一致，被拒的修改要表達的事實已完整涵蓋。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/spell.md「裝備」一節",
+    "observation": "現為「裝備改變後由 fdps_unit_recompute_combat_stats（0x24d70）重算 AP、DP、HIT、EV；哪些格算裝備中、公式、1.15 的截尾與名冊版的差別見 battle.md 的「狀態計時器：效果、持續與解除」」，頁內已無公式區塊與 1.15 截尾的重述。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「狀態計時器：效果、持續與解除」",
+    "observation": "擁有完整公式、0x40 裝備格不限兩件、1.15 double 常數截尾，並列出名冊版 0x23ac0 做同樣加總但不套任何 buff。"
+   },
+   {
+    "source": "src",
+    "location": "src/roster.c:194",
+    "observation": "fdps_roster_recompute_combat_stats 只做基礎值加上 0x40 格物品的 ap/dp/hit/ev，不讀 status_timers。"
+   },
+   {
+    "source": "src",
+    "location": "src/unit.c:387",
+    "observation": "fdps_unit_recompute_combat_stats 對 status_timers[2] 加 DX、對 [0]/[1] 乘 STAT_BUFF_MULTIPLIER，與 battle.md 的公式一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X141 (conflict) settled on: `fdps_unit_recompute_combat_stats`（`0x24d70`）的公式由 program_info/battle.md 擁有：它是戰鬥衍生數值的重算，呼叫者遍及部署、商店、教會、村莊選單、章節事件與回合倒數，不是只為法術與道具服務，battle.md 的驗證對象也列有 `0x24d70`。pitfalls.md 那一列連到 battle.md 是對的；錯的是 spell.md 同時宣告擁有它並重寫了一份公式，改為連結 battle.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/spell.md\n  why the edit was made: 刪去與 battle.md 重複的公式，保留一句與連結，名冊版不套 buff 的事實只有本檔寫，留下。\n  old: 戰鬥中的衍生數值由 `fdps_unit_recompute_combat_stats`（`0x24d70`）算：\n\n```\ndx = dx_base (+0x3e)                   // 有號 word\nif (status_timers[2]) dx += 15\nap  = ap_base (+0x37) + Σ 裝備中物品的 ap\ndp  = dp_base (+0x39) + Σ dp\nhit = dx + Σ hit\nev  = dx + Σ ev\nif (status_timers[0]) ap = (int)(ap * 1.15)    // double 乘法，向零截斷\nif (status_timers[1]) dp = (int)(dp * 1.15)\n存回 +0x48 ap、+0x4a dp、+0x4c hit、+0x4e ev    // 16-bit 截斷\n```\n\n「裝備中」是背包 8 格裡所有帶 `0x40` 旗標的格，不限兩件。命中與閃避都從同一個 DX 出發，所以 DX buff 兩者都加。1.15 的 double 常數略小於 1.15，100 乘出來是 114（踩雷點見 [`../rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)）。名冊版的 `fdps_roster_recompute_combat_stats`（`0x23ac0`）做同樣的基礎值與裝備加總，但不套任何 buff。\n  new: 戰鬥中的衍生數值（AP、DP、HIT、EV）由 `fdps_unit_recompute_combat_stats`（`0x24d70`）以基礎值加上所有帶 `0x40` 旗標的背包格重算，並套上神之祝福；公式與 1.15 倍的截尾見 [`battle.md`](battle.md) 的「狀態計時器：效果、持續與解除」。名冊版的 `fdps_roster_recompute_combat_stats`（`0x23ac0`）做同樣的基礎值與裝備加總，但不套任何 buff。\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/spell.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F40",
+  "item_sha1": "0fa3ea11c288962c02e8540393af148a7164989b",
+  "verdict": "consistent",
+  "conclusion": "前作的庫裡沒有本體的 ail function 是 13 個，其中只有 00044dc0 要補、另外 12 個是不必補的 LX 驅動載入層死碼；六支 DPMI 服務常式判在 fdps、不在這 13 個裡，連同 00044dc0 構成遊戲側要給 ailv3.lib 的七個符號。pitfalls.md 現行那一列已完整寫出這些事實。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md（「前作的庫裡沒有本體的那 13 個 `ail` function」那一列）",
+    "observation": "現行文字寫 13 個裡只有 1 個要補（00044dc0）、另外 12 個不必，並說要補的連同六支已改判成遊戲程式碼的 DPMI 常式共七個，1+12=13 已表明 DPMI 不在這 13 個裡；被拒的修正要表達的事實全數涵蓋。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md「FDPS 有而前作沒有的 13 個」與 ail 列 436",
+    "observation": "ail 436 個、改判的六個全部落在沒命中的那一堆、剩下 13 個在 ailv3.lib 裡真的沒有本體，與 pitfalls 現行數字一致。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/ail_link.md「遊戲要給的七個符號」",
+    "observation": "遊戲側要提供七個符號，與 pitfalls 現行列的「這七個」一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X145 (conflict) settled on: 遊戲側要提供給 ailv3.lib 的是七個符號：六支 DPMI 服務常式（0003ca49–0003cbaa，全部判在 fdps）加上 00044dc0，ail_link.md 正確。六支 DPMI 改判 fdps 之後，ail 只剩 436 個，前作的庫裡沒有本體的 13 個 ail function 中只有 00044dc0 一個要補；pitfalls.md 與 code_pools.md 仍沿用三支 DPMI 還算在 ail 時「16 個裡 4 個要補」的舊算法，兩處都要改。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 六支 DPMI 全部改判 fdps 後，ail 裡沒有本體的只剩 13 個且不含 DPMI，「16 個裡 4 個要補」是舊算法，且會讓讀者以為只需補三支 DPMI。\n  old: | 前作的庫沒有的那 16 個 `ail` function 裡，**只有 4 個要補、另外 12 個不必** | 看到「16 個沒有對應」就整批去重抽或手寫。要補的是 `00044dc0`（存 EFLAGS 的 4 byte）與三支已改判成遊戲程式碼的 DPMI 常式——少了它們連結解不掉。另外 12 個不必補：主體的 LX 驅動映像載入層（`0003ccf8` 領頭）在 `FDPS.LE` 裡本來就是連結器整包抽進來的死碼，沒有任何可達的呼叫端，`ailv3.lib` 也沒有參照它們 |\n  new: | 前作的庫裡沒有本體的那 13 個 `ail` function 裡，**只有 `00044dc0` 一個要補、另外 12 個不必**；遊戲側要給的是七個符號，六支 DPMI 常式不在這 13 個裡 | 看到「13 個沒有對應」就整批去重抽或手寫，或反過來以為遊戲側要補的只有這一批。要補的是 `00044dc0`（存 EFLAGS 的 4 byte）——少了它連結解不掉。另外 12 個不必補：主體的 LX 驅動映像載入層（`0003ccf8` 領頭）在 `FDPS.LE` 裡本來就是連結器整包抽進來的死碼，沒有任何可達的呼叫端，`ailv3.lib` 也沒有參照它們。六支 DPMI 服務常式判在 `fdps`，不算在這 13 個裡，但同樣由庫以 EXTDEF 指向、要由重建版自己提供 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F41",
+  "item_sha1": "e798af25216e4cd172646dcb3b7d74ace563c247",
+  "verdict": "consistent",
+  "conclusion": "遊戲側要另外提供給 ailv3.lib 的是 00044dc0 加上六支判在 fdps 的 DPMI 服務常式，共七個符號；code_pools.md 目前的句子已寫成「要另外提供的只有 00044dc0 與六支已改判成 fdps 的 DPMI 常式」，「已改判成 fdps」本身就表明它們不在這 13 個 ail 裡，被拒的修正要表達的事實已完整涵蓋。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md「FDPS 有而前作沒有的 13 個」末段",
+    "observation": "現行文字為「要另外提供的只有 `00044dc0` 與六支已改判成 `fdps` 的 DPMI 常式」，已由三支改為六支，且以「已改判成 fdps」區隔於這一批 ail function。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/code_pools.md「AIL 會呼叫遊戲的程式碼」",
+    "observation": "列出 0003ca49–0003cbaa 六支 DPMI 常式，六支都歸 fdps。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/ail_link.md「遊戲要給的七個符號」",
+    "observation": "遊戲側提供六支 DPMI 常式加上 00044dc0（crt_equivalent_get_eflags_thunk），共七個。"
+   },
+   {
+    "source": "src",
+    "location": "src/dpmi.h:31,53,75,96,116,139",
+    "observation": "重建版在遊戲側定義六支 DPMI 常式：fdps_dpmi_alloc_dos_memory、free_dos_memory、lock_region、unlock_region、lock_size、unlock_size。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X145 (conflict) settled on: 遊戲側要提供給 ailv3.lib 的是七個符號：六支 DPMI 服務常式（0003ca49–0003cbaa，全部判在 fdps）加上 00044dc0，ail_link.md 正確。六支 DPMI 改判 fdps 之後，ail 只剩 436 個，前作的庫裡沒有本體的 13 個 ail function 中只有 00044dc0 一個要補；pitfalls.md 與 code_pools.md 仍沿用三支 DPMI 還算在 ail 時「16 個裡 4 個要補」的舊算法，兩處都要改。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/code_pools.md\n  why the edit was made: 這一批 13 個已不含 DPMI 常式，而遊戲側要提供的是全部六支 DPMI，不是三支。\n  old: 要另外提供的只有 `00044dc0` 與三支已改判成 `fdps` 的 DPMI 常式，做法見\n  new: 這一批裡要另外提供的只有 `00044dc0`；六支 DPMI 常式判在 `fdps`、不在這一批裡，同樣要由重建版提供，做法見\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/code_pools.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F42",
+  "item_sha1": "c6f6b563d90b60d33787906c45865d6ce6947bfa",
+  "verdict": "fixed",
+  "conclusion": "emittest 的 undefined 判定讀最後一次連結：有第二次連結（build2.out）就判第二次，沒有時判第一次；清單目前是空的，所以實際判的是第一次連結。emit_pipeline.md 的 gate 段仍寫「未解析符號只看第二次連結」，漏了沒有第二次連結的情況，改成最後一次。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "tools/code_emit/build_emit.py:832-833 (diagnostics)",
+    "observation": "\"undefined\": bm.parse_undefined(txt2) if second else bm.parse_undefined(txt1)——build2.out 存在才讀第二次，否則讀第一次連結的輸出。"
+   },
+   {
+    "source": "tool",
+    "location": "tools/build_gate/gate.py:101-108",
+    "observation": "emittest 目標的 diagnostics 直接沿用 build_emit.diagnostics，transcripts 只列存在的 build.out／build2.out。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/build_gate.md:15",
+    "observation": "undefined 列已寫「判的是最後一次……清單空時不跑第二次，判的就是第一次」，與程式一致。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/emit_pipeline.md「emit 的 gate」段",
+    "observation": "落地後的文字寫「未解析符號只看第二次連結」，與同頁上方「清單空時不跑第二次連結」及 build_gate.md 不一致。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/emit_pipeline.md",
+    "old": "未解析符號只看第二次連結",
+    "new": "未解析符號只看最後一次連結，沒有第二次時就是第一次",
+    "why": "undefined 判定讀最後一次連結，清單空時不跑第二次連結，只寫第二次會漏掉目前實際的情況。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "親自查 tools/code_emit/build_emit.py:805-835：diagnostics() 的 undefined 在 build2.out 存在時取 parse_undefined(txt2)，否則取 parse_undefined(txt1)，即判最後一次連結；tools/build_gate/gate.py:98-109 的 emittest 目標直接沿用這支 diagnostics。現頁 rebuild_info/emit_pipeline.md:87 仍寫「未解析符號只看第二次連結」，與同頁 77 行「清單空時不產生 stub 模組、也不跑第二次連結」及 build_gate.md:15「判的是最後一次……判的就是第一次」矛盾；先落地的那筆改的是別處，這段沒有涵蓋。old 字串在頁面上唯一出現，新文字與程式一致、結論式，擁有者仍是 build_gate.md（本段只是括號內的摘要並連回去），不需 outside。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X154 (conflict) settled on: 單元測試映像最多連結兩次：第一次不帶 stub，只有它報出未定義符號時才產生 stub 模組並連第二次；清單空時不產生 stub 模組、也不跑第二次連結。回歸閘的「零未解析符號」判的是最後一次連結（有第二次判第二次，否則判第一次）。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/emit_pipeline.md\n  why the edit was made: diagnostics() 在沒有 build2.out 時讀第一次連結的輸出。\n  old: 「零未解析符號」判的是第二次連結，第一次的那份是清單不是錯誤。\n  new: 「零未解析符號」判的是最後一次連結：有第二次就判第二次，第一次的那份是清單不是錯誤；沒有第二次時判的就是第一次。\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/emit_pipeline.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F43",
+  "item_sha1": "5092373880d0924a9544d5d366f65c91c11816af",
+  "verdict": "consistent",
+  "conclusion": "emit_pipeline.md 隱性契約表 B 列現行文字已拿掉前作 FD2 的「實測甚至反序」，改說 tentative 定義連同一個 .c 內也不照原始碼順序，並補上本專案的相鄰寫法（兩者都帶初值、同一個 .c、原始碼前後緊接，或真陣列／struct），連回擁有者 data_emit.md 的「工具鏈怎麼擺全域」與「佈局約束」。被拒的修正要表達的三件事都已涵蓋，不需再改。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "rebuild_info/emit_pipeline.md 隱性契約表 B 列",
+    "observation": "現行文字：「Watcom 對 tentative 定義的順序與相鄰不保證，連同一個 .c 內也不照原始碼順序。任何讀寫經由鄰居位址碰到另一個全域的地方，兩者都要帶初值、落在同一個 .c、原始碼裡前後緊接，或 emit 成真的陣列或 struct，見 data_emit.md 的「工具鏈怎麼擺全域」與「佈局約束」」；已無「反序」字樣。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/data_emit.md「工具鏈怎麼擺全域（實測）」",
+    "observation": "tentative 落 _BSS、順序不是原始碼順序（實測四個排成 1、2、4、3）；兩符號必須相鄰的唯一寫法是都帶初值、同一個 .c、原始碼前後緊接且對齊允許。"
+   },
+   {
+    "source": "tool",
+    "location": "tools/data_emit/layout_probe.py 第 47-50 行",
+    "observation": "量測的四個 tentative（pr_a_tent1..4）定義在同一個 unit 內，支持現行文字「連同一個 .c 內也不照原始碼順序」。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X159 (conflict) settled on: 本專案工具鏈（Watcom 10.0a + wlink）對不帶初值全域的實測順序是四個排成 1、2、4、3，不是反序；「實測甚至反序」是前作 FD2（Watcom 9.5a）的量測。這件事的擁有者是 data_emit.md「工具鏈怎麼擺全域（實測）」，而本專案讓相鄰全域成立的做法除了真陣列／struct，還有同一個 .c 內前後緊接的帶初值定義。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/emit_pipeline.md\n  why the edit was made: 「實測甚至反序」是前作 FD2 的量測，本專案實測為 1、2、4、3，改連擁有者 data_emit.md，並補上本專案實際採用的帶初值相鄰寫法。\n  old: Watcom 對 tentative 定義的順序與相鄰不保證，實測甚至反序。任何把相鄰全域當單一陣列索引的地方，必須 emit 成真的陣列或 struct |\n  new: Watcom 對 tentative 定義的順序與相鄰不保證，本專案工具鏈的實測見 [`data_emit.md`](data_emit.md)「工具鏈怎麼擺全域（實測）」。任何把相鄰全域當單一陣列索引的地方，必須 emit 成真的陣列或 struct，或照 [`data_emit.md`](data_emit.md) 寫成同一個 `.c` 內前後緊接的帶初值定義 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/emit_pipeline.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F44",
+  "item_sha1": "33dcc18260ff8d0926e09c9d1fdd0f9c340ae490",
+  "verdict": "consistent",
+  "conclusion": "過場影片由光碟上的 `FD.EXE` 播放，`FDPS.LE` 以 `spawnlp(P_WAIT, …)` 呼叫它，不是 `spawnv`。pitfalls.md「影片播放不在重建範圍」那一列現在已寫成「只負責以 `spawnlp` 呼叫它」並連回 cd_audio.md，被拒的修正要表達的事實已在頁面上。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/title.c:145",
+    "observation": "spawnlp(P_WAIT, movie_player_path, movie_player_path, video_stream_path, ...) is the call that runs the movie player"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md (row 影片播放不在重建範圍)",
+    "observation": "Current text: 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責以 `spawnlp` 呼叫它 | program_info/cd_audio.md"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X171 (conflict) settled on: `fdps_play_movie`（`0x30f40`）以 `spawnlp(P_WAIT, …)` 執行光碟上的 `FD.EXE`，不是 `spawnv`；`0x435a2` 是 CRT 的 `spawnlp`。program_info/cd_audio.md 與 resource_info/disc_images.md 已寫對，pitfalls.md 那一列改為 `spawnlp` 並維持連回 cd_audio.md 這個擁有者。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 原版呼叫的是 `spawnlp`（`0x435a2`），與擁有者 cd_audio.md 一致。\n  old: `FDPS.LE` 只負責 `spawnv` |\n  new: `FDPS.LE` 只負責 `spawnlp` |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F45",
+  "item_sha1": "4269777f8a00bd8ccae2df645ffbdda93a38627f",
+  "verdict": "fixed",
+  "conclusion": "fdps_vfs_open 把表頭 0x07 的 32-bit 筆數整個存進 handle，只有 fdps_vfs_find_entry／fdps_vfs_find_entry_size 取回時只讀低 byte，N 筆的容器只查得到前 N mod 256 筆；table 偏移以帶號 16-bit seek。pitfalls.md 現行的事實欄已正確完整，但「照直覺會怎麼寫」欄仍是籠統的「用 u32 讀筆數」，與開啟端本來就讀 u32 的事實衝突，補明是查找端讀成 u32、或為求一致把開啟端改存一個 byte，兩者都偏離原版。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/vfs.c:300-320",
+    "observation": "fdps_vfs_open 以 unsigned int 讀入筆數並 *(unsigned int *)handle = entry_count 整個 dword 存入；fseek 的 table_offset 是 short。"
+   },
+   {
+    "source": "src",
+    "location": "src/vfs.c:166",
+    "observation": "fdps_vfs_find_entry 以 *(unsigned char *)handle 只取低 byte 當筆數。"
+   },
+   {
+    "source": "src",
+    "location": "src/vfs.c:222",
+    "observation": "fdps_vfs_find_entry_size 同樣只取低 byte。"
+   },
+   {
+    "source": "src",
+    "location": "src/vfs.c:272-277",
+    "observation": "註解明言開啟端寫成一個 byte 雖與查找端一致卻是錯的，因為原版確實填滿整個欄位；查找端讀成 dword 則會讓第 256 筆以後可查到。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 第 95 行",
+    "observation": "事實欄已改為開啟時存 32-bit、兩支查找只取低 byte、N mod 256、恰好 256 筆一筆也查不到；直覺寫法欄仍是「用 u32 讀筆數、用 long seek」。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "| 用 `u32` 讀筆數、用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 |",
+    "new": "| 查找時把 handle 裡的筆數當 `u32` 讀、或為了一致改成開啟時只存一個 byte，用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 |",
+    "why": "開啟端本來就以 u32 讀筆數，籠統的「用 u32 讀筆數」會被誤解成開啟端也該改，補明兩種偏離原版的直覺寫法。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查 src/vfs.c：fdps_vfs_open 以 VFS_HEADER_ENTRY_COUNT_BYTES=4 讀入 unsigned int 筆數並 *(unsigned int *)handle 整個存入（:300-315），table_offset 為 short 後 fseek（:301,:318）；fdps_vfs_find_entry（:166）與 fdps_vfs_find_entry_size（:222）以 *(unsigned char *) 只取低 byte；:272-277 註解明言開啟端改寫成一個 byte 雖與查找端一致卻是錯的。pitfalls.md 第 95 行事實欄已由另一筆修正正確寫出 32-bit 存入、查找取低 byte、N mod 256、帶號 16-bit seek，但直覺寫法欄仍是原本籠統的「用 u32 讀筆數」，與開啟端本來就讀 u32 的事實不相符，F45 原意中對這欄的修正沒有落地。第一位的 edit 只改這一欄，old 在頁面上逐字唯一，新文字與 src 相符、是結論式，擁有者仍是 resource_info/vfs.md 並由 pitfalls 連回，確認。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X174 (conflict) settled on: fdps_vfs_open 把表頭 0x07 的筆數整個 32-bit 存進 handle，只有 handle 端的查找 fdps_vfs_find_entry／fdps_vfs_find_entry_size 取它的低 byte，所以 N 筆的容器只查得到前 N mod 256 筆（255 筆是上限，恰好 256 筆一筆也查不到）；table 偏移由 fdps_vfs_open 以帶號 16-bit seek。對記憶體內容器查找的 fdps_vfs_image_get_entry 則是 32-bit 無號筆數與 16-bit 零延伸偏移。resource_info/vfs.md 的寫法正確，pitfalls.md 把 fdps_vfs_open 也算成 8-bit 讀入並寫成「第 256 筆以後走不到」，已改正。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: fdps_vfs_open 實際存整個 32-bit 筆數，截斷只發生在兩支查找，且結果是 N mod 256 而非「第 256 筆以後走不到」，改成與 src 及 resource_info/vfs.md 一致。\n  old: | 以 handle 開啟與查找 `.VFS` 時（`fdps_vfs_open`、`fdps_vfs_find_entry`、`fdps_vfs_find_entry_size`），entry 筆數以 8-bit 讀入，第 256 筆以後走不到；entry table 偏移以帶號 16-bit seek，上限 `0x7FFF`。對已整個讀進記憶體的容器查找的 `fdps_vfs_image_get_entry`（`0x39cf0`）則是筆數 32-bit 無號比較、偏移 16-bit 零延伸，兩條路徑的寬度不能統一 | 用 `u32` 讀筆數、用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 |\n  new: | `fdps_vfs_open` 把 entry 筆數整個 32-bit 存進 handle，但 handle 端的查找 `fdps_vfs_find_entry`、`fdps_vfs_find_entry_size` 只取它的低 byte，N 筆的容器只查得到前 N mod 256 筆；`fdps_vfs_open` 以帶號 16-bit seek 到 entry table，上限 `0x7FFF`。對已整個讀進記憶體的容器查找的 `fdps_vfs_image_get_entry`（`0x39cf0`）則是筆數 32-bit 無號比較、偏移 16-bit 零延伸，兩條路徑的寬度不能統一 | 查找時把 handle 裡的筆數當 `u32` 讀、或為了一致改成開啟時只存一個 byte，用 `long` seek。容器沒有踩到上限，但這是原版的硬限制 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F46",
+  "item_sha1": "b30162217cf29c366ec89146f469b9141b9352db",
+  "verdict": "consistent",
+  "conclusion": "fdps_battle_move_unit_toward 每次呼叫把移動網格擴散三到五次：第 1、3、4 輪必跑，第 2 輪只在第 1 輪找不到路時跑，第 2b 輪只在第 2 輪有路時跑。movement.md 現行正文寫「最多把網格重建五次」，同段表格在第 2 輪與第 2b 輪各自標出執行條件、第 1、3、4 輪無條件，已涵蓋被拒修正要表達的事實，且不再與五列表格矛盾。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/movegrid.c:1107-1113",
+    "observation": "第 1 輪（標控制區、自己的 move 擴散、模式 0 trace）無條件執行"
+   },
+   {
+    "source": "src",
+    "location": "src/movegrid.c:1115-1122",
+    "observation": "第 2 輪（reset、移動力 100、模式 1 trace）只在 step_count == -1 時執行"
+   },
+   {
+    "source": "src",
+    "location": "src/movegrid.c:1124-1130",
+    "observation": "第 2b 輪（reset、標控制區、自己的 move 擴散）只在第 2 輪 step_count != -1 時執行"
+   },
+   {
+    "source": "src",
+    "location": "src/movegrid.c:1161-1168, 1191-1199",
+    "observation": "第 3 輪（含挖掉有人站的格）與第 4 輪無條件執行，故每次呼叫擴散三到五次"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/movement.md「朝目標移動」段",
+    "observation": "正文為「它最多把網格重建五次，只有第 2b 輪與第 4 輪設定相同」，表格第 2 列註明「只在第 1 輪回 -1 時跑」、第 2b 列註明「第 2 輪有路時」，與原始碼一致"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item X186 (conflict) settled on: fdps_battle_move_unit_toward（0x119e0）每次呼叫把移動網格擴散三到五次：第 1、3、4 輪必跑，第 2 輪（放寬重試）只在第 1 輪找不到路時跑，改目的地前的第 2b 輪（reset、標控制區、以真實移動力擴散）只在第 2 輪有路時跑；pitfalls.md 的「最多重建五次」正確，movement.md 的「重建四次」與 src/movegrid.c、Ghidra 註解的 FOUR TIMES 都漏算了 00011af4 起的第 2b 輪。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: program_info/movement.md\n  why the edit was made: 反組譯有五個擴散呼叫點，正文的「四次」與同段表格的五列互相矛盾。\n  old: 呼叫端都會先把游標移到單位身上。它把網格重建四次，四輪各有不同：\n  new: 呼叫端都會先把游標移到單位身上。它每次呼叫把網格重建三到五次（第 1、3、4 輪必跑，第 2 輪只在第 1 輪找不到路時跑，第 2b 輪只在第 2 輪有路時跑），各輪設定不同：\n\nSee what happened to that passage: git diff 14a5e44 -- program_info/movement.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F47",
+  "item_sha1": "c49b05949c68bde161b1aa013a234c7a38f9e0a6",
+  "verdict": "fixed",
+  "conclusion": "fdps_play_movie 以 spawnlp（P_WAIT）執行光碟上的 FD.EXE；呼叫前 AIL_shutdown、卸下鍵盤中斷、清空 BIOS 鍵盤緩衝、停止 CD 音軌、DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並以 25 Hz 重新初始化音效。已落地的改動把函式名改正為 spawnlp，但保留了「只負責」的說法，漏掉了這列要警告的重點：只寫 spawn 呼叫不夠，前後的拆裝也在重建範圍內。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/title.c:115-156",
+    "observation": "fdps_play_movie 依序 AIL_shutdown、fdps_uninstall_keyboard_isr、kbhit/getch 清緩衝、fdps_cd_stop_audio、調黑 DAC，spawnlp(P_WAIT, ...)，之後 memset 清畫面、還原 DAC、fdps_install_keyboard_isr、fdps_audio_init(25)。"
+   },
+   {
+    "source": "src",
+    "location": "src/title.c:103-109",
+    "observation": "註解說明先關音效再卸鍵盤中斷，是因為否則 AIL 計時器會在遊戲已不擁有的機器上繼續跑。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 「影片播放不在重建範圍」列",
+    "observation": "現行文字為「FDPS.LE 只負責以 spawnlp 呼叫它」，函式名已正確，但沒有提到前後的拆裝，「只負責」仍誘導重建時只寫 spawn 呼叫。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/cd_audio.md 第 11 行與「影片播放外呼」節",
+    "observation": "擁有者頁已寫明 spawnlp 以及呼叫前後關閉再重開音效與鍵盤中斷、調黑再還原調色盤。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "| 影片播放不在重建範圍 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責以 `spawnlp` 呼叫它 |",
+    "new": "| 影片播放不在重建範圍，但呼叫前後的拆裝在 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 以 `spawnlp` 呼叫它。只寫這個呼叫不夠：呼叫前要關掉 AIL、卸下鍵盤中斷、調黑調色盤，回來後要還原調色盤、裝回鍵盤中斷並重新初始化音效，否則 `FD.EXE` 執行期間 AIL 計時器與鍵盤中斷仍掛在遊戲身上 |",
+    "why": "現行列已改正函式名，但「只負責」仍會誘導重建時漏掉呼叫前後音效與鍵盤中斷的拆裝，補回這個警告。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查 src/title.c:115-156：fdps_play_movie 依序 AIL_shutdown、fdps_uninstall_keyboard_isr、kbhit/getch 清 BIOS 緩衝、fdps_cd_stop_audio、DAC 調黑，spawnlp(P_WAIT, fd.exe, ...)，回來後清畫面、還原 DAC、fdps_install_keyboard_isr、fdps_audio_init；103-109 行註解說明先關 AIL 是因其計時器否則會繼續在遊戲不再擁有的機器上跑。現行 pitfalls.md 第 295 行（環境與範圍表，欄位是「內容」）已把函式名改成 spawnlp，但仍寫「只負責以 spawnlp 呼叫它」，漏掉 PF2 要補的重點：前後的拆裝也在重建範圍內。新文字所列步驟皆與 src 相符、未列的細節（停 CD 音軌、清鍵盤緩衝、清畫面）由連結的擁有者 program_info/cd_audio.md 負責（第 11 行與「影片播放外呼」節已寫），擁有權單一。old 與頁面現行文字逐字相符。確認。",
+   "edits": []
+  },
+  "_landed": true,
+  "_refused": [
+   {
+    "id": "F47",
+    "doc": "rebuild_info/pitfalls.md",
+    "why": "old occurs 0 times now"
+   }
+  ],
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item PF2 (pitfall) settled on: fdps_play_movie 以 spawnlp（P_WAIT）執行光碟上的 FD.EXE，呼叫前先 AIL_shutdown、卸下鍵盤中斷並清空 BIOS 鍵盤緩衝、Stop Audio、DAC 調黑，回來後清畫面、還原 DAC、裝回鍵盤中斷並以 25 Hz 重新 fdps_audio_init。這只影響一支 function，依 pitfalls.md「單一 function 的踩雷點記在它自己的註解裡」不另立新列，細節已在 src 的註解與 cd_audio.md；但 pitfalls.md「影片播放不在重建範圍」那一列寫成「只負責 spawnv」，函式名錯且正好誘導只寫 spawn 呼叫，改正該列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 原列把函式寫成 spawnv（實為 spawnlp），且「只負責」會誘導重建時漏掉音效與鍵盤中斷的拆裝。\n  old: | 影片播放不在重建範圍 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 只負責 `spawnv` |\n  new: | 影片播放不在重建範圍，但呼叫前後的拆裝在 | 三段過場由光碟上的 `FD.EXE` 播放，`FDPS.LE` 以 `spawnlp` 呼叫它。只寫這個呼叫不夠：呼叫前要關掉 AIL、卸下鍵盤中斷，回來後要裝回鍵盤中斷並重新初始化音效，否則 `FD.EXE` 執行期間 AIL 計時器與鍵盤中斷仍掛在遊戲身上 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F48",
+  "item_sha1": "deadaccfc9d02ece7202f4b3a2a5fec6f2493e76",
+  "verdict": "fixed",
+  "conclusion": "FDPS 的 fdps_item_effect 與 FD2 types.h 的 item_effect 同為 23 byte，但 FD2 的宣告在 +0 多一個前綴 byte、type 在 +1；FDPS 的 type 在 +0，其後各欄前移一格，+0x15 是 select_mode（對應 FD2 宣告的 trailing_22），+0x16 全表為 0。先落地的編輯只改寫了 pragma pack(1) 那一列，這條 FD2 錯位的踩雷點在 pitfalls.md 仍未收錄，故補上。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/fdpstype.h:165-183",
+    "observation": "struct fdps_item_effect：type 在 +0，ap/hit/dp/ev 為 short，接著 hit_effect、hit_effect_rate、range_min、range_max、use_effect、short use_amount、use_distance、use_target、use_radius、unsigned short price（+0x13）、select_mode（+0x15）、gap_016[1]，共 23 byte。"
+   },
+   {
+    "source": "fd2",
+    "location": "C:/Users/fdpsf/Documents/fd2-anatomy/src/include/types.h:48-72",
+    "observation": "FD2 item_effect（23 bytes）：unknown_00 在 +0 為前綴 byte、type 在 +1、ap 在 +2 ... price 在 +20、trailing_22 在 +22；照這份宣告讀 FDPS record，價格落在 +0x14..+0x15，即 FDPS 價格高位 byte 與 select_mode。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/tables/items.md",
+    "observation": "佈局表列 0x15 為 select_mode、0x16 全表 251 筆一律為 0。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md（不能換的型別與寫法）",
+    "observation": "現行的 #pragma pack(1) 列已被另一次編輯改寫；全頁沒有任何一列提到 FD2 的 item_effect 或物品 record 相對前作的錯位（grep item_effect 無結果）。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "| 執行期記錄一律要明寫 `#pragma pack(1)`，不能靠命令列旗標或編譯器預設的對齊 | 照 C 的常識宣告 struct、讓編譯器自己排。現行旗標組下這樣編出來剛好對（wcc386 10.0a 不帶 `-zp` 的預設就是 byte packing），但旗標組一加上 `-zp4` 之類的對齊選項或換用別的編譯器，落在不對齊位移上的多 byte 欄位（`fdps_vfs_image_header` 的 `version` 在 `+0x3`、`entry_count` 在 `+0x7`）就整批往後推；每一個不在自然對齊位移上的欄位都會這樣，而且編得過、跑得動、值是錯的 | [`build_flags.md`](build_flags.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |",
+    "new": "| 執行期記錄一律要明寫 `#pragma pack(1)`，不能靠命令列旗標或編譯器預設的對齊 | 照 C 的常識宣告 struct、讓編譯器自己排。現行旗標組下這樣編出來剛好對（wcc386 10.0a 不帶 `-zp` 的預設就是 byte packing），但旗標組一加上 `-zp4` 之類的對齊選項或換用別的編譯器，落在不對齊位移上的多 byte 欄位（`fdps_vfs_image_header` 的 `version` 在 `+0x3`、`entry_count` 在 `+0x7`）就整批往後推；每一個不在自然對齊位移上的欄位都會這樣，而且編得過、跑得動、值是錯的 | [`build_flags.md`](build_flags.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |\n| 物品 record `fdps_item_effect`（`ITEM.DAT` 一筆）與前作 FD2 `types.h` 的 `item_effect` 同為 23 byte，但 FD2 的宣告在 `+0` 多放一個前綴 byte、`type` 在 `+1`；FDPS 的 `type` 在 `+0`，其後各欄都比 FD2 的宣告前移一格，`+0x15` 是 `select_mode`（位置上對應 FD2 宣告的 `trailing_22`），`+0x16` 恆為 0 | 照「先拿前作的答案當起點」直接沿用 FD2 `types.h` 的 `item_effect`。尺寸相同，編得過、跑得動，但每一欄都讀到隔壁的 byte：類型碼、四項加成、使用效果碼與價格全部錯位，價格讀進的是 FDPS 價格的高位 byte 與 `select_mode` | [`assets/tables/items.md`](../assets/tables/items.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |",
+    "why": "照 FD2 的型別宣告寫物品 record 會無聲錯位，達到收錄門檻而頁面尚未收錄，在現行的 pack(1) 列之後補一列並連回擁有佈局的 items.md。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "amend",
+   "why": "查 src/fdpstype.h:165-183：fdps_item_effect 的 type 在 +0、price 在 +0x13–0x14、select_mode 在 +0x15、gap_016 在 +0x16，共 23 byte；fd2-anatomy/src/include/types.h:48-72 的 item_effect 有 +0 前綴 byte、type 在 +1、price 在 +20–21、trailing_22 在 +22，照它讀 FDPS 價格確實讀到 FDPS 價格高位與 select_mode。ITEM.DAT（workspace/vfs_dump/MISC/ITEM.DAT，5773 byte = 251 筆）每筆 +0x16 全為 0。現行 pitfalls.md 第 106 列是另一次編輯改寫過的 pack(1) 列，全頁沒有 FD2 item_effect 錯位的列；program_info/data_structures.md「與前作 FD2 的對應」只寫佈局不同，佈局擁有者是 assets/tables/items.md，新列連回兩者，歸屬正確。結論與新增列成立，唯括號「位置上對應 FD2 宣告的 trailing_22」不精確：FD2 宣告的 +0x15 是 price 的高位 byte，trailing_22 在 +0x16，是前移一格後才對到 select_mode，故改寫該括號。",
+   "edits": [
+    {
+     "doc": "rebuild_info/pitfalls.md",
+     "old": "| 執行期記錄一律要明寫 `#pragma pack(1)`，不能靠命令列旗標或編譯器預設的對齊 | 照 C 的常識宣告 struct、讓編譯器自己排。現行旗標組下這樣編出來剛好對（wcc386 10.0a 不帶 `-zp` 的預設就是 byte packing），但旗標組一加上 `-zp4` 之類的對齊選項或換用別的編譯器，落在不對齊位移上的多 byte 欄位（`fdps_vfs_image_header` 的 `version` 在 `+0x3`、`entry_count` 在 `+0x7`）就整批往後推；每一個不在自然對齊位移上的欄位都會這樣，而且編得過、跑得動、值是錯的 | [`build_flags.md`](build_flags.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |",
+     "new": "| 執行期記錄一律要明寫 `#pragma pack(1)`，不能靠命令列旗標或編譯器預設的對齊 | 照 C 的常識宣告 struct、讓編譯器自己排。現行旗標組下這樣編出來剛好對（wcc386 10.0a 不帶 `-zp` 的預設就是 byte packing），但旗標組一加上 `-zp4` 之類的對齊選項或換用別的編譯器，落在不對齊位移上的多 byte 欄位（`fdps_vfs_image_header` 的 `version` 在 `+0x3`、`entry_count` 在 `+0x7`）就整批往後推；每一個不在自然對齊位移上的欄位都會這樣，而且編得過、跑得動、值是錯的 | [`build_flags.md`](build_flags.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |\n| 物品 record `fdps_item_effect`（`ITEM.DAT` 一筆）與前作 FD2 `types.h` 的 `item_effect` 同為 23 byte，但 FD2 的宣告在 `+0` 多放一個前綴 byte、`type` 在 `+1`；FDPS 的 `type` 在 `+0`，其後各欄都比 FD2 的宣告前移一格，`+0x15` 是 `select_mode`（前移一格後對應 FD2 宣告最後一欄、位於 `+0x16` 的 `trailing_22`），`+0x16` 恆為 0 | 照「先拿前作的答案當起點」直接沿用 FD2 `types.h` 的 `item_effect`。尺寸相同，編得過、跑得動，但每一欄都讀到隔壁的 byte：類型碼、四項加成、使用效果碼與價格全部錯位，價格讀進的是 FDPS 價格的高位 byte 與 `select_mode` | [`assets/tables/items.md`](../assets/tables/items.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |",
+     "why": "照 FD2 的型別宣告寫物品 record 會無聲錯位，達到收錄門檻而頁面尚未收錄，在現行的 pack(1) 列之後補一列並連回擁有佈局的 items.md。 括號改寫：FD2 宣告的 +0x15 是價格高位 byte，trailing_22 在 +0x16，前移一格後才對到 select_mode，原寫「位置上對應」會讓人以為同位移。"
+    }
+   ]
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item PF4 (pitfall) settled on: FDPS 的物品 record（fdps_item_effect，ITEM.DAT 一筆）與前作 FD2 的 item_effect 同為 23 byte，但沒有 FD2 在 +0 的前綴 byte：type 在 +0，其後各欄都比 FD2 前移一格，+0x15 是 select_mode、+0x16 是恆為 0 的空位。照專案「先沿用前作」的做法直接拿 FD2 types.h 的 item_effect 會編得過、每一欄都錯位，屬於照直覺寫就會偏離原版的事，而 pitfalls.md 尚未收錄，故在「不能換的型別與寫法」補一列並連回擁有佈局的 assets/tables/items.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 照 FD2 的型別宣告寫會無聲錯位，達到收錄門檻且 pitfalls.md 尚未收錄；改掉原稿「select_mode 是 FDPS 才有的」這個無依據的說法。\n  old: | 執行期記錄一律要 `#pragma pack(1)`，不能用編譯器預設對齊 | 照 C 的常識宣告 struct，讓編譯器自己排。80x87 模擬器的 10-byte scratch operand 在預設對齊下會變成 12 byte，無聲蓋掉緊接在後的續行指標；同一個問題會出現在每一筆非 4 的倍數的記錄上，而且編得過、跑得動、值是錯的 | [`program_info/data_structures.md`](../program_info/data_structures.md) |\n  new: | 執行期記錄一律要 `#pragma pack(1)`，不能用編譯器預設對齊 | 照 C 的常識宣告 struct，讓編譯器自己排。80x87 模擬器的 10-byte scratch operand 在預設對齊下會變成 12 byte，無聲蓋掉緊接在後的續行指標；同一個問題會出現在每一筆非 4 的倍數的記錄上，而且編得過、跑得動、值是錯的 | [`program_info/data_structures.md`](../program_info/data_structures.md) |\n| 物品 record `fdps_item_effect`（`ITEM.DAT` 一筆）與前作 FD2 `types.h` 的 `item_effect` 同為 23 byte，但 FD2 的宣告在 `+0` 多放一個前綴 byte、`type` 在 `+1`；FDPS 的 `type` 在 `+0`，其後各欄都比 FD2 的宣告前移一格，`+0x15` 是 `select_mode`（位置上對應 FD2 宣告的 `trailing_22`），`+0x16` 恆為 0 | 照「先拿前作的答案當起點」直接沿用 FD2 `types.h` 的 `item_effect`。尺寸相同，編得過、跑得動，但每一欄都讀到隔壁的 byte：類型碼、四項加成、使用效果碼與價格全部錯位，價格讀進的是 FDPS 價格的高位 byte 與 `select_mode` | [`assets/tables/items.md`](../assets/tables/items.md)、[`program_info/data_structures.md`](../program_info/data_structures.md) |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F49",
+  "item_sha1": "637c195878a49ce3a507ad3444bd10ef74f42ef1",
+  "verdict": "fixed",
+  "conclusion": "過場腳本的 SWITCH_MAP 無條件改寫章節索引並呼叫 fdps_chapter_state_reset，不比較目標與目前地圖；ICON29 在 0xB78 切到同一張地圖 29 靠這次重設丟掉演出殘留，再由 0xB7A 的 DEPLOY_WAVE 部署戰鬥用的平衡之神。先落地的修改只改了第 5 章那一列的措辭，這個踩雷點的新列整列沒有進 pitfalls.md，因此補上。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/icon.c:1053-1058",
+    "observation": "case SCRIPT_OP_SWITCH_MAP 直接寫 data_fdps_chapter_current_chapter_id = script[offset+1] 並呼叫 fdps_chapter_state_reset()，沒有任何與目前地圖的比較"
+   },
+   {
+    "source": "src",
+    "location": "src/chapter.c:275-293",
+    "observation": "fdps_chapter_state_reset 重建地圖單位陣列、清空格子事件旗標、視野游標歸零、回合數設為 1"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/ICONANI/ICON29.DAT@0xB78",
+    "observation": "bytes 11 1D 04 01 01 13 00 01：0xB78 為 SWITCH_MAP 0x1D（地圖 29），0xB7A 為 DEPLOY_WAVE 波次 1、原位放置，0xB7D 為 0x13 觸發旗標"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch30.md 開場過場流程與波次 1 出場說明",
+    "observation": "已記載 0xb78 的 SWITCH_MAP 切到同一張地圖 29、整個戰場重設、0xb7a 再部署波次 1"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md",
+    "observation": "目前頁面搜尋不到 SWITCH_MAP 同地圖重設的列；〈不能加的檢查〉表最後一列是第 5 章格子事件那一列，已被另一個修改改寫成「波次 1 的全部敵兵同樣改成主動」"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "直到我方自己越線 | [`resource_info/map.md`](../resource_info/map.md)、[`chapters/ch05.md`](../chapters/ch05.md)；`src/maptile.c` 的註解 |",
+    "new": "直到我方自己越線 | [`resource_info/map.md`](../resource_info/map.md)、[`chapters/ch05.md`](../chapters/ch05.md)；`src/maptile.c` 的註解 |\n| 過場腳本的 `SWITCH_MAP` 不比較目標與目前地圖：切到當下所在的地圖一樣改寫章節索引並做一次完整的 `fdps_chapter_state_reset`。`ICON29` 靠的就是這一點——`0xB78` 切到它本來就在的地圖 29，把演出期間的部署、退場、復歸、放置與地圖改寫全部丟掉，再由 `0xB7A` 的 `DEPLOY_WAVE` 部署戰鬥用的平衡之神 | 把「目標等於目前地圖」當成可省略的切換，加一道 `if (m != 目前地圖)` 才重設。第 30 章會帶著演出殘留的單位與地圖改寫開戰 | [`resource_info/cutscene_script.md`](../resource_info/cutscene_script.md)、[`chapters/ch30.md`](../chapters/ch30.md) |",
+    "why": "先落地的修改只改寫了第 5 章那一列，SWITCH_MAP 同地圖仍完整重設的踩雷點整列遺失，補在〈不能加的檢查〉表末。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查了 src/icon.c:1053-1058（SWITCH_MAP 直接改寫 data_fdps_chapter_current_chapter_id 並呼叫 fdps_chapter_state_reset，沒有與目前地圖比較）、src/chapter.c:275-293（重建地圖單位陣列、清格子事件旗標、回合數歸 1）、src/deploy.c:510 與 src/rsrc.c:280（fdps_build_map_unit_array 先呼叫 fdps_field_load_chapter_resources，重新載入圖層與 MAP/DTL，所以地圖改寫也被丟掉）；ICON29.DAT@0xB78 為 11 1D 04 01 01 13 00 01（SWITCH_MAP 29、DEPLOY_WAVE 波次 1 原位、0x13 觸發旗標），與 chapters/ch30.md 第 72、129、211、695 行一致。pitfalls.md 現況：〈不能加的檢查〉末列只剩第 5 章格子事件那列（已被另一修改改成「波次 1 的全部敵兵同樣改成主動」），全頁搜不到 SWITCH_MAP 同地圖重設的列，該踩雷點確實遺失。修改以第 88 列末尾唯一的片段為 old、在其後補一列，新文字屬實、結論式，正典連回 resource_info/cutscene_script.md（第 73 行擁有 SWITCH_MAP 重設語意）與 chapters/ch30.md，擁有者單一。確認。",
+   "edits": []
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item PF9 (pitfall) settled on: 過場腳本的 SWITCH_MAP 無條件改寫章節索引並呼叫 fdps_chapter_state_reset，不檢查目標是否等於目前地圖；ICON29 在 0xB78 切到同一張地圖 29 就是靠這次重設丟掉演出殘留，再由 0xB7A 的 DEPLOY_WAVE 放上戰鬥用的平衡之神。這是照直覺加上「同地圖略過」就會出錯的事，pitfalls.md 原本沒有，已補一列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 補上 SWITCH_MAP 切到同一張地圖仍需完整重設的踩雷點；錯法是補一道原版沒有的判斷，歸「不能加的檢查」，連回擁有 SWITCH_MAP 語意與第 30 章流程的正典頁\n  old: | 格子事件不分陣營：`fdps_map_set_pending_tile_event` 只比對格子的事件碼與觸發時機，不看是誰回報的；四支行走動畫每走一步都回報，敵方與 NPC 階段也和我方一樣在單位行動結束後以它的索引分派待處理事件。第 5 章中央岩塊西側那道縱線的總攻擊因此不只由我方觸發——敵方階段被 AI 移動過去的敵兵走進任何一格，全軍同樣從原地改成主動；`fdps_chapter_05_event_enemies_advance` 也不看觸發者是誰 | 照攻略站的「己方一通過中央石頭前一格的垂直線」，在設定待處理事件或分派處理函式時加上「只限我方單位」的條件，或只在我方回合檢查格子事件。主動行為的敵兵走上那道線時原版會提早發動總攻擊，重建版卻讓其餘敵兵繼續原地等待，直到我方自己越線 | [`resource_info/map.md`](../resource_info/map.md)、[`chapters/ch05.md`](../chapters/ch05.md)；`src/maptile.c` 的註解 |\n  new: | 格子事件不分陣營：`fdps_map_set_pending_tile_event` 只比對格子的事件碼與觸發時機，不看是誰回報的；四支行走動畫每走一步都回報，敵方與 NPC 階段也和我方一樣在單位行動結束後以它的索引分派待處理事件。第 5 章中央岩塊西側那道縱線的總攻擊因此不只由我方觸發——敵方階段被 AI 移動過去的敵兵走進任何一格，全軍同樣從原地改成主動；`fdps_chapter_05_event_enemies_advance` 也不看觸發者是誰 | 照攻略站的「己方一通過中央石頭前一格的垂直線」，在設定待處理事件或分派處理函式時加上「只限我方單位」的條件，或只在我方回合檢查格子事件。主動行為的敵兵走上那道線時原版會提早發動總攻擊，重建版卻讓其餘敵兵繼續原地等待，直到我方自己越線 | [`resource_info/map.md`](../resource_info/map.md)、[`chapters/ch05.md`](../chapters/ch05.md)；`src/maptile.c` 的註解 |\n| 過場腳本的 `SWITCH_MAP` 不比較目標與目前地圖：切到當下所在的地圖一樣改寫章節索引並做一次完整的 `fdps_chapter_state_reset`。`ICON29` 靠的就是這一點——`0xB78` 切到它本來就在的地圖 29，把演出期間的部署、退場、復歸、放置與地圖改寫全部丟掉，再由 `0xB7A` 的 `DEPLOY_WAVE` 部署戰鬥用的平衡之神 | 把「目標等於目前地圖」當成可省略的切換，加一道 `if (m != 目前地圖)` 才重設。第 30 章會帶著演出殘留的單位與地圖改寫開戰 | [`resource_info/cutscene_script.md`](../resource_info/cutscene_script.md)、[`chapters/ch30.md`](../chapters/ch30.md) |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F50",
+  "item_sha1": "c035943685857839c1f32354628c977fbd9231c8",
+  "verdict": "fixed",
+  "conclusion": "第 1、4、5、6、9、11、17 章的行動後處理先呼叫共用判定 fdps_battle_check_default_end_conditions，返回後無條件問本章要守的單位（第 1 章索爾、第 4／5／6／17 章單位 3、第 9 章單位 6 或 7、第 11 章單位 8 琴琴）是否退場並寫敗北，不看結束碼現值、也不是過關的 else，因此會蓋掉共用判定剛寫的過關與章節事件先寫的結果。現行 pitfalls.md 只有第 25–27、30 章那一列與共用判定本身那一列，這一族沒有收錄，補上一列。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chpost1.c:112-122",
+    "observation": "fdps_chapter_01_post_action 先呼叫共用判定，再 if (fdps_unit_is_retired(CH01_SOL_SLOT)) 畫字並寫結束碼 1，不讀現值；註解明言會蓋掉共用判定剛寫的 2。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost1.c:237-242, 287-292, 340-345",
+    "observation": "第 4、5、6 章：共用判定後 if (fdps_unit_is_retired(3)) 寫 1。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost1.c:567-572",
+    "observation": "第 9 章：共用判定後 if (fdps_unit_is_retired(6) || fdps_unit_is_retired(7)) 寫 1。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost1.c:696-702",
+    "observation": "第 11 章：共用判定後 if (fdps_unit_is_retired(8)) 寫 1；註解說明索引 8 是 fdps_chapter_11_init 附加的琴琴，且這一寫在共用判定因入口保護返回的路徑上也照樣執行。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost2.c:106-111",
+    "observation": "第 17 章：共用判定後 if (fdps_unit_is_retired(3)) 寫 1。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlend.c:112-139",
+    "observation": "共用判定入口在結束碼非 0 時返回，這是唯一看現值的地方；行動後處理的第二次寫入不經過這道保護。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 第 153、197、200 列",
+    "observation": "現行頁面只有共用判定本身、第 25–27／30 章與第 17 章共用判定章節特例三列，沒有「共用判定後再無條件寫敗北」這一族的列。"
+   }
+  ],
+  "edits": [
+   {
+    "doc": "rebuild_info/pitfalls.md",
+    "old": "同歸於盡就從敗北變成通關最終章 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)、[`chapters/ch30.md`](../chapters/ch30.md)；`src/chpost3.c` 的註解 |",
+    "new": "同歸於盡就從敗北變成通關最終章 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)、[`chapters/ch30.md`](../chapters/ch30.md)；`src/chpost3.c` 的註解 |\n| 先跑共用判定、再加一條本章敗北的第 1、4、5、6、9、11、17 章行動後處理（例如 `fdps_chapter_11_post_action` 看單位索引 8 的琴琴，第 9 章看單位 6 或 7 兩名）：共用判定 `fdps_battle_check_default_end_conditions` 返回後，**無條件**問本章要守的單位是否退場、寫敗北，不看目前的結束碼，也不是過關的 else。共用判定剛寫的過關會被蓋掉，所以同一次行動裡清光敵人又失去要守的單位是敗北；共用判定因結束碼已非 0 而在入口返回時，這一寫照樣執行，蓋掉章節事件先寫的結果 | 仿照共用判定入口的保護寫成 `if (結束碼 == 0 && 退場) 敗北;`，或把本章條件掛在過關的 else 上、併進共用判定成為「敵人全滅就過關，否則看守護對象」。同一次行動裡敵人全滅與要守的單位退場同時發生時，原版記敗北、改寫版記過關；章節事件先寫的結果也不再被本章的敗北蓋過 | [`program_info/chapter.md`](../program_info/chapter.md)、[`chapters/ch11.md`](../chapters/ch11.md)；`src/chpost1.c`、`src/chpost2.c` 的註解 |",
+    "why": "這一族共用判定後無條件再寫敗北的章節在 pitfalls 仍未收錄，照原意補上一列，接在第 25–27、30 章那一列之後。"
+   }
+  ],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "amend",
+   "why": "查了現行 rebuild_info/pitfalls.md（第 197 列為第 25–27、30 章那一列，第 200 列為共用判定的第 17 章特例；全頁沒有「共用判定後再無條件寫敗北」這一族，缺漏屬實、達收錄門檻）與 src：chpost1.c:112-122、237-242、287-292、340-345、567-572、696-702 與 chpost2.c:106-111 都是先呼叫共用判定、再不看現值地寫 1；btlend.c:112-139 的共用判定入口在結束碼非 0 時返回，第 4 步章節索引 0x10（第 17 章）與 0x15 看單位 3、其他看單位 0，且無條件寫 1。第一位的新列把第 17 章也說成「會蓋掉共用判定剛寫的過關、同時成立時改寫版記過關」，這對第 17 章不成立：共用判定自己的 0x10 分支已看同一個單位 3、已把 2 改成 1（chpost2.c:71-86 註解明言本章這一寫在那時只是把 1 寫成 1），所以加保護或掛在過關的 else 上，同時成立時仍是敗北；第 17 章這一寫只在進入時結束碼已非 0 的路徑上改變結果，照直覺會寫錯的方式是把它當重複碼刪掉或加保護。因此改寫該列，把同時成立的結論限定在第 1、4、5、6、9、11 章，另述第 17 章的差別並連回 chapters/ch17.md。program_info/chapter.md 形狀表第 196 行的括註「所以會蓋掉剛寫的 2」同樣把第 17 章包進去，是這一列要連回的正典，一併補上第 17 章的限定，否則連過去的頁面與 pitfalls 矛盾。",
+   "edits": [
+    {
+     "doc": "rebuild_info/pitfalls.md",
+     "old": "同歸於盡就從敗北變成通關最終章 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)、[`chapters/ch30.md`](../chapters/ch30.md)；`src/chpost3.c` 的註解 |",
+     "new": "同歸於盡就從敗北變成通關最終章 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)、[`chapters/ch30.md`](../chapters/ch30.md)；`src/chpost3.c` 的註解 |\n| 先跑共用判定、再加一條本章敗北的第 1、4、5、6、9、11、17 章行動後處理（例如 `fdps_chapter_11_post_action` 看單位索引 8 的琴琴，第 9 章看單位 6 或 7 兩名）：共用判定 `fdps_battle_check_default_end_conditions` 返回後，**無條件**問本章要守的單位是否退場、寫敗北，不看目前的結束碼，也不是過關的 else。共用判定因結束碼已非 0 而在入口返回時，這一寫照樣執行，蓋掉章節事件先寫的結果；第 1、4、5、6、9、11 章它還會蓋掉共用判定剛寫的過關，所以同一次行動裡清光敵人又失去要守的單位是敗北。第 17 章的共用判定自己的敗北一步已看同一個單位 3，同時成立時本來就是敗北，本章這一寫只在進入時結束碼已非 0 的路徑上改變結果，不是重複碼 | 仿照共用判定入口的保護寫成 `if (結束碼 == 0 && 退場) 敗北;`，或把本章條件掛在過關的 else 上、併進共用判定成為「敵人全滅就過關，否則看守護對象」；第 17 章則是看到共用判定已問過單位 3，就把這一寫當重複碼刪掉。第 1、4、5、6、9、11 章在敵人全滅與要守的單位退場同一次行動發生時，原版記敗北、改寫版記過關；各章（含第 17 章）章節事件先寫的結果也不再被本章的敗北蓋過 | [`program_info/chapter.md`](../program_info/chapter.md)、[`chapters/ch11.md`](../chapters/ch11.md)、[`chapters/ch17.md`](../chapters/ch17.md)；`src/chpost1.c`、`src/chpost2.c` 的註解 |",
+     "why": "這一族共用判定後無條件再寫敗北的章節在 pitfalls 仍未收錄，補上一列；第 17 章的共用判定自己已看單位 3，同時成立的過關被蓋掉只適用於第 1、4、5、6、9、11 章，第 17 章的差別只在進入時結束碼已非 0 的路徑（src/btlend.c:129-133、src/chpost2.c:71-86）。"
+    },
+    {
+     "doc": "program_info/chapter.md",
+     "old": "| 共用判定後，再加「某單位退場 → 1」（不檢查目前值，所以會蓋掉剛寫的 2） | 1、4、5、6、9、11、17 |",
+     "new": "| 共用判定後，再加「某單位退場 → 1」（不檢查目前值，所以會蓋掉剛寫的 2；第 17 章的共用判定第 4 步已看同一個單位 3，這一寫只在進入時結束碼已非 0 的路徑上改變結果） | 1、4、5、6、9、11、17 |",
+     "why": "形狀表的括註把第 17 章也說成會蓋掉共用判定剛寫的 2，但第 17 章（章節索引 0x10）的共用判定自己已看單位 3 並寫 1，本章的寫入在那條路徑上只是 1 寫成 1（src/btlend.c:129-133、src/chpost2.c:71-86）。"
+    }
+   ]
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item PF30 (pitfall) settled on: 第 1、4、5、6、9、11、17 章的行動後處理先呼叫共用判定，再無條件以 fdps_unit_is_retired 檢查一名單位、寫結束碼 1，不看現值也不是 else，所以會蓋掉共用判定剛寫的過關與章節事件先寫的結果；第 11 章檢查的是單位索引 8（琴琴）。pitfalls.md 只收了不呼叫共用判定的第 25–27 章與共用判定本身的形狀，這一族沒有收，照直覺加上「結束碼仍為 0」的保護或寫成 else 會讓同時成立時變成過關，達到收錄門檻，新增一列並連回 program_info/chapter.md 的形狀表與 chapters/ch11.md。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 共用判定後無條件再寫敗北的第 1、4、5、6、9、11、17 章，照直覺加保護或寫成 else 就會把同時成立的結果從敗北變成過關，pitfalls 尚未收錄；措辭涵蓋第 9 章的兩名守護對象。\n  old: | 不呼叫共用判定、自己判勝敗的第 25、26、27 章行動後處理（`fdps_chapter_25_post_action`、`fdps_chapter_26_post_action`、`fdps_chapter_27_post_action`）與共用判定同一個形狀：先問魔王方是否倒下、寫過關，再**無條件**問蘭迪斯是否退場、寫敗北，兩個寫入互不為 else、都不看目前的結束碼，後寫的敗北蓋過過關，所以同一次行動裡魔王與蘭迪斯一起倒下是敗北。第 3 章則是先查蘭迪斯的 else-if，結果同為敗北，但各章的形狀要各自照原版寫 | 寫成 `if (魔王倒下) 過關; else if (蘭迪斯退場) 敗北;`，或把共用判定入口那道「結束碼已非 0 就不動」的保護套到第二個寫入上。同一次行動裡兩人一起倒下時，原版記敗北，改寫版記過關；反過來，拿掉保護也正是讓過關能蓋過同一次行動裡章節事件先寫的敗北 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)；`src/chpost3.c` 的註解 |\n  new: | 不呼叫共用判定、自己判勝敗的第 25、26、27 章行動後處理（`fdps_chapter_25_post_action`、`fdps_chapter_26_post_action`、`fdps_chapter_27_post_action`）與共用判定同一個形狀：先問魔王方是否倒下、寫過關，再**無條件**問蘭迪斯是否退場、寫敗北，兩個寫入互不為 else、都不看目前的結束碼，後寫的敗北蓋過過關，所以同一次行動裡魔王與蘭迪斯一起倒下是敗北。第 3 章則是先查蘭迪斯的 else-if，結果同為敗北，但各章的形狀要各自照原版寫 | 寫成 `if (魔王倒下) 過關; else if (蘭迪斯退場) 敗北;`，或把共用判定入口那道「結束碼已非 0 就不動」的保護套到第二個寫入上。同一次行動裡兩人一起倒下時，原版記敗北，改寫版記過關；反過來，拿掉保護也正是讓過關能蓋過同一次行動裡章節事件先寫的敗北 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)；`src/chpost3.c` 的註解 |\n| 先跑共用判定、再加一條本章敗北的第 1、4、5、6、9、11、17 章行動後處理（例如 `fdps_chapter_11_post_action` 看單位索引 8 的琴琴，第 9 章看單位 6 或 7 兩名）：共用判定 `fdps_battle_check_default_end_conditions` 返回後，**無條件**問本章要守的單位是否退場、寫敗北，不看目前的結束碼，也不是過關的 else。共用判定剛寫的過關會被蓋掉，所以同一次行動裡清光敵人又失去要守的單位是敗北；共用判定因結束碼已非 0 而在入口返回時，這一寫照樣執行，蓋掉章節事件先寫的結果 | 仿照共用判定入口的保護寫成 `if (結束碼 == 0 && 退場) 敗北;`，或把本章條件掛在過關的 else 上、併進共用判定成為「敵人全滅就過關，否則看守護對象」。同一次行動裡敵人全滅與要守的單位退場同時發生時，原版記敗北、改寫版記過關；章節事件先寫的結果也不再被本章的敗北蓋過 | [`program_info/chapter.md`](../program_info/chapter.md)、[`chapters/ch11.md`](../chapters/ch11.md)；`src/chpost1.c`、`src/chpost2.c` 的註解 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F51",
+  "item_sha1": "05e27f577504eee2b7022d9bd60763168345b706",
+  "verdict": "consistent",
+  "conclusion": "第 30 章行動後處理 fdps_chapter_30_post_action 只在蘭迪斯退場時把結束碼寫成 1，不看目前的值；本章唯一的過關寫入是第三型態平衡之神死亡腳本 opcode 4 的寫 2，同一次行動裡兩者都成立時結果是敗北，照共用判定加上「已非 0 就不動」的保護會變成通關。pitfalls.md 第 25、26、27 章那一列已併入這件事的現象、錯法與後果，並連到 ch30.md，不需另立一列。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chpost3.c:516-521",
+    "observation": "fdps_chapter_30_post_action 只有 if (fdps_unit_is_retired(0) != 0) data_fdps_chapter_event_or_battle_end_code = 1; 沒有看目前值的保護。"
+   },
+   {
+    "source": "src",
+    "location": "src/chpost3.c:495-509",
+    "observation": "註解確認第 30 章戰鬥唯一可執行的寫 2 是 fdps_run_death_scripts opcode 4 那一支（0001dcfb），且這裡的寫入無保護，同一次行動的敗北蓋過過關，照共用判定加保護會讓玩家通關最後一章。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/pitfalls.md 第 25、26、27 章行動後處理那一列",
+    "observation": "現況已寫明第 30 章只寫敗北、過關由第三型態平衡之神死亡腳本 opcode 4 寫入、敗北寫入不看目前的結束碼、同歸於盡時敗北蓋過過關；錯法欄寫明套上保護就從敗北變成通關最終章；參照欄含 chapters/ch30.md 與 src/chpost3.c 的註解。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item PF37 (pitfall) settled on: 第 30 章 fdps_chapter_30_post_action 在蘭迪斯退場時無條件把結束碼寫成 1，不看目前值；本章唯一的過關寫入是第三型態平衡之神死亡腳本 opcode 4 的寫 2，同一次行動裡兩者都成立時結果是敗北。照共用判定加上「已非 0 就不動」的保護會把這種情形變成通關，符合 pitfalls 收錄門檻；現有第 25、26、27 章那一列不含第 30 章，故新增一列。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: rebuild_info/pitfalls.md\n  why the edit was made: 第 30 章行動後處理無條件寫敗北、會蓋掉同一次行動死亡腳本寫的過關，照直覺加保護就會變成通關，現有列未涵蓋。\n  old: | 不呼叫共用判定、自己判勝敗的第 25、26、27 章行動後處理（`fdps_chapter_25_post_action`、`fdps_chapter_26_post_action`、`fdps_chapter_27_post_action`）與共用判定同一個形狀：先問魔王方是否倒下、寫過關，再**無條件**問蘭迪斯是否退場、寫敗北，兩個寫入互不為 else、都不看目前的結束碼，後寫的敗北蓋過過關，所以同一次行動裡魔王與蘭迪斯一起倒下是敗北。第 3 章則是先查蘭迪斯的 else-if，結果同為敗北，但各章的形狀要各自照原版寫 | 寫成 `if (魔王倒下) 過關; else if (蘭迪斯退場) 敗北;`，或把共用判定入口那道「結束碼已非 0 就不動」的保護套到第二個寫入上。同一次行動裡兩人一起倒下時，原版記敗北，改寫版記過關；反過來，拿掉保護也正是讓過關能蓋過同一次行動裡章節事件先寫的敗北 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)；`src/chpost3.c` 的註解 |\n  new: | 不呼叫共用判定、自己判勝敗的第 25、26、27 章行動後處理（`fdps_chapter_25_post_action`、`fdps_chapter_26_post_action`、`fdps_chapter_27_post_action`）與共用判定同一個形狀：先問魔王方是否倒下、寫過關，再**無條件**問蘭迪斯是否退場、寫敗北，兩個寫入互不為 else、都不看目前的結束碼，後寫的敗北蓋過過關，所以同一次行動裡魔王與蘭迪斯一起倒下是敗北。第 3 章則是先查蘭迪斯的 else-if，結果同為敗北，但各章的形狀要各自照原版寫 | 寫成 `if (魔王倒下) 過關; else if (蘭迪斯退場) 敗北;`，或把共用判定入口那道「結束碼已非 0 就不動」的保護套到第二個寫入上。同一次行動裡兩人一起倒下時，原版記敗北，改寫版記過關；反過來，拿掉保護也正是讓過關能蓋過同一次行動裡章節事件先寫的敗北 | [`chapters/ch27.md`](../chapters/ch27.md)、[`chapters/ch26.md`](../chapters/ch26.md)、[`chapters/ch25.md`](../chapters/ch25.md)、[`chapters/ch03.md`](../chapters/ch03.md)；`src/chpost3.c` 的註解 |\n| 第 30 章行動後處理 `fdps_chapter_30_post_action` 只做一件事：蘭迪斯退場就把結束碼寫成敗北，寫入**不看目前的值**。本章唯一的過關寫入是第三型態平衡之神死亡腳本的 opcode 4，它在同一次行動裡先執行，所以打倒第三型態的同一次行動裡蘭迪斯也退場時，這裡的敗北蓋過剛寫的過關，結果是敗北 | 照共用判定 `fdps_battle_check_default_end_conditions` 入口的習慣替這個寫入加上「結束碼已非 0 就不動」的保護。同一次行動裡第三型態與蘭迪斯一起倒下時，原版記敗北，改寫版記通關最後一章 | [`chapters/ch30.md`](../chapters/ch30.md)；`src/chpost3.c` 的註解 |\n\nSee what happened to that passage: git diff 14a5e44 -- rebuild_info/pitfalls.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F52",
+  "item_sha1": "5582f884057883f9906b1408923c9089a40d3a55",
+  "verdict": "consistent",
+  "conclusion": "`FDETXT30` `0x13`–`0x14` 是蘭迪斯與法蓮娜道別那一場在章節區塊裡的舊稿：`WIN29` 切到地圖 63 後畫的是 `FDETXT64` `0x11`–`0x16`，開頭到法蓮娜「嗯？」與 `0x13` 逐字相同、`0x14` 的「我會永遠記得妳的。」留在 `FDETXT64` `0x14`，同一位置、同樣分別後接強盜與重逢段，屬「搬到過場地圖區塊並改寫」的 S13b，與 `FDETXT01` `0x0E`→`FDETXT37` `0x0B` 的改寫擴充先例一致。頁面現行的 S4「22 條」（`0x13`、`0x14` 都不在 S4）與排除清單 S13b 的「30 `0x13`–`0x14`→64」正確，被拒修正要把 `0x14` 加進 S4 成 24 條的前提（`0x13` 仍在 S4）已不成立，不需再改。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT30.TXT（0x13、0x14、0x15–0x1F）",
+    "observation": "0x13：蘭迪斯決心找母親、法蓮娜祝福、「法蓮娜﹒﹒﹒」「嗯？」後問她是不是真的不願意同行、她沉默；0x14：「也許，旅程要結束了。」「謝謝妳，我會永遠記得妳的。我走了！」法蓮娜沉默；0x15 起是強盜與眾人重逢。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT64.TXT（0x11–0x21）",
+    "observation": "0x11 從「我已經下定決心了」到法蓮娜「嗯？」與 FDETXT30 0x13 逐字相同，之後改成再會的約定；0x14「再見了，我會永遠記得妳的。別讓我久等」；0x17–0x21 與 FDETXT30 0x15–0x1F 逐字相同。同一場景在同一位置被改寫擴充，舊稿 0x13–0x14 沒有讀取端。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT01.TXT（0x0E）；python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT37.TXT（0x0B）",
+    "observation": "已列 S13b 的先例：短稿被大幅改寫擴充，情節細節也改了（原稿蘭迪斯要帶國王回家治療，顯示版是治療後的長對話），證明 S13b 收錄改寫幅度大的同場舊稿。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/story.md S4 分類列與條列；cut_content/_index.md 排除清單 S13b",
+    "observation": "現行 S4 為「22 條」「19 段」，條列已無 `30` `0x13`；S13b 範圍寫「30 `0x13`–`0x14`→64」。兩處一致，都是一致性項目 R3a 落地的結果。"
+   },
+   {
+    "source": "tool",
+    "location": "tools/cut_content/story.py 第 309、353、396 行",
+    "observation": "產生器仍把 (30, 0x13) 放在 S4_GROUPS、S13b 只列 (30, 0x14, None)，所以 story.md 的 story:S4-text 區塊與總表 `FDETXT30` `0x13` 那一列還是 S4，與手寫段不一致。"
+   }
+  ],
+  "edits": [],
+  "outside": "tools/cut_content/story.py 尚未跟上已落地的手寫分類（一致性項目 R3a 的 outside）：從 S4_GROUPS 刪掉 `([(30, 0x13)], \"另一版的道別\")`；_owners() 的 S13b 範圍把 `(30, 0x14, None)` 改成 `(30, 0x13, 0x14)`；NOTE_OVERRIDES 加 (30, 0x13) 的說明（前半與 `FDETXT64` `0x11` 逐字相同，後半的同行邀約改寫成再會約定）。之後重生 cut_content/story.md 的 story:S4-text 與總表區塊、cut_content/_index.md 總表（python tools/cut_content/cut_content.py index），以及 chapters/ch30.md 的 chapter_docs:dialogue 區塊（`FDETXT30` `0x13` 改連 S13b）。不要照一致性項目 R3b 的 outside 把 (30, 0x14) 移進 S4。",
+  "confidence": "medium",
+  "open_question": "把「邀她同行、她沉默、他獨自離開」與顯示版「約定再會」看成同一場景的改寫而非另一段劇情，是依同位置、逐字相同的開頭、共用台詞與 S13b 既有改寫先例所做的判讀。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "親自以 text_decode 解 FDETXT30 與 FDETXT64：FDETXT30 0x13 開頭到法蓮娜「嗯？」與 FDETXT64 0x11 逐字相同，0x14 的「我會永遠記得妳的。」保留在 FDETXT64 0x14，FDETXT64 0x17–0x21 又是 FDETXT30 0x15–0x1F 的逐字複本（皆以 FDETXT65 的 GOODEND 段為對應），可見 FDETXT64 是由 FDETXT30 0x13–0x1F 整段搬過去、只把 0x13–0x14 改寫擴充成 0x11–0x16，符合 cut_content/_index.md 第 185 行 S13b「搬到過場地圖區塊的過場台詞」及 01 0x0E→37 0x0B 的改寫擴充先例；舊稿裡蘭迪斯獨自離開、後段法蓮娜趕來重逢，與顯示版同一劇情位置，不是另一段獨立劇情。頁面現況：story.md 第 247 行 S4 為 22 條、條列已無 30 0x13，_index.md 第 185 行 S13b 為「30 0x13–0x14→64」，手寫段正確一致；被拒修正（0x13 仍在 S4 時再加 0x14 成 24 條）前提已失效，不需編輯。產生區塊（story.md 第 491 行 S4-text 的 0x13、第 1034 行總表、chapters/ch30.md 第 1528 行連 S4）仍是舊歸屬，確由 tools/cut_content/story.py 第 309、353、396 行造成，outside 所列改法正確。另注意 tools/cut_content/story_verify.py 的 CH30_CLAIMS 仍寫 0x13、0x14 歸 S4，但其 _index.md 已說明那些主張只對票 25.14 那次執行有意義，屬歷史輸入，不需一併改。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item R3b (reclass) settled on: `FDETXT30` `0x14` 是 `0x13` 那一版道別的結尾：蘭迪斯說旅程也許要結束了、謝謝法蓮娜、「我會永遠記得妳的。我走了！」，法蓮娜沉默，兩人就此分別；顯示中的 `FDETXT64` `0x11`–`0x16` 把這一幕改成約定再會，與它只共用「我會永遠記得妳的。」一句。這段「不約而別」的劇情沒有任何地方顯示，應與 `0x13` 同歸 S4（殘留內容），不是被改寫版取代的舊稿（S13b）。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: cut_content/story.md\n  why the edit was made: `FDETXT30` `0x14` 改歸 S4，條數加一。\n  old: `52`、`56`、`62`、`63` 的 23 條\n  new: `52`、`56`、`62`、`63` 的 24 條\n\nSee what happened to that passage: git diff 14a5e44 -- cut_content/story.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F53",
+  "item_sha1": "bc2db9d8f4c38e6adec96194e474e3688318d0b3",
+  "verdict": "consistent",
+  "conclusion": "`FDETXT30` `0x13`、`0x14` 是同一場蘭迪斯與法蓮娜道別的舊稿：顯示版 `FDETXT64` `0x11`–`0x16` 位在同一位置（母親道別之後、強盜登場之前），開頭到法蓮娜「嗯？」逐字相同、保留「我會永遠記得妳的。」、兩人分開的結局不變，只把邀她同行與沉默改寫成再會的約定，因此兩條一起歸排除清單 S13b（被取代的舊稿），不是 S4。頁面現況（S4 為 19 段、22 條，`30` `0x13` 不在 S4 清單，排除清單寫 `30` `0x13`–`0x14`→64）已把兩條歸在一起，被拒的「20→21 段」以 `0x13` 仍在 S4 為前提，現已不成立，不應再套用。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT30.TXT",
+    "observation": "0x12 是母親道別，0x13 是蘭迪斯決心找母親、法蓮娜祝福、「法蓮娜﹒﹒﹒﹒﹒」「嗯？」後問她是否真的不願同行、她沉默；0x14 是「也許，旅程要結束了」「謝謝妳，我會永遠記得妳的。我走了！」、法蓮娜沉默；0x15 起是強盜段，0x1D 法蓮娜重逢。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT64.TXT",
+    "observation": "0x10 母親道別後的法蓮娜段，0x11 開頭到「嗯？」與 30 0x13 逐字相同，之後改成再會的約定；0x14「再見了，我會永遠記得妳的。別讓我久等，好嗎？」；0x17–0x21 與 30 0x15–0x1F 相同。顯示版是同一場景在同一位置的改寫擴充，分開與後來重逢的走向不變。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/_index.md 排除清單 S13b",
+    "observation": "S13b 收「被取代的舊稿」，含改寫擴充的先例（`FDETXT01` `0x0E`→`FDETXT37` `0x0B`），現已寫 `30` `0x13`–`0x14`→64，兩條歸在一起。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/story.md S4 條目（手寫段）",
+    "observation": "現況為「22 條」「19 段」，`30` `0x13` 那一列已刪；逐項重數 11 組共 22 條、扣三份複本為 19 段，數字與清單一致。被拒編輯的 old「20 段」已不存在，套用 21 段會與清單矛盾。"
+   },
+   {
+    "source": "tool",
+    "location": "tools/cut_content/story.py 第 309、353、396 行",
+    "observation": "產生器仍把 (30, 0x13) 放在 S4_GROUPS、S13b 範圍只有 (30, 0x14, None)，所以 story.md 的 story:S4-text 區塊仍有 `FDETXT30` `0x13` 全文、story:text-index 總表仍把 `0x13` 列為 S4，與手寫段不一致，要由產生器修正。"
+   }
+  ],
+  "edits": [],
+  "outside": "tools/cut_content/story.py：刪掉 S4_GROUPS 的 `([(30, 0x13)], \"另一版的道別\")`；_owners() 的 S13b 範圍把 `(30, 0x14, None)` 改成 `(30, 0x13, 0x14)`；NOTE_OVERRIDES 補 `(30, 0x13)` 的說明（前半與 `FDETXT64` `0x11` 逐字相同，後半的同行邀約改寫成再會約定）。之後重生 cut_content/story.md 的 story:S4-text（刪掉 `FDETXT30` `0x13` 全文）與 story:text-index（`FDETXT30` `0x13` 改列 S13b）、cut_content/_index.md 總表（python tools/cut_content/cut_content.py index），以及 chapters/ch30.md 的 chapter_docs:dialogue 區塊（`0x13` 的連結由 S4 改為 S13b）。此項與 R3a 的 outside 相同。",
+  "confidence": "medium",
+  "open_question": "把 `0x13`–`0x14` 的「不約而別」看成同一場景被改寫而非另一段劇情是判讀；依據是同一位置、逐字相同的開頭、共用句與不變的分開結局，以及 S13b 既有的改寫擴充先例。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "以 text_decode 親自解碼 FDETXT30 0x11–0x15 與 FDETXT64 0x10–0x16：64 0x11 從「我已經下定決心了」到法蓮娜「嗯？」與 30 0x13 逐字相同，之後的同行邀約與沉默改寫成再會約定；30 0x14 的「我會永遠記得妳的。」留在 64 0x14；兩者在同一位置（母親道別之後），30 0x15–0x1F 也同樣搬到 64/65 歸 S13b。S4 手寫段自己寫明收的是「其他文字區塊也沒有複本或改寫版」的對白，0x13–0x14 有改寫版，歸 S13b 與排除清單既有的改寫擴充先例一致。頁面現況：cut_content/story.md S4 手寫段已無 30 0x13，逐項重數 22 條、扣三份複本 19 段，數字與清單相符；cut_content/_index.md S13b 已寫 30 `0x13`–`0x14`→64。被拒的「20→21 段」以 0x14 移入 S4 為前提（R3b），與已落地的 R3a 方向相反且較不合分類定義，不應套用，edits 為空正確。outside 屬實：tools/cut_content/story.py 第 309 行仍把 (30, 0x13) 放在 S4_GROUPS、第 353 行 S13b 只有 (30, 0x14, None)，因此 story.md 第 491 行 S4-text 仍有 0x13 全文、第 1034 行總表仍列 S4，chapters/ch30.md 的 0x13 段仍連到 S4，都要由產生器重產；另外 R3a 的 outside 還列了 tools/chapter_docs/judgements/ch30.json 的 0x13 why 句與 tools/cut_content/_index.md 的「第 30 章歸 S4 的四條」描述，兩張票的 outside 合併處理時應以 R3a 那份較完整的清單為準。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item R3b (reclass) settled on: `FDETXT30` `0x14` 是 `0x13` 那一版道別的結尾：蘭迪斯說旅程也許要結束了、謝謝法蓮娜、「我會永遠記得妳的。我走了！」，法蓮娜沉默，兩人就此分別；顯示中的 `FDETXT64` `0x11`–`0x16` 把這一幕改成約定再會，與它只共用「我會永遠記得妳的。」一句。這段「不約而別」的劇情沒有任何地方顯示，應與 `0x13` 同歸 S4（殘留內容），不是被改寫版取代的舊稿（S13b）。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: cut_content/story.md\n  why the edit was made: `FDETXT30` `0x14` 成為 S4 的一段，段數加一。\n  old: 說話者與換頁都齊的對白，20 段（其中三段\n  new: 說話者與換頁都齊的對白，21 段（其中三段\n\nSee what happened to that passage: git diff 14a5e44 -- cut_content/story.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F54",
+  "item_sha1": "32caaf3ff720a94677f3d8a62e2897815053aa12",
+  "verdict": "consistent",
+  "conclusion": "`FDETXT30` `0x13`、`0x14` 是同一版蘭迪斯與法蓮娜道別的前後兩條（邀她同行被沉默以對、他說旅程也許要結束了並道謝離去），`FDETXT64` 是本區塊的複本，這兩條的位置被改寫擴充成 `0x11`–`0x16` 的再會約定，由 `WIN29` 切到地圖 63 後顯示；兩條一起屬被取代的舊稿（S13b），不是 S4。頁面現在已把兩條一起移出 S4、在排除清單寫成「30 `0x13`–`0x14`→64」，這筆被拒的修正要把兩條歸 S4，與正確的分類相反，不應落地。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT30.TXT",
+    "observation": "0x13：蘭迪斯決心找母親、法蓮娜祝福、「大家都還在等妳，妳真的不願意，跟我們一起走嗎？」、法蓮娜沉默；0x14：「也許，旅程要結束了。」「謝謝妳，我會永遠記得妳的。我走了！」、法蓮娜沉默；0x15 起是 GOODEND 的強盜一幕。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT64.TXT",
+    "observation": "0x11 前半與 FDETXT30 0x13 逐字相同，後半改成「我們來作個約定好嗎？……再會的約定！」；0x12–0x16 是風聲、「再見了，我會永遠記得妳的。別讓我久等，好嗎？」與「風！它會告訴妳的！」；0x17 與 FDETXT30 0x15 逐字相同，0x18 與 0x16 相同，整個區塊是 FDETXT30 的複本，只有 0x13–0x14 這段被擴寫成 0x11–0x16。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch30.md WIN29.DAT 腳本表 0x084e、0x0871；FDETXT30 0x13、0x14 小節",
+    "observation": "WIN29 在地圖 63 畫的是 FDETXT64 的條目，FDETXT30 0x13、0x14 沒有讀取端；同一幕在遊戲裡以改寫版顯示。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/_index.md 排除清單 S13b；cut_content/story.md S4 `30` `0x0D`、`0x0E` 條目",
+    "observation": "S13b 已涵蓋改寫擴充的舊稿（FDETXT01 0x0E→FDETXT37 0x0B），並已列出「30 `0x13`–`0x14`→64」；S4 把 30 0x0D、0x0E 收進來的理由正是「其他文字區塊也沒有它們的複本或改寫版」，0x13–0x14 有改寫版，不符 S4 的收錄條件。S4 目前 22 條、19 段，與逐條清點相符。"
+   },
+   {
+    "source": "kb",
+    "location": "workspace/kb_consist/verdicts/R3a.json（已落地）與 R3b.json（本筆出處）",
+    "observation": "兩個一致性項目對 0x13–0x14 的資料解讀一致，只在分類上相反；R3a 經第二位 agent 確認後落地，本筆修正的 old 因此已不在頁面上。"
+   }
+  ],
+  "edits": [],
+  "outside": "",
+  "confidence": "medium",
+  "open_question": "舊稿結尾「不約而別」與顯示版「約定再會」劇情走向相反，把它算成被取代的舊稿（S13b）而非另一版劇情（S4）是分類判斷；依據是同一幕、同一位置、開頭逐字相同、FDETXT64 其餘條目逐字複製 FDETXT30，且 S13b 已收同類的改寫擴充舊稿。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "親自以 text_decode.py 解 FDETXT30 0x11–0x17 與 FDETXT64 0x10–0x1a：64 0x11 從「我已經下定決心了」到法蓮娜「嗯？」與 30 0x13 逐字相同，之後把同行邀約與沉默改寫成再會約定；64 0x14「再見了，我會永遠記得妳的。別讓我久等，好嗎？」承接 30 0x14 的「謝謝妳，我會永遠記得妳的。我走了！」；64 0x17、0x18 與 30 0x15、0x16 逐字相同。同一場、同一位置、由 WIN29 切到地圖 63 才畫，30 的兩條沒有讀取端，符合 cut_content/_index.md S13b 的「搬到過場地圖區塊的過場台詞」與 01 0x0E→37 0x0B、25 0x0E→60 的改寫擴充先例；S4 手寫段自己寫明收錄的是沒有複本或改寫版的對白，被拒修正把兩條歸 S4 不成立，不應落地，edits 為空正確。頁面手寫部分已一致：story.md S4 清單無 30 0x13、「22 條／19 段」經重數正確（去掉 30 0x13 後 22 條、扣三份複本 19 段），_index.md S13b 寫「30 `0x13`–`0x14`→64」。結論說頁面「已把兩條一起移出 S4」只對手寫部分成立：產生區塊仍落後——tools/cut_content/story.py 第 309 行 S4_GROUPS 仍有 (30, 0x13)、第 353 行 S13b 只有 (30, 0x14, None)，因此 story.md 第 491 行 story:S4-text 仍列 0x13 全文、第 1034 行總表仍標 S4，chapters/ch30.md 第 1528 行 dialogue 區塊的 0x13 仍連到 S4（story.py check 回報 OK，因為它只比對產生器自己的輸出）。這個修正已由 R3a 的 outside 以及 F52、F53、F55 的 outside 帶著（刪 S4_GROUPS 那一組、S13b 改 (30, 0x13, 0x14)、NOTE_OVERRIDES 補 (30, 0x13)、重生 story.md 兩個區塊、_index 總表與 ch30.md dialogue），本筆 outside 留空不會漏；落地 outside 時要照 R3a 的方向，R3b 的 outside（把 (30, 0x14) 移進 S4）必須不採用。"
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item R3b (reclass) settled on: `FDETXT30` `0x14` 是 `0x13` 那一版道別的結尾：蘭迪斯說旅程也許要結束了、謝謝法蓮娜、「我會永遠記得妳的。我走了！」，法蓮娜沉默，兩人就此分別；顯示中的 `FDETXT64` `0x11`–`0x16` 把這一幕改成約定再會，與它只共用「我會永遠記得妳的。」一句。這段「不約而別」的劇情沒有任何地方顯示，應與 `0x13` 同歸 S4（殘留內容），不是被改寫版取代的舊稿（S13b）。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: cut_content/story.md\n  why the edit was made: `0x14` 是 `0x13` 那一版不約而別的結尾，內容在任何地方都不顯示，屬殘留內容而不是被取代的舊稿。\n  old:   - `30` `0x13`：另一版的道別。前半與 `WIN29` 在地圖 63 畫的 `FDETXT64` `0x11` 逐字相同，後半蘭迪斯問法蓮娜是不是真的不願意同行、她沉默；顯示中的版本在這裡改成兩人約定再會。`WIN29` 切到地圖 63 才畫字，沒有腳本在地圖 29 上畫本區塊這一條。緊接的 `0x14`（蘭迪斯「我會永遠記得妳的。我走了！」）是被顯示版改寫吸收的舊稿，列在排除清單（S13b）。\n  new:   - `30` `0x13`、`0x14`：另一版的道別。`0x13` 前半與 `WIN29` 在地圖 63 畫的 `FDETXT64` `0x11` 逐字相同，後半蘭迪斯問法蓮娜是不是真的不願意同行、她沉默；`0x14` 接著是蘭迪斯說旅程也許要結束了、謝謝她、「我會永遠記得妳的。我走了！」，法蓮娜仍然沉默，兩人就此分別。顯示中的版本在這裡改成兩人約定再會（`FDETXT64` `0x11`–`0x16`），與 `0x14` 只共用「我會永遠記得妳的。」一句。`WIN29` 切到地圖 63 才畫字，沒有腳本在地圖 29 上畫這兩條。\n\nSee what happened to that passage: git diff 14a5e44 -- cut_content/story.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ },
+ {
+  "id": "F55",
+  "item_sha1": "ff8b9b0361abe80f4e6acd036437d5c65d3e0e98",
+  "verdict": "consistent",
+  "conclusion": "`FDETXT30` `0x13`、`0x14` 是蘭迪斯與法蓮娜道別那一場的舊稿：`WIN29` 切到地圖 63 才畫這場道別，畫的是開頭與 `0x13` 逐字相同、把同行邀約與沉默改寫成再會約定的 `FDETXT64` `0x11`–`0x16`，兩人分開的走向不變，所以兩條同歸排除清單 S13b。被拒的修正（把 `0x14` 移出 S13b、改歸 S4）與 S4 的收錄標準「其他文字區塊沒有複本或改寫版」及 S13b 既有的改寫擴充先例（`FDETXT25` `0x0E`→`FDETXT60`、`FDETXT01` `0x0E`→`FDETXT37`）不合，頁面現在的「30 `0x13`–`0x14`→64」是正確的，不需修改。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT30.TXT（0x13、0x14）",
+    "observation": "0x13：蘭迪斯下定決心找母親、法蓮娜祝福、「法蓮娜﹒﹒﹒﹒﹒」「嗯？」後問她是否真的不願同行，她沉默；0x14：「也許，旅程要結束了。」「謝謝妳，我會永遠記得妳的。我走了！」，法蓮娜沉默。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/text_decode/text_decode.py show workspace/vfs_dump/FIELD/FDETXT64.TXT（0x11–0x16）",
+    "observation": "0x11 從「我已經下定決心了」到法蓮娜「嗯？」與 FDETXT30 0x13 逐字相同，之後改成再會的約定；0x14「再見了，我會永遠記得妳的。別讓我久等，好嗎？」保留 0x14 的一句；0x12–0x16 是同一場道別的擴寫，結局仍是兩人分開。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch30.md WIN29 腳本表 0x074e、0x0831–0x088f；0x014a、0x01cd",
+    "observation": "WIN29 在 0x074e SWITCH_MAP 到地圖 63 後，0x0831–0x088f 依序畫 FDETXT64#0x11–0x16；在地圖 29 上只畫 FDETXT30#0x11、0x12，0x13、0x14 沒有讀取端。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/story.md S4 條目 `30` `0x0D`、`0x0E`；總表 FDETXT25 0x0e、FDETXT01 0x0e",
+    "observation": "S4 條目以「其他文字區塊也沒有它們的複本或改寫版」為歸 S4 的理由；S13b 已收「拆成 FDETXT60 0x09–0x0b 三條、後半改寫擴充」的 FDETXT25 0x0E 與「改寫擴充成 FDETXT37 0x0b」的 FDETXT01 0x0E，同一位置被改寫擴充的舊稿歸 S13b。"
+   },
+   {
+    "source": "kb",
+    "location": "cut_content/_index.md 排除清單 S13b；cut_content/story.md S4 手寫段（22 條、19 段，已無 `30` `0x13`）",
+    "observation": "一致性段 R3a 已落地：S13b 寫「30 `0x13`–`0x14`→64」，story.md S4 手寫段同步移除 `30` `0x13`，兩頁手寫文字彼此一致；R3b 的相反修正在 story.md 的三處也都因原文已不在而未落地。"
+   }
+  ],
+  "edits": [],
+  "outside": "tools/cut_content/story.py 仍是舊分類：第 309 行 S4_GROUPS 還有 ([(30, 0x13)], \"另一版的道別\")，第 353 行 S13b 範圍是 (30, 0x14, None)，第 396 行 NOTE_OVERRIDES 只有 (30, 0x14)。應照 R3a 的 outside 改：刪掉 S4_GROUPS 那一組、S13b 範圍改成 (30, 0x13, 0x14)、NOTE_OVERRIDES 補 (30, 0x13) 的說明，再重生 cut_content/story.md 的 story:S4-text 與 story:text-index 區塊（目前第 491 行仍列 FDETXT30 0x13 全文、總表第 1034 行仍標 S4）、cut_content/_index.md 總表（tools/cut_content/cut_content.py index）與 chapters/ch30.md 的 chapter_docs:dialogue 區塊。",
+  "confidence": "medium",
+  "open_question": "把 `0x13` 的同行邀約與 `0x14` 的獨自離去看成同一場景的改寫而非另一段劇情是判讀；依據是顯示版以逐字相同的開頭接續、位於同一腳本位置、分開的結局不變，並與 S13b 既有的改寫擴充先例一致。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "以 text_decode.py 解 FDETXT30 0x13、0x14 與 FDETXT64 0x11–0x16：64 0x11 開頭到法蓮娜「嗯？」與 30 0x13 逐字相同，之後把同行邀約改成再會約定；64 0x14 保留 30 0x14 的「我會永遠記得妳的。」，兩人分開的結局不變，0x13、0x14 是同一場道別的前後兩段、同一份被改寫擴充的舊稿。ch30.md WIN29 腳本表確認地圖 29 只畫 FDETXT30 0x11、0x12，0x074e SWITCH_MAP 到 63 後在 0x0831–0x088f 畫 FDETXT64 0x11–0x16，正合 S13b 的定義（章節區塊裡被搬到過場地圖區塊、舊稿沒有讀取端）。R3b 把 0x14 當成沒有顯示版本的另一段劇情而歸 S4 不成立；頁面現在的「30 `0x13`–`0x14`→64」正確，不需修改。outside 所指 tools/cut_content/story.py 第 309 行 S4_GROUPS 仍有 (30, 0x13)、第 353 行 S13b 範圍仍是 (30, 0x14, None)、第 396 行 NOTE_OVERRIDES 只有 (30, 0x14) 已逐一核對屬實，story.md 第 491 行產生區塊仍列 0x13 為 S4、ch30.md 第 1528 行 chapter_docs 區塊仍指向 S4，照 outside 改 story.py 並重產即可。",
+   "edits": []
+  },
+  "_landed": true,
+  "item": "Kind: an edit the consistency pass could not land\nConsistency item R3b (reclass) settled on: `FDETXT30` `0x14` 是 `0x13` 那一版道別的結尾：蘭迪斯說旅程也許要結束了、謝謝法蓮娜、「我會永遠記得妳的。我走了！」，法蓮娜沉默，兩人就此分別；顯示中的 `FDETXT64` `0x11`–`0x16` 把這一幕改成約定再會，與它只共用「我會永遠記得妳的。」一句。這段「不約而別」的劇情沒有任何地方顯示，應與 `0x13` 同歸 S4（殘留內容），不是被改寫版取代的舊稿（S13b）。\nOne of its edits was refused at landing because its old text was no longer in the page: another edit landed first on the same passage.\n  page: cut_content/_index.md\n  why the edit was made: `FDETXT30` `0x14` 移出排除清單，改歸 S4。\n  old: 27 `0x13`→62、30 `0x14`→64、30 `0x15`–`0x1F`→65\n  new: 27 `0x13`→62、30 `0x15`–`0x1F`→65\n\nSee what happened to that passage: git diff 14a5e44 -- cut_content/_index.md (the page before both passes landed, against the working tree), and the other items' verdicts in workspace\\kb_consist\\verdicts\\ and workspace\\kb_verify\\verdicts\\.\n\nQuestion: does the page as it stands now state what this edit meant to state -- the fact, not the wording?  If yes (the edit that landed covers it, possibly better), verdict consistent with no edits.  If the landed wording is wrong or lost part of this fix, write the edit that brings the current text to the correct, complete statement (old copied from the page as it is now).  Check the fact itself against first-hand sources if the two edits disagree on it."
+ }
+]

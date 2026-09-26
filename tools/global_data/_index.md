@@ -24,7 +24,7 @@ Workflow({ scriptPath: "tools/global_data/globals_ticket17.js",
            args: { roundSize: 16, maxItems: 128 } })
 ```
 
-不給 `addrs` 時 workflow 自己開一個 agent 跑 `build_worklist.py` 並讀回清單——腳本本身讀不到檔案系統，這是唯一的取得途徑。**可重跑**：判定檔存在且與現況相符的 anchor 不會再判一次，所以每次呼叫都從上次停下的地方接。1,100 多個 anchor 塞不進一次 session，分次跑是常態。
+不給 `addrs` 時 workflow 自己開一個 agent 跑 `build_worklist.py` 並讀回清單——腳本本身讀不到檔案系統，這是唯一的取得途徑。**可重跑**：判定檔存在且與現況相符的 anchor 不會再判一次，所以每次呼叫都從上次停下的地方接。一千多個 anchor（數量見 [`program_info/data_structures.md`](../../program_info/data_structures.md)）塞不進一次 session，分次跑是常態。
 
 struct 階段只在 anchor 全部判完之後才跑，因為 struct 清單是從判定檔的 `struct_candidate` 欄位長出來的。要單獨跑它用 `args: { structs: true }`。
 
@@ -43,7 +43,7 @@ struct 階段只在 anchor 全部判完之後才跑，因為 struct 清單是從
 
 ## 字串字面值不在清單上
 
-415 個字串已經帶著 Ghidra 的 `s_` 標籤，而重建之後它們是敘述句裡的字面值而不是具名全域，替它們取名等於憑空造出原版沒有的符號。理由與例外（指向它們的指標表是實實在在的具名資料）記在 [`rebuild_info/naming.md`](../../rebuild_info/naming.md)。它們仍然留在匯出裡，因為判定別的 anchor 時會需要看到它們。
+字串字面值（數量見 [`program_info/data_structures.md`](../../program_info/data_structures.md)）多半已經帶著 Ghidra 的 `s_` 標籤，而重建之後它們是敘述句裡的字面值而不是具名全域，替它們取名等於憑空造出原版沒有的符號。理由與例外（指向它們的指標表是實實在在的具名資料）記在 [`rebuild_info/naming.md`](../../rebuild_info/naming.md)。它們仍然留在匯出裡，因為判定別的 anchor 時會需要看到它們。
 
 ## gate 有兩道
 

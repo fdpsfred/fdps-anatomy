@@ -15,8 +15,11 @@ two emits end up writing the same function into different .c files.
 
 Two jobs:
 
-    --stats   how many functions are pending / emitted / reviewed / committed /
-              failed / skipped
+    --stats   how many functions are in each status the emit workflows write:
+              pending (never started) / in_flight / interrupted / failed /
+              skip / committed, with a committed entry whose body size no
+              longer matches the snapshot counted as `stale (re-emit)`.
+              Only `committed` and `skip` are terminal; the rest go back out.
     (default) print the JSON to hand to the workflow as `args`
 
 An entry is only treated as done when it is `committed` AND the function it

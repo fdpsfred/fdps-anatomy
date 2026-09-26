@@ -922,12 +922,16 @@ int fdps_church_select_promote_candidate(int candidate_count,
    is the last thing that happens.
 
    THE ELIGIBILITY TEST IS ON THE PORTRAIT ID AND NOT THE CLASS CODE.  Writing
-   the obvious `clazz < 9` lets 蓋亞, 珊 and 蘭斯洛特 through, and every
-   already-promoted unit with them, and then indexes a RankUp.dat that holds
-   nine records out of bounds (rebuild_info/pitfalls.md).
+   the obvious `clazz < 9` lets 蘭斯洛特 (class 08) through along with every
+   promoted form whose class code is 01 to 08 -- 蘭迪斯's, 裘娜's and 亞克's --
+   shuts out 法蓮娜, 費塔加, 瑪麗安, 尤利安, 琴琴 and 布蘭多 (initial classes
+   0D, 0D, 0A, 10, 13 and 16), and indexes RankUp.dat, which holds nine
+   records, out of bounds with 蘭斯洛特's character id 0x0b
+   (rebuild_info/pitfalls.md).
 
-   THE STAT BONUSES ARE THE RAW *_max BYTES of the FRILEVUP.DAT row, which are
-   one greater than the growth maximum the tables print, and they are added
+   THE STAT BONUSES ARE THE RAW *_max BYTES of the FRILEVUP.DAT row -- the
+   figures assets/characters.md prints, and, for a pair whose two bytes differ,
+   one greater than the largest gain a level-up can roll -- and they are added
    whole.  A rebuild whose parse normalised those bytes down by one would hand
    out one point less on every stat.
 

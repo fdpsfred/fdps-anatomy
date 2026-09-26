@@ -27,21 +27,7 @@ AP 基礎值 = AP 係數 × LV  DP 基礎值 = DP 係數 × LV  DX = DX 係數 �
 
 ## 擊殺經驗
 
-`EXP` 欄是經驗值倍率，不是固定經驗值。經驗先在全域 `data_fdps_battle_pending_xp_credit` 算出一個基數，行動結束時再由發放端換算，交給 `fdps_unit_award_exp_and_level_up`（`src/unitstat.c`）：
-
-| 行動 | 算基數的地方 | 基數 | 發放前的換算 |
-| --- | --- | --- | --- |
-| 物理攻擊，戰鬥畫面 | `fdps_combat_compute_hit_outcome`（`0x19f80`，`src/combat.c`），條件：攻擊者陣營 2、目標陣營 0 | `目標 LV × EXP ÷ 攻擊者 LV` | × 15 ÷ 10（我方行動 `fdps_battle_action_menu`，`src/btlact.c`；敵方攻擊時我方反擊所得在 `fdps_map_actor_move_and_attack`，`src/aiact.c`） |
-| 物理攻擊，地圖上 | `fdps_unit_resolve_attack_hit`（`0x1c520`，`src/unitatk.c`），條件：攻擊者陣營 2、目標肖像編號 ≥ `0x3C` | 同上 | × 15 ÷ 10，在 `fdps_map_actor_move_and_attack`（`src/aiact.c`）；地圖上的結算只由戰鬥動畫關閉時 AI 發動的交戰走到，我方自己的攻擊指令不看開關、一律走戰鬥畫面 |
-| 法術 | `fdps_unit_apply_damage`（`0x28460`，`src/unitstat.c`），條件：目標陣營 0；每個目標累加 | `EXP × 目標 LV` 的總和 | ÷ 施法者 LV（`fdps_battle_spell_command`，`src/spellmnu.c`） |
-| 道具 | 同法術 | — | 歸零：`fdps_apply_item_effect_to_targets`（`0x262a0`，`src/item.c`）結尾把基數清成 0，用道具打倒敵人拿不到經驗 |
-
-- 物理攻擊的除數：攻擊者肖像編號大於 10（蘭斯洛特 `0B`、所有轉職後型態、客串單位）時，攻擊者 LV 先加 30。法術的除數：施法者肖像編號大於 8 時先加 30——兩處門檻不同。
-- 目標沒被打倒時，基數再乘以 `傷害 ÷ 目標最大 HP`；打倒時拿全額。
-- 發放時一次最多 99 點。全部是整數運算，每一步都無條件捨去。
-- 戰鬥畫面與法術兩條只看陣營，陣營 0 而肖像編號小於 `0x3C` 的單位會讀到表前方的記憶體；地圖上的物理攻擊另外測了肖像編號。見 [`rebuild_info/pitfalls.md`](../rebuild_info/pitfalls.md)。
-
-經驗怎麼累積成升級屬於戰鬥機制，見 [`program_info/`](../program_info/_index.md)。
+`EXP` 欄是經驗值倍率，不是固定經驗值。它在兩條路徑乘進經驗：物理攻擊以 `目標 LV × EXP ÷ 攻擊者 LV` 代入，法術以 `EXP × 目標 LV`（每個目標累加）代入、再除以施法者 LV；用道具打倒敵人不給經驗。LV 的 +30 加成與兩條路徑各自的門檻、沒打倒時的比例、發放前的換算、每次上限與升級，物理攻擊與發放見 [`program_info/battle.md`](../program_info/battle.md#經驗值)，法術與道具見 [`program_info/spell.md`](../program_info/spell.md#施法與使用道具的經驗值)。
 
 ## 全表
 

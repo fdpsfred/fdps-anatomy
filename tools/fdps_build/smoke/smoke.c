@@ -21,11 +21,14 @@
  * DOSBox-X reports success from IMGMOUNT whether or not the image mounted, so
  * only reading real bytes off the disc proves the mount took.
  *
- * The MSCDEX probe repeats what the original main() does at 0x3c636: a DPMI
- * simulate-real-mode-interrupt (INT 31h AX=0300h) carrying INT 2Fh AX=1500h,
- * the installation check, whose BX answer is the number of CD drives. The
- * original exits(1) when that path fails, so a rebuild that cannot make this
- * call cannot boot at all.
+ * The MSCDEX probe asks the installation-check question, INT 2Fh AX=1500h,
+ * whose BX answer is the number of CD drives, through a DPMI
+ * simulate-real-mode-interrupt (INT 31h AX=0300h) -- the path the original's
+ * device-request sender fdps_cd_device_request (0x3bb7d) uses. The original's
+ * own installation check, fdps_cdrom_detect (0x3c636, called from main),
+ * issues it directly with int386(0x2f, ...) instead. main exits(1) when
+ * fdps_cdrom_detect does not return 1, so a rebuild that cannot get this
+ * answer cannot boot at all.
  */
 #include <stdio.h>
 #include <stddef.h>

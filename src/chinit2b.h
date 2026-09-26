@@ -76,9 +76,9 @@ extern void fdps_chapter_25_init(void);
    behind it and no zeroed, retired spare is written.
 
    The cut-scene switches no map and deploys no wave, which is what tells it
-   apart from chapter 25's: its 142 opcodes play entirely on the board this
-   handler's own reset built, and nothing but the dispatcher ever writes the
-   chapter id.
+   apart from chapter 25's: its 142 opcodes before the closing END play
+   entirely on the board this handler's own reset built, and nothing but the
+   dispatcher ever writes the chapter id.
 
    The chapter is fought without 法蓮娜, and the cut-scene is what leaves her
    off: it retires map units 1 to 11 so that only 蘭迪斯 is drawn through the
@@ -119,9 +119,9 @@ extern void fdps_chapter_26_init(void);
    behind it and no zeroed, retired spare is written.
 
    The cut-scene switches no map and deploys no wave, the same as chapter 26's
-   and unlike chapter 25's: its seventy-five opcodes play entirely on the board
-   this handler's own reset built, and nothing but the dispatcher ever writes
-   the chapter id.
+   and unlike chapter 25's: its seventy-four opcodes before the closing END
+   play entirely on the board this handler's own reset built, and nothing but
+   the dispatcher ever writes the chapter id.
 
    The chapter is fought without 法蓮娜, and the cut-scene is what takes her
    off: its one RETIRE_UNIT, the third opcode in the file, names map unit 3 and
@@ -164,9 +164,9 @@ extern void fdps_chapter_27_init(void);
    behind it and no zeroed, retired spare is written.
 
    The cut-scene switches no map and deploys no wave, the same as chapters 26's
-   and 27's and unlike chapter 25's: its thirty-one opcodes play entirely on
-   the board this handler's own reset built, and nothing but the dispatcher
-   ever writes the chapter id.
+   and 27's and unlike chapter 25's: its thirty-one opcodes before the closing
+   END play entirely on the board this handler's own reset built, and nothing
+   but the dispatcher ever writes the chapter id.
 
    The chapter is fought with the whole party, which is what tells this handler
    apart from the three before it.  ICON27.DAT carries no RETIRE_UNIT, no
@@ -209,9 +209,9 @@ extern void fdps_chapter_28_init(void);
    behind it and no zeroed, retired spare is written.
 
    The cut-scene switches no map and deploys no wave, the same as chapters
-   26's, 27's and 28's and unlike chapter 25's: its eighty-nine opcodes play
-   entirely on the board this handler's own reset built, and nothing but the
-   dispatcher ever writes the chapter id.
+   26's, 27's and 28's and unlike chapter 25's: its eighty-nine opcodes before
+   the closing END play entirely on the board this handler's own reset built,
+   and nothing but the dispatcher ever writes the chapter id.
 
    The chapter is fought with the whole party, as chapter 28 is, but by a route
    chapter 28's member has not got: ICON28.DAT carries no RETIRE_UNIT, and the

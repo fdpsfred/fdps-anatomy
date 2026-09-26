@@ -174,7 +174,7 @@ extern void fdps_chapter_07_end(void);
    with its own script name and its own stored index.  The sweep is the
    load-bearing step it is in chapter 3 rather than the belt-and-braces one it
    is in chapters 4 to 7: chapter 8 is the underground-prison chapter, and its
-   post-action test is the only one in the family that never consults the enemy
+   post-action test, like chapter 3's and chapter 10's, never consults the enemy
    side -- it records the clear when all four captives are off the battlefield
    with at least one of them having escaped alive
    (fdps_chapter_08_post_action, chpost1.h) -- so the chapter normally ends
@@ -220,7 +220,7 @@ extern void fdps_chapter_09_end(void);
    load-bearing step it is in chapters 3 and 8 rather than the belt-and-braces
    one it is in chapters 4 to 7, and it carries more weight here than in either
    of those: chapter 10 is the escape chapter, and fdps_chapter_10_post_action
-   (chpost1.h) is the only test in its family that never calls the shared end
+   (chpost1.h), like the chapter 3 and 8 tests, never calls the shared end
    condition -- the clear is recorded when all eight player slots have reached
    the map's bottom row or retired, with the enemy side never consulted -- so
    the chapter cannot be won by emptying that side and this call is the whole

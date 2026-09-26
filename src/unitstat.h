@@ -308,16 +308,21 @@ extern int fdps_unit_is_ailment_immune(int unit_index);
    growth_pair points at one two-byte {min, exclusive max} pair inside a
    FRILEVUP.DAT record -- struct fdps_character_growth in src/fdpstype.h, as
    fdps_get_growth_record hands it back.  THE SECOND BYTE IS AN EXCLUSIVE BOUND:
-   the gain is min + rand() % (max - min), so the most a pair can ever give is
-   max - 1.  The growth table in assets/characters.md prints the file's two
-   bytes as they stand, which makes its upper figure one more than any level-up
-   can roll (rebuild_info/pitfalls.md).
+   the gain is min + rand() % (max - min), so when the two bytes differ the most
+   a pair can ever give is max - 1.  The growth table in assets/characters.md
+   prints the file's two bytes as they stand, which makes its upper figure one
+   more than any level-up can roll whenever the two differ
+   (rebuild_info/pitfalls.md).
 
    A PAIR WHOSE TWO BYTES ARE EQUAL DRAWS NO RANDOM NUMBER AT ALL.  The range is
    tested against zero before the divide, and the test guards the rand() call as
    well as the division, so an equal pair always gains exactly the minimum and
-   leaves the shared random stream where it found it.  Half of FRILEVUP.DAT's
-   300 pairs are equal, so that path is the ordinary one and not an edge case:
+   leaves the shared random stream where it found it.  151 of FRILEVUP.DAT's
+   300 pairs are equal, 125 of them in the 25 rows that hold no growth at all,
+   but 26 of the 175 pairs
+   in the 35 rows that hold any growth are equal too -- 15 of the 155 of the
+   forms the party levels through, mostly the DX pair -- so that path is an
+   ordinary one and not an edge case:
    replacing the test with a rand() whose answer is discarded would still gain
    the right amount and would still shift every later roll of the battle by one
    draw.

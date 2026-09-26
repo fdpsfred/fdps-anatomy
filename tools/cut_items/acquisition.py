@@ -88,7 +88,7 @@ SEEN_LABELS = {
     "scene_record": lambda d: f"過場地圖 {dt.compact(d)} 的寶物記錄",
     "scene_drop": lambda d: f"過場地圖 {dt.compact(d)} 的死亡掉落",
     "placeholder_shop": lambda d: "占位商店檔 " + "、".join(f"`SHOP{n:02d}`" for n in sorted(d)),
-    "sealed_shop": lambda d: "`SHOP25.DAT` 神秘商店",
+    "sealed_shop": lambda d: "`SHOP25.DAT` 秘密商店",
     "lottery": lambda d: "酒館抽獎的大獎",
 }
 

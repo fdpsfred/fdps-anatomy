@@ -594,7 +594,8 @@ void fdps_transition_random_blocks(unsigned int src_or_fill, int src_pitch,
    only shows for a centre left of or above the screen centre, where the
    numerator is negative -- the village's signboard table has entries on both
    sides of it -- and writing the obvious >> 3 moves that step's centre by a
-   quarter pixel.
+   whole pixel (four quarter-pixel units), since the division comes before
+   the multiply by 4 into quarter pixels.
 
    THE TICK THE FIRST STEP WAITS FOR IS WHATEVER WAS ON THE STACK.  last_tick
    is read at 000318bd before anything has written it, so the first step's wait

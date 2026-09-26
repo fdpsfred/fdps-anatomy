@@ -222,10 +222,10 @@ int fdps_map_actor_score_best_attack(int unit_index, int side_select)
 #define ITEM_SEARCH_LINE_AIM_REACH 1
 #define ITEM_SEARCH_LINE_AIM_MIN_DIST 1
 
-/* CMP EAX,0xf / JLE at 0001310f and again at 000131d6.  Bit 0x10 of the
-   ITEM.DAT use_distance byte marks the straight-line shape and the low nibble
-   is the reach, so 0x10 is the lowest line-shaped value and a line's length is
-   the byte less 0x10. */
+/* CMP EAX,0xf / JLE at 0001310f and again at 000131d6.  The ITEM.DAT
+   use_distance byte is compared as a number, not masked: below 0x10 it is the
+   reach, from 0x10 up the item covers a straight line whose length is the
+   byte less 0x10. */
 #define ITEM_USE_DISTANCE_LINE_BIT 0x10
 
 /* 00013040.  Picks the best item use the actor could make this turn -- which

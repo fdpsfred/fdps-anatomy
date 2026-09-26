@@ -933,7 +933,8 @@ static void stage_text(void)
                 (unsigned char) (0x80 >> (i - 8));
         }
     }
-    /* Glyph index -3, six bytes in front of the sheet: what '-' becomes. */
+    /* Glyph index -3, six bytes in front of the sheet at this fixture's
+       2-byte stride (0x60 bytes in the game): what '-' becomes. */
     font_storage[FONT_LEAD_IN - 6] = 0x80;
 
     for (i = 0; i < (int) sizeof(text_block); i++) {
@@ -1155,7 +1156,8 @@ static void a_number_token_draws_the_dialog_value_a_digit_at_a_time(void)
 /* The digit map has no range check and no case for the sign: '-' is 0x2d, so
    "%d" of a negative value sends glyph index -3 into fdps_draw_glyph, which
    multiplies it by the sheet stride and reads six bytes IN FRONT of the font
-   sheet.  That is what the original does; clamping the index, or special-casing
+   sheet at this fixture's 2-byte stride (0x60 bytes at the game's 0x20).  That
+   is what the original does; clamping the index, or special-casing
    the sign the way fdps_draw_number does, would draw a different character
    here.  The staged sheet carries a lead-in so the read lands somewhere real,
    and the byte at -3 is a column-0 glyph. */

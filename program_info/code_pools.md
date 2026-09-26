@@ -190,7 +190,7 @@ AIL 的 vendor object 不是 `wcc386` 的預設輸出：它會在沒有存回的
 
 514 個裡有 172 個沒有直接的 `CALL`／`JMP` 呼叫端，其中 139 個是函式指標表 slot 指到的入口，呼叫圖已經以分派者解出它們的呼叫端；連指標表入邊都沒有的是 33 個。從進入點與位址被取用的 function 出發走不到的 `fdps` 共 36 個（多出的 3 支只被同樣走不到的 MSCDEX 包裝呼叫），分類與成因見 [`architecture.md`](architecture.md) 的「呼叫圖走不到的部分」。有沒有呼叫端都不是歸屬的疑點，這些 function 一樣要還原。
 
-514 個全部有語意名稱（除了 C 進入點 `main`（`00029220`）這個命名規則唯一的無前綴豁免，見 [`rebuild_info/naming.md`](../rebuild_info/naming.md)，其餘都以 `fdps_` 開頭）、逐一判定過的 calling convention 與描述行為的 plate comment，名稱與參數都沒有 `FUN_*`／`param_N` 這類預設命名殘留。參數名稱只有兩個沒有語意化：`fdps_audio_init`（`000304e0`）唯一的參數在 Ghidra 叫 `param1`（`src/` 叫 `tick_rate_hz`，AIL timer 的頻率），`fdps_blit_dispatch`（`000568db`）的第 6 個參數叫 `arg6`（`src/` 叫 `mode_operand`，各貼圖模式各自解讀的運算元）。按子系統分到 `src/` 各檔的方式見 [`rebuild_info/code_layout.md`](../rebuild_info/code_layout.md)。
+514 個全部有語意名稱（除了 C 進入點 `main`（`00029220`）這個命名規則唯一的無前綴豁免，見 [`rebuild_info/naming.md`](../rebuild_info/naming.md)，其餘都以 `fdps_` 開頭）、逐一判定過的 calling convention 與描述行為的 plate comment，名稱與參數都沒有 `FUN_*`／`param_N` 這類預設命名殘留。參數名稱全部語意化。按子系統分到 `src/` 各檔的方式見 [`rebuild_info/code_layout.md`](../rebuild_info/code_layout.md)。
 
 ### 其中有一批不是 C
 

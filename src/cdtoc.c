@@ -6,7 +6,7 @@
  * replies mean.
  *
  * Note on this module's original build flags: like the rest of the block from
- * 0003bade to 0003c96x it was not compiled with the flag set the rest of the
+ * 0003bade to 0003c97b it was not compiled with the flag set the rest of the
  * game was -- every function in it opens with PUSH <frame size> / CALL __CHK,
  * the stack probe that -s removes and that no other game function carries.
  * The rebuild has one flag set for every unit (rebuild_info/build_flags.md),

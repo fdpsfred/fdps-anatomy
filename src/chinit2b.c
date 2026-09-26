@@ -80,15 +80,16 @@
    THE CUT-SCENE REBUILDS THE BOARD TWICE MORE BEHIND THIS HANDLER'S OWN
    REBUILD, which is what makes this member unlike its neighbours'.  Walked
    with the opcode ladder in src/icon.c, ICON24.DAT's 507 bytes hold
-   eighty-eight opcodes and two of them are SWITCH_MAP: the third opcode, at
-   script offset 4, sets the chapter id to 56 and resets the state onto that
-   map, and the one at offset 183 sets it back to 24 and resets again.  Map 56
-   is a cut-scene stage -- eleven player slots and two deployment records, both
-   wave 0, so the scene plays there on a thirteen-unit board -- and the second
-   reset throws that board away and rebuilds map 24's, so when the handler
-   returns the chapter id reads 24 again, put back by the script rather than
-   left untouched.  The handler neither reads nor writes that global itself;
-   the dispatcher that reached this slot is what put 24 there.
+   eighty-eight opcodes before the closing END, and two of them are SWITCH_MAP:
+   the third opcode, at script offset 4, sets the chapter id to 56 and resets
+   the state onto that map, and the one at offset 183 sets it back to 24 and
+   resets again.  Map 56 is a cut-scene stage -- eleven player slots and two
+   deployment records, both wave 0, so the scene plays there on a thirteen-unit
+   board -- and the second reset throws that board away and rebuilds map 24's,
+   so when the handler returns the chapter id reads 24 again, put back by the
+   script rather than left untouched.  The handler neither reads nor writes
+   that global itself; the dispatcher that reached this slot is what put 24
+   there.
 
    WHAT THE CUT-SCENE LEAVES BEHIND.  Its single RETIRE_UNIT, at script offset
    185 and the first opcode after the return to map 24, takes map unit 3 off
@@ -185,10 +186,10 @@ void fdps_chapter_25_init(void)
 
    THE CUT-SCENE SWITCHES NO MAP, which is what makes this member unlike
    chapter 25's.  Walked with the opcode ladder in src/icon.c, ICON25.DAT's
-   1,564 bytes hold 142 opcodes and not one of them is SWITCH_MAP or
-   DEPLOY_WAVE: the whole scene plays on the board this handler's own reset
-   built, and the chapter id is never written by anything but the dispatcher
-   that reached this slot.
+   1,564 bytes hold 142 opcodes before the closing END, and not one of them is
+   SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the board this handler's
+   own reset built, and the chapter id is never written by anything but the
+   dispatcher that reached this slot.
 
    WHAT THE CUT-SCENE LEAVES BEHIND is one player slot off the board.  It
    retires map units 1 to 11 at script offsets 7 to 27 so that only 蘭迪斯 is
@@ -291,10 +292,10 @@ void fdps_chapter_26_init(void)
 
    THE CUT-SCENE SWITCHES NO MAP AND DEPLOYS NO WAVE, the same as chapter 26's
    and unlike chapter 25's.  Walked with the opcode ladder in src/icon.c,
-   ICON26.DAT's 719 bytes hold seventy-five opcodes and not one of them is
-   SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the board this handler's
-   own reset built, and the chapter id is never written by anything but the
-   dispatcher that reached this slot.
+   ICON26.DAT's 719 bytes hold seventy-four opcodes before the closing END, and
+   not one of them is SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the
+   board this handler's own reset built, and the chapter id is never written by
+   anything but the dispatcher that reached this slot.
 
    WHAT THE CUT-SCENE LEAVES BEHIND is one player slot off the board.  Its
    third opcode, the RETIRE_UNIT at script offset 4, names map unit 3, and the
@@ -400,10 +401,10 @@ void fdps_chapter_27_init(void)
 
    THE CUT-SCENE SWITCHES NO MAP AND DEPLOYS NO WAVE, the same as chapters 26's
    and 27's and unlike chapter 25's.  Walked with the opcode ladder in
-   src/icon.c, ICON27.DAT's 267 bytes hold thirty-one opcodes and not one of
-   them is SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the board this
-   handler's own reset built, and the chapter id is never written by anything
-   but the dispatcher that reached this slot.
+   src/icon.c, ICON27.DAT's 267 bytes hold thirty-one opcodes before the
+   closing END, and not one of them is SWITCH_MAP or DEPLOY_WAVE: the whole
+   scene plays on the board this handler's own reset built, and the chapter id
+   is never written by anything but the dispatcher that reached this slot.
 
    THE CHAPTER IS FOUGHT WITH THE WHOLE PARTY, which is what makes this member
    unlike the three before it.  ICON27.DAT carries no RETIRE_UNIT, no
@@ -508,10 +509,10 @@ void fdps_chapter_28_init(void)
 
    THE CUT-SCENE SWITCHES NO MAP AND DEPLOYS NO WAVE, the same as chapters
    26's, 27's and 28's and unlike chapter 25's.  Walked with the opcode ladder
-   in src/icon.c, ICON28.DAT's 721 bytes hold eighty-nine opcodes and not one
-   of them is SWITCH_MAP or DEPLOY_WAVE: the whole scene plays on the board
-   this handler's own reset built, and the chapter id is never written by
-   anything but the dispatcher that reached this slot.
+   in src/icon.c, ICON28.DAT's 721 bytes hold eighty-nine opcodes before the
+   closing END, and not one of them is SWITCH_MAP or DEPLOY_WAVE: the whole
+   scene plays on the board this handler's own reset built, and the chapter id
+   is never written by anything but the dispatcher that reached this slot.
 
    THE CHAPTER IS FOUGHT WITH THE WHOLE PARTY, as chapter 28 is, but this
    member reaches that end by a route chapter 28's has not got.  ICON28.DAT
@@ -634,18 +635,18 @@ void fdps_chapter_29_init(void)
    everything the player sees opposite them is put there by a script.
 
    THE CUT-SCENE IS WHAT DEPLOYS THE BOSS.  ICON29.DAT's 2,977 bytes hold 478
-   opcodes when walked with the opcode ladder in src/icon.c, and two of them
-   are DEPLOY_WAVE, at script offsets 435 and 2938, both reading `04 01 01` --
-   wave 1, placed on the tile its placement record names rather than on a
-   searched-for one.  MAP29.DAT's wave 1 is a single record, record 0: the LV40
-   平衡之神, character 60, whose ENEMYDAT.DAT row 0 carries 150 HP a level and
-   so the guide's HP6000 (assets/characters.md).  It lands at map unit 12, the
-   first index behind the twelve player slots, on MAP29.COD's record 0, (10, 3).
-   The three records the map tags waves 2 and 3 are the god's second and third
-   forms, characters 61 and 62, and the four it tags wave 4 are the endless
-   reinforcement pair the guide's 事件 line describes, LV20 死靈 x2 (character
-   106) and LV20 白骨戰士 x2 (85); none of the seven but record 0 is on the
-   board when this handler returns.
+   opcodes before the closing END when walked with the opcode ladder in
+   src/icon.c, and two of them are DEPLOY_WAVE, at script offsets 435 and 2938,
+   both reading `04 01 01` -- wave 1, placed on the tile its placement record
+   names rather than on a searched-for one.  MAP29.DAT's wave 1 is a single
+   record, record 0: the LV40 平衡之神, character 60, whose ENEMYDAT.DAT row 0
+   carries 150 HP a level and so the guide's HP6000 (assets/characters.md).  It
+   lands at map unit 12, the first index behind the twelve player slots, on
+   MAP29.COD's record 0, (10, 3).  The three records the map tags waves 2 and 3
+   are the god's second and third forms, characters 61 and 62, and the four it
+   tags wave 4 are the endless reinforcement pair the guide's 事件 line
+   describes, LV20 死靈 x2 (character 106) and LV20 白骨戰士 x2 (85); none of the
+   seven but record 0 is on the board when this handler returns.
 
    THE SECOND DEPLOY IS BEHIND A MAP SWITCH THAT CHANGES NOTHING.  The
    SWITCH_MAP at script offset 2936 writes chapter id 0x1d -- 29, the id the

@@ -1,0 +1,194 @@
+{
+ "items": 66,
+ "fixes": 149,
+ "complete": 65,
+ "unfinished": [
+  {
+   "id": "O50",
+   "state": "failing",
+   "problems": [
+    "edits[0]: old occurs 0 times in tools/chapter_docs/judgements/ch06.json"
+   ]
+  }
+ ],
+ "by_status": {
+  "fixed": 113,
+  "done_already": 31,
+  "declined": 1,
+  "developer": 3
+ },
+ "edits_landing": 202,
+ "ghidra": [
+  {
+   "address": "0x3a8c0",
+   "change": "plate_replace",
+   "detail": "In the plate of fdps_chapter_10_post_action replace the sentence \"Unlike the other chapters' handlers this one never calls the shared default end-condition check at fdps_battle_check_default_end_conditions, so wiping out the enemies is not a victory here.\" with \"Like the chapter 3 and 8 handlers (nine of the thirty handlers in all: chapters 3, 8, 10, 22, 23, 25, 26, 27 and 30), this one never calls the shared default end-condition check at fdps_battle_check_default_end_conditions, so wiping out the enemies is not a victory here.\" and in the Rebuild note replace \"that its sibling chapter handlers call\" with \"that most of its sibling chapter handlers call\". Leave the rest of the plate unchanged.",
+   "id": "O1"
+  },
+  {
+   "address": "0x3a710",
+   "change": "plate_replace",
+   "detail": "In the plate of fdps_chapter_08_post_action replace the sentence \"The gate is there because unit 0x13 is not on the map before that: fdps_chapter_08_event_send_guest_mage_to_cells is what puts it into play, and the chapter script fires it at the end of the player's third turn.\" with \"The gate is there because unit 0x13 is not on the map before that: on turn 3 fdps_chapter_08_event_for_turn (0x372d0) plays Icon7-1.dat, whose DEPLOY_WAVE deploys map07.dat's single wave-1 record into that slot; fdps_chapter_08_event_send_guest_mage_to_cells only re-aims him afterwards.\" Leave the rest of the plate unchanged.",
+   "id": "O1"
+  },
+  {
+   "address": "0x18ba0",
+   "change": "plate_replace",
+   "detail": "Returns a pointer to one record of the class equipment table loaded from PROEQU.DAT: the item types the class is allowed to equip.\n\nAlgorithm:\nMultiplies class_index by 6, the PROEQU.DAT record stride, adds the table base pointer held in the global at 0x00063fe4, spills the sum to a stack local and reloads it into EAX as the return value. fdps_load_data_tables@00018930 fills that global at startup by loading \"ProEqu.dat\" through fdps_vfs_load_file_or_exit, so the pointer is valid from startup until teardown. There is no null check on the base pointer and no bounds check on the index: the table holds 36 records, covering class codes 0x00..0x23, while class codes run to 0x27, so 0x24-0x27 address memory past its end. No unit that reaches the only caller carries such a class: every unit on the shop, village-equip and player-phase paths has a class from FRIAPRDA.DAT or RANKUP.DAT, at most 0x19.\n\nThe record is six bytes from the same value space as byte +0 of an ITEM.DAT record, the item type. They are a variable-length set, stored in ascending order and right-padded with 0xff -- not six fixed slots: in the shipped table a given type sits at whichever position the sorting puts it in, and records run from one type used (class 0x1a, 0e ff ff ff ff ff) to all six (classes 0x0b, 0x0c, 0x0f..0x12 and 0x20). The only caller, fdps_unit_can_equip_item, scans all six positions identically and returns 1 when one of them equals the type of the item it was asked about, which makes this table the \"which item types may this class equip\" list. The 0xff padding never matches because no ITEM.DAT record carries type 0xff; one code that does appear in the table, 0x2d in the records for classes 0x20 and 0x21, is carried by no item either.\n\nParameters:\n  class_index -- the unit's class code, taken straight from byte +0x20 of its 0x50-byte unit record. Passed raw, not incremented: the PROMAP.DAT accessor fdps_get_class_record is fed class code + 1, this one is not.\n\nReturns:\n  Pointer to the class's 6-byte record, i.e. base + class_index * 6. It is address arithmetic only and is never NULL while the table is loaded, whether or not the index is in range.\n\nPool: fdps  [no Function ID hit in either library set; its only data reference is the game global at 0x00063fe4, written by the game's own table loader, and its only reference is a static call from game logic]\n\nRebuild note:\nTwo ways the obvious rewrite diverges. (1) PROEQU.DAT is indexed by the raw class code, while its neighbour PROMAP.DAT is indexed by class code + 1 -- the callers of fdps_get_class_record that look up a particular unit INC its byte +0x20 before calling (all but fdps_map_actor_move_toward_nearest_reachable_opponent, which omits it, an original defect), the caller of this one does not. Writing the equipment lookup by analogy with the class lookup and adding 1 shifts every class's permitted-equipment list by one record. The table is also 36 records against 40 class codes, so classes 0x24-0x27 read past its end and this accessor does not check. (2) The unused positions of a record hold 0xff, not 0, and the scan in fdps_unit_can_equip_item has no sentinel test at all -- it compares all six. Treating 0 as the empty marker is the intuitive reading and it is wrong: 0x00 is the type byte of the 25 all-zero ITEM.DAT records 0xE2-0xFA and of no item with content, so a table or a comparison written that way would let every class with an unused position -- all but 0x0b, 0x0c, 0x0f..0x12 and 0x20 -- equip all of them.",
+   "id": "O3"
+  },
+  {
+   "address": "0x119e0",
+   "change": "plate_replace",
+   "detail": "Moves a unit toward a requested destination tile: traces a path, retargets to the furthest walkable tile when the direct route is blocked, then picks the reachable tile nearest the target and animates the move.\nPool: fdps  [no Function ID hit in either library set; body is entirely game-domain]\nEvidence: Calls only game routines - fdps_get_unit_record, fdps_get_class_record, fdps_move_path_trace, fdps_map_load_tile_info, fdps_animate_move_path - and reads the map probe result at DAT_00069d0c. malloc/free/abs are consumed, not joined. All callers are battle and map code. Not crt or ail (no library byte match, no vendor state area), not binary_artifact (945-byte body with a real frame).\nName: fdps_ + snake_case for game code; no library symbol identified, and none exists to identify.\nBoundary: 000119e0-00011d90, Watcom prologue 53 56 57 55 89 e5 to matching epilogue 89 ec 5d 5f 5e 5b c3; the 15 bytes after are lea-form alignment padding before fdps_map_grid_collect_marked_tiles.\nSignature: __cdecl, int (int dest_x, int dest_y, int unit_index, int side_select) at [ebp+0x14/0x18/0x1c/0x20], caller-cleaned (add esp,0x10 at every call site), result in EAX. The fourth argument is a side truth value, not a mode: it reaches only fdps_move_grid_mark_opposing_zones_of_control (00010be9..00010c07, marks the units whose side byte at +6 is non-zero when the argument is 0) and fdps_move_grid_block_occupied_tiles (0001197a..0001199d, which reads it with the opposite polarity).\n\nAlgorithm:\n1. fdps_get_unit_record(unit_index) supplies tile x at +0x00, tile y at +0x01, a class index at +0x20 and a movement/terrain cost selector at +0x3b.\n2. fdps_get_class_record(class_index + 1) yields the movement context; malloc(100) is the step buffer (one direction code per step) and malloc(0x800) is the reachable-tile list (x,y byte pairs).\n3. Mark the opposing units' zones of control with fdps_move_grid_mark_opposing_zones_of_control(side_select), then build the movement cost map with fdps_move_grid_flood_fill_range(ctx, x, y, cost_selector) - only the flood builds the cost map, the mark does not - and path from the unit to (dest_x, dest_y) with fdps_move_path_trace(x, y, step_buf, dest_x, dest_y, 0), which returns the step count or -1 for no path.\n4. On failure, reset, flood with NO mark and an allowance of 100, and retry with the relaxed flag 1. If a relaxed path exists, reset, mark and flood again with the unit's real allowance (00011af4), then replay the relaxed path step by step (direction 0 = y+1, 1 = x-1, 2 = y-1, else x+1), probing each tile with fdps_map_load_tile_info(x, y) and reading DAT_00069d0c. The last tile whose probe is not 0xff becomes the new destination - the request is retargeted to the furthest usable tile along the blocked route.\n5. Rebuild the movement map, then narrow it with fdps_move_grid_block_occupied_tiles(unit_index, side_select), which does the OPPOSITE of flooding the unit's reach: it stores the 0xff unreachable sentinel into the occupied units' cells, so the mover may cross them but may not stop on them. Collect the tiles that survive with fdps_map_grid_collect_marked_tiles(tile_buf), which returns their count.\n6. Scan those tiles and keep the one minimising |tx - dest_x| + |ty - dest_y|, breaking ties on the smaller ||dx| - |dy||.\n7. Path to the chosen tile with the strict flag 0. If the step count is non-zero, fdps_animate_move_path(unit_index, step_buf, step_count) performs the move and the result is 1; otherwise 0.\n8. Free both buffers and return.\n\nGrid setup rounds: the grid is set up up to five times. Round 1 at 00011a5a does not reset first, so it inherits whatever the caller staged. Round 2 at 00011aaa resets and floods with NO mark and a literal allowance of 100. When round 2 finds a route, the retarget rebuild at 00011af4 resets + marks + floods with the unit's real allowance before the probe loop, the same setup as round 4. Rounds 3 (00011bc6) and 4 (00011cef) reset + mark + flood, and only round 3 calls fdps_move_grid_block_occupied_tiles. The retarget rebuild and round 4 aside, the rounds are NOT interchangeable: collapsing them into one shared setup would change which tiles the walk may cross and which it may finish on.",
+   "id": "O9"
+  },
+  {
+   "address": "0x10760",
+   "change": "plate_replace",
+   "detail": "In the plate comment of fdps_chapter_30_revive_wave_4_undead, replace the text \"0x55 (死靈) or 0x6a (白骨戰士)\" with \"0x55 (白骨戰士) or 0x6a (死靈)\"; leave the rest of the plate unchanged.",
+   "id": "O14"
+  },
+  {
+   "address": "0x39770",
+   "change": "plate_replace",
+   "detail": "In the plate comment, replace \"map29.dat's wave-4 records are two of character id 0x55 and two of character id 0x6a, all level 0x14\" with \"map29.dat's wave-4 records are two of character id 0x55 (白骨戰士) and two of character id 0x6a (死靈), all level 0x14\"; leave the rest of the plate unchanged.",
+   "id": "O14"
+  },
+  {
+   "address": "0x0002c330",
+   "change": "plate_append",
+   "detail": "Append as a new paragraph at the end of the 'Rebuild note:' section: \"The flag byte is read from the unanimated tile's attribute row (tile_attr[tile * 4] at 0002c50a, before the animation offset is added to the tile index at 0002c52e / 0002c550) and the fixed blend level from the animated frame's row (tile_attr[tile * 4 + 1] at 0002c579, after it). Reading both from one row -- either row -- agrees only while the frames' levels match.\"",
+   "id": "O18"
+  },
+  {
+   "address": "0x388b0",
+   "change": "plate_replace",
+   "detail": "In the plate comment of fdps_chapter_22_event_boss_defeat make two substring replacements and keep the rest verbatim. (a) Algorithm: replace 'so the message raises her portrait through fdps_battle_find_unit_by_character_id -- which skips retired units, which is why the state byte has to be cleared first.' with 'so the message raises her portrait through fdps_battle_find_unit_by_character_id -- which skips retired units but still hands back the last matching record, so clearing the state byte first is what makes it answer her index and the window zoom out of her tile rather than slide in.' (b) Rebuild note: replace 'or the dying line renders with no speaker.' with 'or the dying line opens with the slide-in instead of zooming out of the boss's tile.'",
+   "id": "O22"
+  },
+  {
+   "address": "0x38950",
+   "change": "plate_replace",
+   "detail": "In the plate comment of fdps_chapter_23_event_boss_defeat make two substring replacements and keep the rest verbatim. (a) Algorithm: replace 'so the message raises the boss's portrait through fdps_battle_find_unit_by_character_id -- which skips retired units, which is why the state byte has to be cleared first.' with 'so the message raises the boss's portrait through fdps_battle_find_unit_by_character_id -- which skips retired units but still hands back the last matching record, so clearing the state byte first is what makes it answer the boss's index and the window zoom out of its tile rather than slide in.' (b) Rebuild note: replace 'or the dying line renders with no speaker.' with 'or the dying line opens with the slide-in instead of zooming out of the boss's tile.'",
+   "id": "O22"
+  },
+  {
+   "address": "0x0001e3f0",
+   "change": "plate_append",
+   "detail": "Rebuild note: the three MP-regeneration passes are independent -- unit 4 (0xa6, else 0xa7, found entry equipped), unit 8 (0xb1, equipped), then every unit holding 0xb3 (merely held) -- and the shard pass does not skip units 4 and 8, so a unit qualifying for both regenerates twice in one turn (only once if the first restore brings MP up to its maximum, since fdps_unit_restore_mp clamps and the second pass then sees mp_current == mp_max). All three passes test only byte +0x05 == 0 and MP != max MP; none tests the side byte +0x06 or the poison/paralysis timers +0x25/+0x26. Merging them into one 'at most once per unit' loop, or reusing the rest sweep's guard (side 2, flags & 0x81, timers), changes the result.",
+   "id": "O35"
+  },
+  {
+   "address": "0x1c520",
+   "change": "plate_replace",
+   "detail": "In the existing plate comment of fdps_unit_resolve_attack_hit, replace only the exact substring \"which is 蘭斯洛特 and every guest or NPC unit rather than the eleven permanent roster characters.\" with \"which catches 蘭斯洛特 (0x0b) and every promoted form (0x0f and up) as well as the non-party portraits; 0x00..0x0b are the twelve player characters, so 10 is not the roster boundary.\" Leave the rest of the plate unchanged, then re-export ghidra_snapshot.",
+   "id": "O37"
+  },
+  {
+   "address": "0x00039060",
+   "change": "plate_replace",
+   "detail": "In the plate comment of fdps_chapter_25_event_marian_buys_wind_god_bow, keep everything else verbatim and replace exactly these three substrings: (1) \"with a free bag slot, the merchant offers her the 風神弓\" -> \"with a free bag slot, the village woman (村婦) offers her the 風神弓\"; (2) \"Message 0x15 is the merchant's pitch and 瑪麗安's reply\" -> \"Message 0x15 is the village woman's (村婦) pitch and 瑪麗安's reply\"; (3) \"with FACE.CEL portrait 0x77, the merchant, and fdps_draw_text\" -> \"with FACE.CEL portrait 0x77, 村婦 (the village woman, character 119), and fdps_draw_text\".",
+   "id": "O44"
+  },
+  {
+   "address": "0x000304e0",
+   "change": "rename_param",
+   "detail": "fdps_audio_init: rename parameter param1 to tick_rate_hz (matches src/audio.c; the value is forwarded to fdps_audio_timer_install and on to AIL_set_timer_frequency).",
+   "id": "O46"
+  },
+  {
+   "address": "0x000304e0",
+   "change": "plate_replace",
+   "detail": "In the existing plate, replace the substring 'void fdps_audio_init(int param1)' with 'void fdps_audio_init(int tick_rate_hz)'; leave the rest of the plate unchanged.",
+   "id": "O46"
+  },
+  {
+   "address": "0x000568db",
+   "change": "rename_param",
+   "detail": "fdps_blit_dispatch: rename the sixth parameter arg6 to mode_operand (matches src/blit.c, src/rledisp.asm and fdps_cel_blit_sprite's own parameter of the same name).",
+   "id": "O46"
+  },
+  {
+   "address": "0x000568db",
+   "change": "plate_replace",
+   "detail": "In the existing plate, replace '(src, dst, width, height, pitch, arg6, mode)' with '(src, dst, width, height, pitch, mode_operand, mode)' and replace 'arg6 at [EBP+0x1c] is unused here' with 'mode_operand at [EBP+0x1c] is unused here'; leave the rest unchanged.",
+   "id": "O46"
+  },
+  {
+   "address": "0x00056b25",
+   "change": "plate_replace",
+   "detail": "In the existing plate, replace '(fdps_blit_dispatch's arg6)' with '(fdps_blit_dispatch's mode_operand)' and replace 'becomes the dispatcher's arg6, not the mode' with 'becomes the dispatcher's mode_operand, not the mode'; leave the rest unchanged.",
+   "id": "O46"
+  },
+  {
+   "address": "0x00057a74",
+   "change": "plate_replace",
+   "detail": "In the existing plate, replace both occurrences of 'the dispatcher's arg6' with 'the dispatcher's mode_operand' ('[EBP+0x1c], the dispatcher's arg6, points at' and '(the dispatcher's arg6)'); leave the rest unchanged.",
+   "id": "O46"
+  },
+  {
+   "address": "0x00060154",
+   "change": "plate_replace",
+   "detail": "In the existing plate, replace 'passes the descriptor to fdps_blit_dispatch as arg6' with 'passes the descriptor to fdps_blit_dispatch as mode_operand'; leave the rest unchanged.",
+   "id": "O46"
+  }
+ ],
+ "declined": [
+  {
+   "id": "O2",
+   "ref": "C:R3b",
+   "status": "declined",
+   "note": "0x14 的「我會永遠記得妳的。」保留在顯示版 FDETXT64 0x14，同一位置被改寫擴充成 0x11–0x16，是被取代的舊稿（S13b）而不是沒有顯示版的另一段對白，且此提案以 0x13 仍在 S4 為前提，已不成立。"
+  },
+  {
+   "id": "O17",
+   "ref": "C:P41",
+   "status": "developer",
+   "note": "說法屬實（Ghidra 顯示 0003cbc1 唯一的 xref 是 0003ccf8 內 0003cd49 的呼叫），但這是 ADR，本輪不改決策記錄，是否修訂由開發者決定；知識庫正典 code_pools.md 已寫成正確版本。"
+  },
+  {
+   "id": "O17",
+   "ref": "C:X145",
+   "status": "developer",
+   "note": "說法屬實（六支 DPMI 已改判為 fdps、不在 ail 沒命中的那批裡，七個遊戲側符號中只有 00044dc0 落在沒有本體的 13 個之中），但這是 ADR，是否修訂由開發者決定；code_pools.md 與 ail_link.md 已是正確版本。"
+  },
+  {
+   "id": "O36",
+   "ref": "C:X1",
+   "status": "developer",
+   "note": "要求是把票 22.2 的 Status 改成 wontfix，屬於變更票的狀態而非更正事實陳述，本輪不得依 agent 的話改票狀態；票面寫的是 2026-09-22 使用者決定要做，repo 內沒有記錄使用者後來決定不做，需由使用者親自改票。"
+  }
+ ],
+ "developer_questions": [
+  {
+   "id": "O17",
+   "question": "ADR-0004 Consequences 段是否要修訂成現況：把「這七個裡有四個正好落在那 16 個之中」改為「這七個裡只有 00044dc0 落在前作庫沒有本體的 13 個之中」，並把「0003ccf8、0003cbc1、0003c9db、0003c9eb 四支的 xref 是空的」改為「0003ccf8、0003c9db、0003c9eb 三支的 xref 是空的，0003cbc1 只被 0003ccf8 呼叫」？"
+  },
+  {
+   "id": "O36",
+   "question": "票 22.2（編譯旗標與 translation unit 邊界完全對齊原版）是否已決定不做？若是，請把票面 Status 改為 wontfix 並註明重建版維持每個 unit 同一組 -s -ot -od（依據見 rebuild_info/build_flags.md），票 22 第 71–72 行「改為隨旗標一起對齊原版，歸票 22.2」的敘述也要一併調整。"
+  }
+ ],
+ "rejected": [],
+ "not_reread": [],
+ "still_open": [
+  {
+   "id": "O3",
+   "open_question": "src/aitarget.h 約第 43–45 行也以「bit 0x10 marks the line shape and the low nibble is the reach」描述距離欄位，但不在本組檔案清單內，未改；巨集名 ITEM_USE_DISTANCE_LINE_BIT 保留未改名。"
+  },
+  {
+   "id": "O22",
+   "open_question": "chapters/ch23.md 過關處理沒有提到死神在過關時會被再播一次死亡動畫（ch22.md 有對應的一句），不在本組範圍內。"
+  },
+  {
+   "id": "O39",
+   "open_question": "完全拿掉 status 欄位需要重跑 build_routing.py 重生 routing.json／routing.md（本輪的重生清單沒有這一項）；若要走那條路，由票的 session 刪掉產生器 712、762、785 三處並重生。"
+  },
+  {
+   "id": "O65",
+   "open_question": "program_info/data_structures.md 的 long_double_80 一列寫「多處浮點常數」，但 ghidra_snapshot/data.txt 目前沒有任何資料項套用這個型別（10 byte 常數都是 byte[10]），該列的「所在」欄可能需要另行更正。"
+  }
+ ],
+ "stopped": ""
+}

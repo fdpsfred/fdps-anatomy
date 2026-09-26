@@ -1,9 +1,9 @@
 /* indicat.c -- the battle indicator popups and the queue they are played back
  * from.
  *
- * See indicat.h for what a caller has to know.  The file owns one of the four
- * queue globals, the glyph ids; the cell x offsets, the unit indices and the
- * cursor are gamedata.c's, in the contiguous run the queue's overrun writes
+ * See indicat.h for what a caller has to know.  The file owns none of the four
+ * queue globals: the cell x offsets, the unit indices, the glyph ids and the
+ * cursor are all gamedata.c's, in the contiguous run the queue's overrun writes
  * through.
  *
  * sprintf comes from <stdio.h> and strlen from <string.h>, and both are real

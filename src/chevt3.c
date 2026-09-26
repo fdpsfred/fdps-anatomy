@@ -630,9 +630,15 @@ void fdps_chapter_16_event_wandering_smith_forge(int unit_index)
    one past the end.  Index 0x19 is the top of one range and the bottom of the
    other and is released by whichever branch runs.
 
-   Chapter 16's map15.dat lays 10 player records down at 0..9 and its 25 enemy
-   deployment records at 0x0a..0x22, so unit index = deployment record index +
-   10 and the two ranges are records 15..24 and 0..15.  Nothing is range
+   Chapter 16's map15.dat has 10 player slots at 0..9.  fdps_deploy_unit
+   appends every unit at the end of the array, and fdps_build_map_unit_array
+   deploys only wave 0, in record order: records 0..8 at 0x0a..0x12 and records
+   15..18 at 0x13..0x16.  The opening cutscene's DEPLOY_WAVE calls then append
+   wave 1 (records 9..10 at 0x17..0x18), wave 2 (records 11..14 at 0x19..0x1c),
+   wave 3 (records 19..22 at 0x1d..0x20) and wave 4 (records 23..24 at
+   0x21..0x22).  So unit index is not record index + 10 here: the turn-5 range
+   is waves 2, 3 and 4, and the other range is all of wave 0 plus wave 1 and
+   0x19, the first wave-2 flier, which both ranges share.  Nothing is range
    checked and data_fdps_map_unit_count is not consulted; all four bounds are
    literals in the instruction stream.
 

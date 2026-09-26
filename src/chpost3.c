@@ -89,9 +89,10 @@
 
    There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather
    than a missing line: the guide gives 第25章 魔戰將軍 勝利條件 魔戰將軍死亡,
-   three named bosses and not 敵人全滅, so the shared test's sweep would clear
-   the chapter as soon as the last minion fell with all three warlords still
-   alive.  Because that test never runs, this handler has to carry the defeat
+   three named bosses and not 敵人全滅, and the clear is this handler's own
+   three-warlord test.  The warlords are side-0 records, MAP24.DAT records 0
+   to 2, so the shared sweep could not clear the chapter while any of them
+   stood either.  Because that test never runs, this handler has to carry the defeat
    itself, which is the slot-0 store -- 失敗條件 蘭迪斯死亡, and slot 0 is
    蘭迪斯 because unit slot i is roster slot i and the roster is in join order.
    Chapter 25's 己方 is 法蓮娜以外的所有人, so it is 法蓮娜 at slot 3 and not
@@ -247,9 +248,10 @@ void fdps_chapter_25_post_action(void)
 
    There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather than
    a missing line: the guide gives 第26章 狂信人之塔 勝利條件 擊倒魔戰將軍, four
-   named bosses and not 敵人全滅, so the shared test's sweep would clear the
-   chapter as soon as the last of the seventy-odd garrison fell with all four
-   warlords alive.  Because that test never runs, this handler has to carry both
+   named bosses and not 敵人全滅, and the clear is this handler's own
+   four-warlord test.  The warlords are side-0 records, MAP25.DAT records 0
+   to 3, so the shared sweep could not clear the chapter while any of them
+   stood either.  Because that test never runs, this handler has to carry both
    defeats itself.
 
    Chapter 26 is chapter id 25 and the dword at 000602f0, twenty-five entries
@@ -344,9 +346,10 @@ void fdps_chapter_26_post_action(void)
 
    There is no CALL 0x0003a2e0 here, and that is the chapter's rules rather than
    a missing line: the guide gives 第27章 魔導士的野望 勝利條件 魔導王死亡, one
-   named boss and not 敵人全滅, so the shared test's sweep would clear the
-   chapter as soon as the last of the fifty-odd garrison fell with 吉歐 still
-   alive.  Because that test never runs, this handler has to carry the defeat
+   named boss and not 敵人全滅, and the clear is this handler's own test on
+   吉歐.  He is a side-0 record, MAP26.DAT record 0, so the shared sweep could
+   not clear the chapter while he stood either.  Because that test never runs,
+   this handler has to carry the defeat
    itself.
 
    Chapter 27 is chapter id 26 (0x1a) and the dword at 000602f4, twenty-six

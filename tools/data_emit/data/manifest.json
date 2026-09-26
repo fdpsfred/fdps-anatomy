@@ -1246,7 +1246,7 @@
         "zero_pad_after": 12
       },
       "confidence": "high",
-      "basis": "initialized zero (image bytes 00) with follows data_fdps_battle_teleport_dest_tile_x and a 12-byte zero tail, because the unbounded indicator-queue overrun writes through 0x64120..0x644b2 and needs every member of the run at its original offset",
+      "basis": "initialized zero (image bytes 00) with follows data_fdps_battle_teleport_dest_tile_x and a 12-byte zero tail, because the unbounded indicator-queue overrun writes through 0x64120..0x6443f and needs every member of the run at its original offset",
       "handoff": [],
       "definition_sha": "3143d26cf2a1e7a8"
     },
@@ -1261,7 +1261,7 @@
         "zero_pad_after": 12
       },
       "confidence": "high",
-      "basis": "initialized zero (image bytes 00) with follows data_fdps_teleport_destination_tile_y and a 12-byte zero tail, rerouted to gamedata.c, because the unbounded indicator-queue overrun writes through 0x64120..0x644b2 and needs every member of the run at its original offset",
+      "basis": "initialized zero (image bytes 00) with follows data_fdps_teleport_destination_tile_y and a 12-byte zero tail, rerouted to gamedata.c, because the unbounded indicator-queue overrun writes through 0x64120..0x6443f and needs every member of the run at its original offset",
       "handoff": [],
       "definition_sha": "02f33c1f7e882175"
     },
@@ -1485,7 +1485,7 @@
         "follows": "data_fdps_number_glyph_sheet_ptr"
       },
       "confidence": "high",
-      "basis": "Image bytes zero, but initialised (= 0) with follows=data_fdps_number_glyph_sheet_ptr because the unbounded indicator-queue glyph stores reach 0x643af..0x64443, covering this pointer.",
+      "basis": "Image bytes zero, but initialised (= 0) with follows=data_fdps_number_glyph_sheet_ptr because the unbounded indicator-queue glyph stores reach 0x643b0..0x6443f, covering this pointer.",
       "handoff": [],
       "definition_sha": "e29e0a97a6e34106"
     },
@@ -1499,7 +1499,7 @@
         "follows": "data_fdps_shadow_sprite_sheet_ptr"
       },
       "confidence": "high",
-      "basis": "Image bytes zero; made initialised '= 0' with follows=data_fdps_shadow_sprite_sheet_ptr because the unbounded indicator-queue glyph stores (cursor 255..403 + 0x642b0) overwrite 0x643e0, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
+      "basis": "Image bytes zero; made initialised '= 0' with follows=data_fdps_shadow_sprite_sheet_ptr because the unbounded indicator-queue glyph stores (glyph index 256..399, 0x643b0..0x6443f) overwrite 0x643e0, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
       "handoff": [],
       "definition_sha": "89d7c5131b5e2a82"
     },
@@ -1527,7 +1527,7 @@
         "follows": "data_fdps_vga_fight_palette_ptr"
       },
       "confidence": "high",
-      "basis": "Image bytes zero; made initialised '= { 0 }' with follows=data_fdps_vga_fight_palette_ptr because the unbounded indicator-queue glyph stores (cursor 255..403 + 0x642b0) overwrite 0x643e8..0x643ea, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
+      "basis": "Image bytes zero; made initialised '= { 0 }' with follows=data_fdps_vga_fight_palette_ptr because the unbounded indicator-queue glyph stores (glyph index 256..399, 0x643b0..0x6443f) overwrite 0x643e8..0x643ea, so it must keep its original offset in the contiguous 0x64120..0x653ef run.",
       "handoff": [],
       "definition_sha": "0ab6590b1ea7a8ce"
     },
@@ -1569,7 +1569,7 @@
         "follows": "data_fdps_animation_baseani_entry_ptr"
       },
       "confidence": "high",
-      "basis": "Image bytes 0x643f0..0x653ef all zero, but initialised (= { 0 }) and follows data_fdps_animation_baseani_entry_ptr because the unbounded indicator-queue glyph stores (cursor+0x642b0) reach 0x643f0..0x644b2 in the original.",
+      "basis": "Image bytes 0x643f0..0x653ef all zero, but initialised (= { 0 }) and follows data_fdps_animation_baseani_entry_ptr because the unbounded indicator-queue glyph stores (cursor+0x642b0) reach 0x643f0..0x6443f in the original.",
       "handoff": [],
       "definition_sha": "7b6a4842a5faa881"
     },

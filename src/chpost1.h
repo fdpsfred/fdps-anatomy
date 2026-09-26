@@ -209,9 +209,10 @@ extern void fdps_chapter_07_post_action(void);
    verdict in data_fdps_chapter_event_or_battle_end_code (gamedata.h).
 
    This is the underground-prison chapter, where the party walks four captives
-   off the battlefield.  It is the only handler in this file that neither
-   forwards to nor opens with fdps_battle_check_default_end_conditions
-   (btlend.h), so emptying the enemy side is not a clear here at all.
+   off the battlefield.  It is one of the three handlers in this file, with
+   chapters 3 and 10, that neither forward to nor open with
+   fdps_battle_check_default_end_conditions (btlend.h), so emptying the enemy
+   side is not a clear here at all.
 
    The three rules run in order and each one stores without consulting what is
    already recorded, so the last one to fire is the verdict.  Unit slot 0,
@@ -265,7 +266,7 @@ extern void fdps_chapter_09_post_action(void);
    nothing, and leaves the verdict in
    data_fdps_chapter_event_or_battle_end_code (gamedata.h).
 
-   Alone among the handlers in this file it does NOT call
+   Like the chapter 3 and 8 handlers in this file, it does NOT call
    fdps_battle_check_default_end_conditions (btlend.h), so emptying the enemy
    side is not a clear on this chapter and a defeat is not inherited from the
    shared test either.  Both conditions are its own:
@@ -422,8 +423,8 @@ extern void fdps_chapter_14_post_action(void);
    THE SHARED TEST MUST NOT RUN WHILE THE FLAG IS UP.  Unit 0, 蘭迪斯, is
    one of the records the duel setup retires, so the shared test would force the
    defeat code the moment the player accepts: the ordinary "call the shared test
-   first, then add the chapter's own condition" shape that every other handler
-   in this file has turns chapter 15's duel into an instant Game Over.
+   first, then add the chapter's own condition" shape that most handlers in
+   this file have turns chapter 15's duel into an instant Game Over.
 
    Table slot 14. */
 extern void fdps_chapter_15_post_action(void);

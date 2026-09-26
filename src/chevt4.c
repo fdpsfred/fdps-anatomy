@@ -769,9 +769,16 @@ void fdps_chapter_22_event_for_turn(int event_arg)
    the death sequence has just set bit 0, the removed bit fdps_unit_is_retired
    reads.  Text entry 0x12 opens with the portrait token, which raises its
    speaker through fdps_battle_find_unit_by_character_id -- and that search
-   skips retired units.  So clearing the byte is what gives the line a face, and
-   narrowing the store to bit 0, or moving it after the draw, silently renders
-   the dying line with no speaker.
+   skips retired units, although it still hands back the last matching record.
+   So without the store the portrait is drawn all the same, but the search
+   answers -1 and fdps_draw_text opens the window with the slide-in,
+   fdps_message_window_open_from_tile(-1, ...); clearing the byte is what makes
+   it answer her index, so the window zooms out of her tile instead.  Moving the
+   store after the draw silently changes how the dying line opens, and
+   narrowing it to bit 0 leaves standing the other bits the original clears.
+   The store also leaves her un-retired at zero hit points, so on this path
+   fdps_battle_destroy_remaining_enemies, the first thing fdps_chapter_22_end
+   does, plays her death animation a second time.
 
    Two values are used after a CALL and both are fdps_get_unit_record's: the
    acting unit's record, stored to [EBP-0x4] at 000388c8 and reloaded at
@@ -785,7 +792,7 @@ void fdps_chapter_22_event_for_turn(int event_arg)
 
    Table slot 32, reached only through the table: the boss's deployment record
    in MAP21.DAT carries the death script (opcode 2, operand 32),
-   fdps_collect_defeated_unit_events collects it once her HP reaches 0, and the
+   fdps_collect_death_scripts collects it once her HP reaches 0, and the
    death-script runner calls the slot with the index of the unit that was
    acting. */
 void fdps_chapter_22_event_boss_defeat(int unit_index)
@@ -884,9 +891,16 @@ void fdps_chapter_22_event_boss_defeat(int unit_index)
    the death sequence has just set bit 0, the removed bit fdps_unit_is_retired
    reads.  Text entry 0x1a opens with the portrait token, which raises its
    speaker through fdps_battle_find_unit_by_character_id -- and that search
-   skips retired units.  So clearing the byte is what gives the dying line a
-   face, and narrowing the store to bit 0, or moving it after the draw, silently
-   renders the line with no speaker.
+   skips retired units, although it still hands back the last matching record.
+   So without the store the portrait is drawn all the same, but the search
+   answers -1 and fdps_draw_text opens the window with the slide-in,
+   fdps_message_window_open_from_tile(-1, ...); clearing the byte is what makes
+   it answer the boss's index, so the window zooms out of its tile instead.
+   Moving the store after the draw silently changes how the dying line opens,
+   and narrowing it to bit 0 leaves standing the other bits the original
+   clears.  The store also leaves the boss un-retired at zero hit points, so
+   fdps_battle_destroy_remaining_enemies, the first thing fdps_chapter_23_end
+   does, plays its death animation a second time.
 
    THE SEARCH RUNS WHETHER OR NOT THE CHARACTER MATCHES.  CALL 0x00034520 at
    000389ab is reached unconditionally and its result is parked in [EBP-0x4]
@@ -896,10 +910,11 @@ void fdps_chapter_22_event_boss_defeat(int unit_index)
 
    THE EXCHANGE IS A REMOVE THEN AN ADD, NOT AN IN-PLACE SWAP.
    fdps_unit_remove_item packs the entries above the vacated one down and empties
-   the last, and fdps_unit_add_item then takes the first empty entry, so with a
-   full bag 反禁制器 lands back in the contract's old slot and with a gappy one
-   it lands in the first hole instead.  Storing 0xdc over the slot the search
-   returned would give the player a different slot order.
+   the last, and fdps_unit_add_item then takes the first empty entry, so
+   反禁制器 lands in the first empty entry left after the repack -- with a full
+   bag that is the last entry, which is the contract's old slot only when the
+   contract was last.  Storing 0xdc over the slot the search returned would give
+   the player a different slot order.
 
    Three values are used after a CALL.  fdps_get_unit_record's record pointer is
    stored to [EBP-0x8] at 00038966 and reloaded at 00038969 for the flags store,
@@ -912,7 +927,7 @@ void fdps_chapter_22_event_boss_defeat(int unit_index)
 
    Table slot 33 at 00060248, reached only through the table: the boss's
    deployment record in MAP22.DAT carries the death script (opcode 2, operand
-   33), fdps_collect_defeated_unit_events collects it once its HP reaches 0, and
+   33), fdps_collect_death_scripts collects it once its HP reaches 0, and
    the death-script runner calls the slot with the index of the unit that was
    acting. */
 void fdps_chapter_23_event_boss_defeat(int unit_index)

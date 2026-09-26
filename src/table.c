@@ -176,14 +176,19 @@ struct fdps_item_effect *fdps_get_item_record(int item_id)
    caught by reading a record: the base here is 0x00063fd0 and the enemy
    table's is 0x00063fd4, four bytes apart in bss (contract B).
 
-   record_index is the row number in the file, which the eleven callers form as
-   the unit's class code PLUS ONE -- MOV AL,byte ptr [<unit>+0x20] / INC EAX /
-   PUSH EAX -- because row 0 of PROMAP.DAT is a default row and not class 0x00
-   (assets/tables/classes.md).  The two callers that want that default row,
-   fdps_collect_targets_in_range at 00011e90 and fdps_map_actor_score_best_item
-   at 00013056, push a literal 0 (6a 00) into the call.  The addition is the caller's and stays the
+   record_index is the row number in the file.  Seven of the eleven callers
+   form it as the unit's class code PLUS ONE -- MOV AL,byte ptr [<unit>+0x20] /
+   INC EAX / PUSH EAX -- because row 0 of PROMAP.DAT is a default row and not
+   class 0x00 (assets/tables/classes.md).  The three callers that want that
+   default row, fdps_collect_targets_in_range at 00011e90,
+   fdps_map_actor_score_best_item at 00013056 and
+   fdps_map_actor_score_best_spell at 00013436, push a literal 0 (6a 00) into
+   the call.  The eleventh, the call at 000126f6 in
+   fdps_map_actor_move_toward_nearest_reachable_opponent, pushes the class code
+   without the INC and reads the previous class's row, an original defect
+   (program_info/known_bugs.md).  The addition is the caller's and stays the
    caller's: nothing in here biases the index, so moving the +1 in here would
-   shift both of those literal-zero calls onto class 0x00's row.
+   shift all three literal-zero calls onto class 0x00's row.
 
    IMUL again, the signed form, so a negative index steps backwards off the
    front of the table instead of becoming a four-gigabyte offset.  Nothing is
@@ -223,8 +228,8 @@ struct fdps_class_record *fdps_get_class_record(int record_index)
    class 0x00 is record 0.  The only caller says so outright -- 00025ffe MOV
    AL,byte ptr [EAX+0x20] / 00026001 AND EAX,0xff / 00026006 PUSH EAX in
    fdps_unit_can_equip_item, with no INC between the load and the push, against
-   the MOV AL,[unit+0x20] / INC EAX / PUSH EAX every caller of the class
-   accessor writes.  Adding one here would shift every class's permitted
+   the MOV AL,[unit+0x20] / INC EAX / PUSH EAX the per-unit callers of the
+   class accessor write.  Adding one here would shift every class's permitted
    equipment list onto the next class's record (rebuild_info/pitfalls.md).
 
    The base at 0x00063fe4 is the sixth of the nine table pointers and is a

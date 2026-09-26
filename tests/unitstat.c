@@ -2340,9 +2340,10 @@ static void an_equal_pair_gains_exactly_the_minimum(void)
 }
 
 /* The zero test guards the CALL at 0001e39d as well as the IDIV, so an equal
-   pair leaves the shared stream exactly where it found it.  Half of
-   FRILEVUP.DAT's pairs are equal, so this is the ordinary path and every later
-   roll of the battle depends on it. */
+   pair leaves the shared stream exactly where it found it.  26 of the 175
+   pairs in FRILEVUP.DAT's rows that hold any growth are equal -- 15 of them on
+   the forms the party levels through -- so this is an ordinary path and every
+   later roll of the battle depends on it. */
 static void an_equal_pair_draws_no_random_number(void)
 {
     int untouched;

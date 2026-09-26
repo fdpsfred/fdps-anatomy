@@ -43,6 +43,10 @@ CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒�
 | 遊戲的結構 | `fdps_` + snake_case | `fdps_unit_record` |
 | 程式庫的結構（CRT 與 AIL） | **程式庫原名，無前綴** | `tm`、`FILE`、`__iobuf`、`rt_init` |
 | 判定不出程式庫名稱、只存在於單一 object 內的結構 | `L$N_<模組>_<用途>` | `L$N_emu387_state` |
+| AIL 側、上游沒有名稱的結構 | `ail_` + snake_case，與 `data_ail_` 資料符號同一族 | `ail_xmidi_timb_chunk` |
+| CRT 側、Watcom 10.0a 標頭沒有名稱、又不只屬於單一 object 的值型別 | 沿用前作的輔助型別名，無前綴 | `long_double_80` |
+
+後兩類只存在於 Ghidra：CRT 與 AIL 的程式碼是從 `.LIB` 連結進來的，不 emit 成 C，所以「Ghidra 名稱與 C 名稱逐字相同」對它們沒有約束。`long_double_80` 是 80x87 模擬器與浮點程式庫共用的 80-bit extended real，前作 FD2 用同一個名字，沿用它讓兩邊的對照逐字相同。
 
 **`crt_` 不是前綴。** 唯一合法的形式是複合前綴 `crt_equivalent_`，意思是「行為等價但比對不到程式庫 object、必須手寫的東西」。寫 `crt_tm`、`crt_file` 這種名字是錯的，理由與程式庫函式那條鐵則同源：重建後的 `.c` 是從 `<time.h>`、`<stdio.h>` 拿到這些型別的，加了前綴就會讓 Ghidra 名稱與 C 名稱對不起來。這一點與前作不同：FD2 把 `crt_` 與 `crt_equivalent_` 並列為 CRT 層前綴，庫裡也有 `crt_emu387_int7_fptan_opcode_worker_4c630` 這類裸 `crt_` 名字，本專案不沿用。
 
@@ -55,6 +59,8 @@ CRT／AIL／連結器產物三類**不套用** `fdps_` 慣例。注意這裡沒�
 ## 兩個容易搞錯的細節
 
 **同一支 helper 被靜態連結兩次時，thunk 用原名，body 用程式庫發佈的帶位址後綴名稱。** 廠商的 `.LIB` 裡同一個 helper 可能由兩個 object 各帶一份，連結後成為一個 5-byte `JMP` thunk 加一份完整 body。前作的庫就是這樣命名的（`AIL_internal_log_lock_acquire` 是 thunk，`AIL_internal_log_lock_acquire_3e724` 是 body），照抄：後綴是前作映像裡的位址，不是本專案的位址，本專案位於 `0x4478c` 的 body 仍叫 `AIL_internal_log_lock_acquire_3e724`。
+
+`0003dcb0`／`00044dc0` 這一對是例外。`ailv3.lib` 沒有發佈這一對的名稱，只以 EXTDEF `crt_equivalent_get_eflags_thunk` 參照它——那是前作把這 4 byte 判成 CRT 的讀法，本專案不沿用（見 [`pitfalls.md`](pitfalls.md)）。所以 body 叫 `src/ailflags.asm` 的公開符號 `AIL_internal_isr_eflags_save_cli`、不帶後綴，也是 [`ail_link.md`](ail_link.md) alias 的目標；thunk 保留 Ghidra 自動加上 `thunk_` 前綴的 `thunk_AIL_internal_isr_eflags_save_cli`。thunk 沒有原始碼、不 emit，這個名字只存在於 Ghidra。
 
 **名字要是程式庫真的有的符號。** 判定不出 PUBDEF 就不要硬湊一個像 CRT 的名字：那是 file-static（用 `L$N_`）或必須手寫的等價實作（用 `crt_equivalent_`）。可查證的公開符號清單由 [`tools/pool_triage/fid/`](../tools/pool_triage/fid/_index.md) 的 `extract_watcom_symbols.py` 從實際連結的三個 Watcom 程式庫與啟動 object `CSTRTX3S.OBJ` 產生。
 

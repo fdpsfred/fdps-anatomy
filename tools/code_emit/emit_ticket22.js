@@ -81,8 +81,11 @@
 // next_batch.py hands the address out again exactly as it would a `pending` one.
 //
 // This workflow does not watch its own budget. It runs the list the caller gave
-// it and stops for three reasons only: the list ran out, something upstream is
-// broken (ADR-0007 5.2/5.5), or it was killed. How much to attempt is the
+// it and stops for these reasons only, none of them a budget: the list ran out,
+// something upstream is broken (ADR-0007 5.2/5.5), it was killed, or the working
+// tree is not clean -- Recover found dirty paths outside its bound or could not
+// leave the tree clean, or the cleanup after abandoning a function left residue
+// behind (cleanup_failed). How much to attempt is the
 // caller's decision, made per batch; a workflow that quietly stopped after 12 of
 // the 40 it was asked for would be answering a question nobody asked.
 //

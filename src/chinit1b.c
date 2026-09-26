@@ -524,8 +524,15 @@ void fdps_chapter_14_init(void)
    is record 1 + n -- which is the 光束砲座, and the tail of that step is
    fdps_battle_mark_unit_done, which raises bit 7 of record byte 5.
    fdps_icon_script_run clears that bit when it STARTS rather than when it
-   finishes, so nothing else undoes it, and without this handler's own call the
-   fortress cannon would sit out the first player phase.  The mask matters as
+   finishes, so nothing else undoes it before the battle opens.  Without this
+   handler's own call the cannon would carry bit 7 through the first player
+   and NPC phases, and any unit still in the battle with bit 7 up greys out
+   the save entry of fdps_battle_system_submenu (src/btlmenu.c): the first
+   player phase could not be saved.  Nothing on the map would show it --
+   portrait id 0x80 has no map sprite, and fdps_draw_map_unit returns before
+   it reads the flag (src/mapdraw.c) -- and the cannon would still fire in
+   the first enemy phase, because fdps_battle_advance_turn clears bit 7 again
+   right after the enemy-phase banner (src/btlturn.c).  The mask matters as
    much as the call: it is AND 0x7f, so bit 0 -- the retired flag -- survives
    (src/unit.c).
 

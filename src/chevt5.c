@@ -501,7 +501,8 @@ void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
 /* What the bow costs and what is handed over: CMP dword ptr [0x000643a4],0x7530
    at 0003908b and SUB dword ptr [0x000643a4],0x7530 at 0003914e, and PUSH 0x4a
    at 00039140.  Item 0x4a is 風神弓 and 30000 is exactly its list price in
-   assets/items.md, so the merchant asks the shop rate rather than a mark-up.
+   assets/items.md, so the village woman asks the shop rate rather than a
+   mark-up.
 
    THE PURSE TEST IS SIGNED, JGE at 00039095 and not JAE, so the amount is read
    as an int and a purse that had somehow gone negative fails the gate rather
@@ -541,16 +542,16 @@ void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
 
 /* The four entries of the chapter's own FDETXT25.TXT block this event speaks,
    PUSH 0x15 at 000390cd, PUSH 0x16 at 000390fa, PUSH 0x17 at 00039130 and PUSH
-   0x18 at 0003916d: the merchant's pitch, his question, the sale and the
-   refusal.  They are the four entries after the ones the sword upgrade and the
-   ambush above use. */
+   0x18 at 0003916d: the village woman's (村婦) pitch, her question, the sale
+   and the refusal.  They are the four entries after the ones the sword upgrade
+   and the ambush above use. */
 #define CH25_BOW_OFFER_TEXT_ID 0x15
 #define CH25_BOW_QUESTION_TEXT_ID 0x16
 #define CH25_BOW_BOUGHT_TEXT_ID 0x17
 #define CH25_BOW_DECLINED_TEXT_ID 0x18
 
 /* The portrait the question's panel is opened with, PUSH 0x77 at 000390dd:
-   FACE.CEL record 0x77, the merchant. */
+   FACE.CEL record 0x77, 村婦 (the village woman), character 119. */
 #define CH25_MERCHANT_FACE 0x77
 
 /* The prompt answer that buys, CMP dword ptr [EBP-0x4],0x0 / JNZ at 00039117.
@@ -559,8 +560,8 @@ void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
    along with the right cell. */
 #define CH25_BOW_ANSWER_BUY 0
 
-/* 00039060.  Chapter 25's 風神弓 shop: 瑪麗安 stops on the merchant's tile
-   with the money and the room for the bow, and is offered it once.
+/* 00039060.  Chapter 25's 風神弓 shop: 瑪麗安 stops on the village woman's
+   (村婦) tile with the money and the room for the bow, and is offered it once.
 
    The frame is the family's four-push one with two 4-byte locals -- PUSH EBX /
    PUSH ESI / PUSH EDI / PUSH EBP / MOV EBP,ESP / SUB ESP,0x8 at
@@ -605,11 +606,11 @@ void fdps_chapter_25_event_upgrade_randis_sword(int unit_index)
    the result is void. */
 void fdps_chapter_25_event_marian_buys_wind_god_bow(int unit_index)
 {
-    /* The unit that stopped on the merchant's tile, resolved before any gate;
-       only its character id byte is read. */
+    /* The unit that stopped on the village woman's tile, resolved before any
+       gate; only its character id byte is read. */
     struct fdps_unit_record *triggering_unit;
-    /* What the player answered the merchant: 0 buys, and both the right cell's
-       1 and a cancel's -1 decline. */
+    /* What the player answered the village woman: 0 buys, and both the right
+       cell's 1 and a cancel's -1 decline. */
     int purchase_answer;
 
     triggering_unit = fdps_get_unit_record(unit_index);

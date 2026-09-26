@@ -2716,8 +2716,9 @@ static void ch08_no_unnamed_slot_ends_the_battle(void)
 /* One record past the challenger so slot 0x35 is inside the staged array. */
 #define CH15_STAGE_UNITS 0x36
 
-/* FDETXT15.TXT's own entry count, so entries 0x16, 0x17 and 0x18 sit where the
-   shipped file has them.  Every entry points at the terminator word that
+/* A synthetic entry count, large enough that entries 0x16, 0x17 and 0x18 sit
+   inside the table; it is not FDETXT15.TXT's own, which is twenty-five (0x00
+   to 0x18).  Every entry points at the terminator word that
    follows the table, which is what keeps fdps_draw_text from opening a message
    window and waiting on the keyboard while the test runs. */
 #define CH15_TEXT_ENTRIES 29

@@ -14,9 +14,10 @@
  *
  * Note on this module's original build flags: it was not compiled with the
  * flag set the rest of the game was.  Every function in the block from
- * 0003bade to 0003c96x opens with PUSH <frame size> / CALL __CHK, which -s
- * removes and which no other game function has, and the block pushes the
- * address of a global as PUSH imm32, which the disabled optimiser never emits.
+ * 0003bade to 0003c97b except the frameless leaf fdps_cd_status_is_not_busy
+ * opens with PUSH <frame size> / CALL __CHK, which -s removes and which no
+ * other game function has, and the block pushes the address of a global as
+ * PUSH imm32, which the disabled optimiser never emits.
  * Compiling this file with -bt=dos4g -mf -4s -fpi -os -- no -s, and -os in
  * place of -ot -od -- reproduces fdps_cd_alloc_dos_buffers byte for byte,
  * all 0x9f of them.  The rebuild has one flag set for every unit

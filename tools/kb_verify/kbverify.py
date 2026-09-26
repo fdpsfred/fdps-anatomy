@@ -793,6 +793,34 @@ def all_kb_docs():
     return list(dict.fromkeys(out))
 
 
+# Lint findings reviewed by hand and kept, with the reason: (doc, code, a
+# substring of the finding's message).  The rules are deliberately blunt;
+# these are the places where the word is the subject, not a citation.
+LINT_ACCEPTED = (
+    ("README.md", "narrative", "devlog", "README describes the devlog/ folder"),
+    ("README.md", "forbidden-reference", "`workspace/`", "the folder table lists workspace/ as a folder"),
+    ("README.md", "forbidden-reference", "`legacy/`", "the folder table lists legacy/ as a folder"),
+    ("README.md", "unknown-symbol", "fdps_game_files", "the folder of the original game files, not a symbol"),
+    ("CONTEXT.md", "narrative", "devlog", "the glossary defines the term Devlog"),
+    ("CONTEXT.md", "narrative", "Devlog", "the glossary defines the term Devlog"),
+    ("rebuild_info/build_gate.md", "forbidden-reference", "workspace/",
+     "says why the baselines are NOT kept under workspace/"),
+    ("rebuild_info/data_emit.md", "narrative", "devlog",
+     "the data-emit pipeline's own rule for committing devlog pages"),
+    ("rebuild_info/data_emit.md", "forbidden-reference", "workspace/data_emit/in_flight.json",
+     "describes where the pipeline keeps its in-flight footprint, not a citation of its content"),
+    ("rebuild_info/emit_pipeline.md", "forbidden-reference", "`workspace/` 不能碰",
+     "the emit pipeline's recovery boundary: workspace/ is off limits to it"),
+    ("rebuild_info/emit_pipeline.md", "narrative", "devlog",
+     "the emit pipeline's rule for committing its devlog and run report"),
+    ("rebuild_info/pitfalls.md", "unknown-symbol", "fdps_foo", "a placeholder name in an example"),
+)
+
+
+def _accepted(doc, code, message):
+    return any(doc == d and code == c and s in message for d, c, s, _ in LINT_ACCEPTED)
+
+
 def lint(paths=None):
     """KB-wide rules on every page: no workspace/ or legacy/ citation, no
     process narrative outside generated regions and quoted game text, every
@@ -828,6 +856,7 @@ def lint(paths=None):
         for level, code, no, msg in mech.check_links(lines, (REPO / rel).parent, REPO):
             if (no - 1) not in hidden:
                 findings.append((code, no, msg))
+        findings = [f for f in findings if not _accepted(rel, f[0], f[2])]
         if findings:
             report[rel] = [{"code": c, "line": n, "message": msg} for c, n, msg in findings]
     return report

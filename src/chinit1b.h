@@ -170,8 +170,11 @@ extern void fdps_chapter_14_init(void);
    runs one behaviour step for map unit 35 -- MAP14.DAT's record 27, the
    光束砲座 -- and that step ends in fdps_battle_mark_unit_done, which raises
    the acted-this-turn bit.  fdps_icon_script_run clears that bit on entry, not
-   on exit, so without this handler's own call the cannon would sit out the
-   first player phase.
+   on exit, so without this handler's own call the cannon would keep that
+   bit through the first player phase and grey out the battle menu's save
+   entry (src/btlmenu.c).  It has no map sprite to show the bit, and it would
+   still fire in the first enemy phase, since fdps_battle_advance_turn clears
+   the bit again before that phase.
 
    Table slot 14. */
 extern void fdps_chapter_15_init(void);

@@ -801,10 +801,10 @@ void fdps_apply_item_effect_to_targets(int unit_index, int item_slot,
 #define AIM_SWEEP_KEEP_OWN_TILE 0
 #define AIM_SWEEP_DROP_OWN_TILE 1
 
-/* CMP dword ptr [EBP-0x34],0xf / JLE at 00025510.  Bit 0x10 of the ITEM.DAT
-   use_distance byte marks the straight-line shape and the low nibble is the
-   reach, so 0x10 is the lowest line-shaped value and a line's length is the
-   byte less 0x10 (aitarget.h).  PUSH 0x1 at 00025516 is that collector's
+/* CMP dword ptr [EBP-0x34],0xf / JLE at 00025510.  The ITEM.DAT use_distance
+   byte is compared as a number, not masked: below 0x10 it is the reach, from
+   0x10 up the item covers a straight line whose length is the byte less 0x10
+   (aitarget.h).  PUSH 0x1 at 00025516 is that collector's
    select_enemy_side, which runs the opposite way round from a select mode: 1
    keeps side 0, the enemy side. */
 #define ITEM_USE_DISTANCE_LINE_BIT 0x10

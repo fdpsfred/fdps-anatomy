@@ -5,8 +5,9 @@ compiler proves those definitions agree with their headers; nothing in the
 build proves they agree with FDPS.LE.  This does, from the linked output rather
 than from the C text: for every symbol in tools/data_emit/data/manifest.json it
 finds the symbol's address in the unit-test image's wlink map, reads its bytes
-out of EMITTEST.EXE, and compares them with the bytes at the symbol's Ghidra
-address in the shipped FDPS.LE.
+out of EMITTEST.EXE (or, with --image game, out of FDE.EXE through its own
+map), and compares them with the bytes at the symbol's Ghidra address in the
+shipped FDPS.LE.
 
 Two kinds of byte cannot be compared as bytes:
 

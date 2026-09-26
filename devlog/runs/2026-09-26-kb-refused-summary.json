@@ -1,0 +1,69 @@
+{
+ "items": 55,
+ "by_kind": {
+  "refused": 55
+ },
+ "complete": 55,
+ "unfinished": [],
+ "by_verdict": {
+  "consistent": 40,
+  "fixed": 15
+ },
+ "edits_landing": 16,
+ "rejected": [],
+ "outside_fixes": [
+  {
+   "id": "F22",
+   "outside": "src/chinit1.c:83-88 的 fdps_chapter_01_init 註解寫著：把加入排在 reset 之後，蘭迪斯就完全不會出現在第 1 章的地圖上。實際上 Icon00.dat 在 0x051c 會以 SWITCH_MAP 0 依名冊重建地圖 0，所以只要加入在 fdps_icon_script_run 之前，他還是會上場；這段註解要改成順序只相對於過場之前才有意義（保留原版順序只是因為原版就是這樣排）。"
+  },
+  {
+   "id": "F52",
+   "outside": "tools/cut_content/story.py 尚未跟上已落地的手寫分類（一致性項目 R3a 的 outside）：從 S4_GROUPS 刪掉 `([(30, 0x13)], \"另一版的道別\")`；_owners() 的 S13b 範圍把 `(30, 0x14, None)` 改成 `(30, 0x13, 0x14)`；NOTE_OVERRIDES 加 (30, 0x13) 的說明（前半與 `FDETXT64` `0x11` 逐字相同，後半的同行邀約改寫成再會約定）。之後重生 cut_content/story.md 的 story:S4-text 與總表區塊、cut_content/_index.md 總表（python tools/cut_content/cut_content.py index），以及 chapters/ch30.md 的 chapter_docs:dialogue 區塊（`FDETXT30` `0x13` 改連 S13b）。不要照一致性項目 R3b 的 outside 把 (30, 0x14) 移進 S4。"
+  },
+  {
+   "id": "F53",
+   "outside": "tools/cut_content/story.py：刪掉 S4_GROUPS 的 `([(30, 0x13)], \"另一版的道別\")`；_owners() 的 S13b 範圍把 `(30, 0x14, None)` 改成 `(30, 0x13, 0x14)`；NOTE_OVERRIDES 補 `(30, 0x13)` 的說明（前半與 `FDETXT64` `0x11` 逐字相同，後半的同行邀約改寫成再會約定）。之後重生 cut_content/story.md 的 story:S4-text（刪掉 `FDETXT30` `0x13` 全文）與 story:text-index（`FDETXT30` `0x13` 改列 S13b）、cut_content/_index.md 總表（python tools/cut_content/cut_content.py index），以及 chapters/ch30.md 的 chapter_docs:dialogue 區塊（`0x13` 的連結由 S4 改為 S13b）。此項與 R3a 的 outside 相同。"
+  },
+  {
+   "id": "F55",
+   "outside": "tools/cut_content/story.py 仍是舊分類：第 309 行 S4_GROUPS 還有 ([(30, 0x13)], \"另一版的道別\")，第 353 行 S13b 範圍是 (30, 0x14, None)，第 396 行 NOTE_OVERRIDES 只有 (30, 0x14)。應照 R3a 的 outside 改：刪掉 S4_GROUPS 那一組、S13b 範圍改成 (30, 0x13, 0x14)、NOTE_OVERRIDES 補 (30, 0x13) 的說明，再重生 cut_content/story.md 的 story:S4-text 與 story:text-index 區塊（目前第 491 行仍列 FDETXT30 0x13 全文、總表第 1034 行仍標 S4）、cut_content/_index.md 總表（tools/cut_content/cut_content.py index）與 chapters/ch30.md 的 chapter_docs:dialogue 區塊。"
+  }
+ ],
+ "developer_questions": [],
+ "still_open": [
+  {
+   "id": "F22",
+   "confidence": "high",
+   "open_question": "chapters/ch01.md「進入」第 1 步寫「這一步必須在下一步之前，否則地圖的我方 slot 取不到人」，與同一頁第 3 步的 0x051c 重建互相矛盾，應該改成必須在第 3 步之前；這一處不在本項的範圍內，交給負責 ch01.md 的項目處理。"
+  },
+  {
+   "id": "F52",
+   "confidence": "medium",
+   "open_question": "把「邀她同行、她沉默、他獨自離開」與顯示版「約定再會」看成同一場景的改寫而非另一段劇情，是依同位置、逐字相同的開頭、共用台詞與 S13b 既有改寫先例所做的判讀。"
+  },
+  {
+   "id": "F53",
+   "confidence": "medium",
+   "open_question": "把 `0x13`–`0x14` 的「不約而別」看成同一場景被改寫而非另一段劇情是判讀；依據是同一位置、逐字相同的開頭、共用句與不變的分開結局，以及 S13b 既有的改寫擴充先例。"
+  },
+  {
+   "id": "F54",
+   "confidence": "medium",
+   "open_question": "舊稿結尾「不約而別」與顯示版「約定再會」劇情走向相反，把它算成被取代的舊稿（S13b）而非另一版劇情（S4）是分類判斷；依據是同一幕、同一位置、開頭逐字相同、FDETXT64 其餘條目逐字複製 FDETXT30，且 S13b 已收同類的改寫擴充舊稿。"
+  },
+  {
+   "id": "F55",
+   "confidence": "medium",
+   "open_question": "把 `0x13` 的同行邀約與 `0x14` 的獨自離去看成同一場景的改寫而非另一段劇情是判讀；依據是顯示版以逐字相同的開頭接續、位於同一腳本位置、分開的結局不變，並與 S13b 既有的改寫擴充先例一致。"
+  }
+ ],
+ "not_reread": [],
+ "refused_at_landing": [
+  {
+   "id": "F47",
+   "doc": "rebuild_info/pitfalls.md",
+   "why": "old occurs 0 times now"
+  }
+ ],
+ "stopped": ""
+}

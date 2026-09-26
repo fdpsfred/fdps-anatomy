@@ -354,7 +354,9 @@ void fdps_draw_number(unsigned char *dest, int pitch, int value,
 
    The number code's digit map is a bare subtraction, AND EAX,0xff / SUB
    EAX,0x30, with no range check anywhere: sprintf's '-' for a negative value
-   comes out as glyph index -3 and reads six bytes in front of the font sheet.
+   comes out as glyph index -3 and, at the game's 0x20-byte glyph stride
+   (FONT_GLYPH_STRIDE_BYTES in main.c), reads the glyph that starts 0x60 bytes
+   in front of the font sheet.
    That is the original's behaviour and not a mistake in the transcription.
 
    The four uses of a value after a CALL, all checked against the assembly:

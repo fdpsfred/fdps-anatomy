@@ -55,7 +55,7 @@
 | [`glyph/`](glyph/_index.md) | `FDETXT.FON` 字模對倚天字型逐像素比對、不吻合的字做成校對網頁讓開發者填字、合併成字模對照表（票 25.1） |
 | [`guide_offsets/`](guide_offsets/_index.md) | 把攻略站給的資料表偏移對回 `MISC.VFS` 成員，解表並與攻略站數值逐筆比對 |
 | [`guide_scrape/`](guide_scrape/_index.md) | 把攻略站的內容頁抓成原文鏡像並提供搜尋入口 |
-| [`kb_verify/`](kb_verify/_index.md) | 全知識庫逐條驗證（人手寫的文件一份或一段一個 agent，對照 `src/`、Ghidra 與遊戲檔）與跨文件一致性（修正的擴散、重複的擁有者、矛盾、刪減分類重判，一組一個 agent），兩段都是判定寫檔、第二位 agent 確認後才落地；另有全知識庫的確定性檢查與 `_index.md` 一致性檢查（票 25.17） |
+| [`kb_verify/`](kb_verify/_index.md) | 全知識庫逐條驗證（人手寫的文件一份或一段一個 agent，對照 `src/`、Ghidra 與遊戲檔）與跨文件一致性（修正的擴散、重複的擁有者、矛盾、踩雷點候選、刪減分類重判，一組一個 agent），落地時被拒收的修正逐筆重判，驗證者留在頁面外的修正（`src/`／`tests/` 註解、產生器、Ghidra）分組判定後落地；每段都是判定寫檔、第二位 agent 確認後才落地；另有全知識庫的確定性檢查、`_index.md` 一致性檢查與 plate 改動的 Ghidra 轉錄 script（票 25.17） |
 | [`kbd_probe/`](kbd_probe/_index.md) | 量 DOS/4GW 之下手塞 BIOS 鍵盤環形緩衝區後，鍵盤查詢何時看得到那些鍵（測試端要先等一個 timer tick 的依據） |
 | [`logic_naming/`](logic_naming/_index.md) | 遊戲邏輯 function 的語意命名、參數命名、calling convention 判定與行為註解（票 15 專屬的 workflow） |
 | [`map_decode/`](map_decode/_index.md) | 地圖圖層（`DTL`／`MPL`／`ATTR`／`DSC`）與 `MAPnn.DAT`／`.COD` 的解碼、每一格的判讀、不變量檢查、每張地圖的統計表，以及整張地圖的 PNG 算圖（票 25.3；25.8、25.14 用它產生地圖全圖） |

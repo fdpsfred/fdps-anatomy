@@ -450,9 +450,12 @@ int fdps_audio_sample_is_playing(int sample_index)
 
 /* 00030790.  Straight-line, no argument, no local and no branch: a Watcom
    frame (PUSH ESI/EDI/EBP, MOV EBP,ESP, SUB ESP,0x0 -- the original leaves EBX
-   out of the save set, where the rebuild's prologue keeps it, which is
-   register allocation and outside ADR-0001) around exactly two effects, then
-   the mirrored POP sequence and RET.
+   out of the save set because it was declared __cdecl, which Watcom treats as
+   free to clobber EBX: the same body declared __cdecl and built with the game
+   flags matches the original byte for byte.  The rebuild declares it with the
+   undecorated "*" pragma instead (rebuild_info/pitfalls.md), so its prologue
+   saves EBX as well, one register more and no change in behaviour) around
+   exactly two effects, then the mirrored POP sequence and RET.
 
    The increment is written ++x rather than x++ on purpose.  The counter is
    volatile, so post-increment makes the compiler materialise the old value it

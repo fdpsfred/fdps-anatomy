@@ -728,8 +728,8 @@ void fdps_unit_equip_window(int unit_index)
    The class code is byte +0x20 of the unit record, taken zero-extended: MOV
    EAX,[EBP-0x18] / MOV AL,byte ptr [EAX+0x20] / AND EAX,0xff at 00025ffb, so
    a class code of 0x80 or above asks for record 128..255 and not for a record
-   in front of the table.  It is pushed exactly as read -- the INC that every
-   caller of fdps_get_class_record applies is absent here, because PROEQU.DAT
+   in front of the table.  It is pushed exactly as read -- the INC that the
+   per-unit callers of fdps_get_class_record apply is absent here, because PROEQU.DAT
    has no leading default row (see table.h).
 
    The item's type is byte +0x00 of its record, also zero-extended and kept as

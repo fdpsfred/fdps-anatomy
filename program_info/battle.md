@@ -1,6 +1,6 @@
 # 戰鬥數值與回合
 
-**驗證對象**：`FDPS.LE` 的物理攻擊、經驗值與升級、狀態計時器、回合推進與單位死亡。涵蓋的 function 與所在的 `src/` 檔：`0x18d60`、`0x194e0`–`0x1a4bf`（全螢幕戰鬥畫面：`fdps_combat_play_attack_exchange`、`fdps_combat_slide_in_attacker`、`fdps_combat_play_blow`、`fdps_combat_compute_hit_outcome`、`fdps_combat_slide_backdrops`，`src/combat.c`、`src/cmbblow.c`）；`0x120d0`、`0x1c3a0`–`0x1ca99`（地圖上的攻擊與休息，`src/unitatk.c`）；`0x1dd30`、`0x1e370`、`0x1fa30`、`0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（經驗、升級、HP／MP 增減、狀態異常與計時器，`src/unitstat.c`）；`0x119b0`、`0x12960`、`0x12b20`、`0x15470`、`0x1e3f0`、`0x2bae0`、`0x2e0c0`、`0x2ea10`（回合與階段，`src/btlturn.c`）；`0x1d6c0`、`0x1d990`、`0x26180`、`0x274e0`（死亡，`src/death.c`）；`0x109b0`、`0x12550`、`0x24d70`、`0x2d210`、`0x2db50`、`0x2df90`（單位記錄的存取與衍生數值，`src/unit.c`）；`0x15d00`（行動選單，`src/btlact.c`）。以上範圍內的戰鬥規則以此檔為唯一正典。敵方 AI 怎麼選行動見 [`map_ai.md`](map_ai.md)，法術與道具的效果見 [`spell.md`](spell.md)，移動範圍與地形讀取見 [`movement.md`](movement.md)，章節勝敗判定見[`chapter.md`](chapter.md)。
+**驗證對象**：`FDPS.LE` 的物理攻擊、經驗值與升級、狀態計時器、回合推進與單位死亡。涵蓋的 function 與所在的 `src/` 檔：`0x18d60`、`0x194e0`–`0x1a4bf`（全螢幕戰鬥畫面：`fdps_combat_play_attack_exchange`、`fdps_combat_slide_in_attacker`、`fdps_combat_play_blow`、`fdps_combat_compute_hit_outcome`、`fdps_combat_slide_backdrops`，`src/combat.c`、`src/cmbblow.c`）；`0x19250`、`0x192c0`、`0x19310`（全螢幕畫面與法術演出共用的 HP／MP 量表：`fdps_draw_gauge_fill`、`fdps_draw_stat_gauge`、`fdps_draw_unit_hp_mp_gauges`，`src/gauge.c`）；`0x120d0`、`0x1c3a0`–`0x1ca99`（地圖上的攻擊與休息，`src/unitatk.c`）；`0x1dd30`、`0x1e370`、`0x1fa30`、`0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（經驗、升級、HP／MP 增減、狀態異常與計時器，`src/unitstat.c`）；`0x119b0`、`0x12960`、`0x12b20`、`0x15470`、`0x1e3f0`、`0x2bae0`、`0x2e0c0`、`0x2ea10`（回合與階段，`src/btlturn.c`）；`0x1d6c0`、`0x1d990`、`0x26180`、`0x274e0`（死亡，`src/death.c`）；`0x109b0`、`0x12550`、`0x24d70`、`0x2d210`、`0x2db50`、`0x2df90`（單位記錄的存取與衍生數值，`src/unit.c`）；`0x15d00`（行動選單，`src/btlact.c`）。以上範圍內的戰鬥規則以此檔為唯一正典。敵方 AI 怎麼選行動見 [`map_ai.md`](map_ai.md)，法術與道具的效果見 [`spell.md`](spell.md)，移動範圍與地形讀取見 [`movement.md`](movement.md)，章節勝敗判定見[`chapter.md`](chapter.md)。
 
 下文的「記錄 `+n`」指單位記錄（`fdps_unit_record`，0x50 byte，[`data_structures.md`](data_structures.md)）的位移：`+5` 狀態 byte、`+6` 陣營（0 敵方、1 友軍 NPC、2 我方）、`+7` 肖像編號、`+0x20` 職業、`+0x21` 等級、`+0x22`..`+0x27` 六個狀態計時器、`+0x3c` 經驗餘數、`+0x40`／`+0x42` HP／HP 上限、`+0x44`／`+0x46` MP／MP 上限、`+0x48` AP、`+0x4a` DP、`+0x4c` HIT、`+0x4e` EV。
 
@@ -47,6 +47,16 @@
 - 某一擊結束時守方 HP 為 0，剩下的那一擊取消。
 
 n 是整個動畫的命中標記數，連「前導影格」（第 0 格 byte `+4` 指定的前幾格，播在畫面滑向守方之前）也算在內，但前導影格不付款；命中標記若落在前導影格裡，守方只會損失播到的那一部分。出貨的 91 個 `Act%03d.saf` 不會出現這種情形：有前導影格的 7 個（`ACT005`、`ACT020`、`ACT029`、`ACT062`、`ACT093`、`ACT094`、`ACT095`）命中標記全部落在前導影格之後，而且每個檔至少有一格命中標記，所以 n 從不需要補成 1，每一擊都會付完全部傷害。
+
+### 全螢幕畫面的 HP／MP 量表
+
+全螢幕交戰（`fdps_combat_slide_in_attacker`、`fdps_combat_play_blow`（`0x196d0`））與法術演出 `fdps_combat_play_spell_on_targets`（`0x1a4c0`）畫單位的 HP／MP 量表時都呼叫 `fdps_draw_unit_hp_mp_gauges`（`0x19310`，`src/gauge.c`）。它每次都從單位記錄重新讀 HP、HP 上限、MP、MP 上限，所以量表顯示的是呼叫當下已寫回記錄的值。
+
+- **位置**：記錄 `+6` 陣營為 0（敵方）的畫在畫面左下，其他任何陣營值（我方、友軍 NPC）畫在右上。右上的兩條靠右對齊（空的部分在左邊），左下的兩條靠左對齊。
+- **長度**：條寬 125 像素，填色寬度 = ⌈目前值 × 125 ÷ 上限⌉（有號整數運算），所以目前值只要是 1 以上就至少亮 1 像素。上限 ≤ 0 時畫空條；四個欄位以有號 16 位元讀取，上限 −1 也走空條。目前值為負時寬度夾到 0。
+- **目前值大於上限**：寬度超過 125 時填色 blit `fdps_draw_gauge_fill`（`0x19250`）整個不畫，不會夾到 125，那一條顯示為空條而不是滿條。
+
+`fdps_draw_stat_gauge`（`0x192c0`）是同一公式的獨立副本，原版沒有呼叫點：兩條量表的計算都是編譯器在 `fdps_draw_unit_hp_mp_gauges` 裡就地展開的（見 [`architecture.md`](architecture.md) 的 `-oe` 展開本體）。
 
 ### 地圖上路徑
 

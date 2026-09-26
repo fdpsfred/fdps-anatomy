@@ -74,8 +74,8 @@ extern int fdps_map_actor_score_best_attack(int unit_index, int side_select);
    byte of 1 gives.  Only 0, 1 and 3 occur in MAGICDAT.DAT, so this caller never
    produces that collector's select_mode 2.
 
-   The cast distance is handed to the flood fill RAW, straight-line bit 0x10
-   included, which the player's own targeting path decodes and this one does not
+   The cast distance is handed to the flood fill RAW, a line value of 0x10 and
+   up included, which the player's own targeting path decodes and this one does not
    (assets/tables/spells.md).  The range is spread over PROMAP.DAT row 0, whose
    eight terrain costs are all 1, so it counts walkable tiles and walls cut it
    short; a distance of 0 leaves the actor's own tile as the only candidate.
@@ -111,9 +111,9 @@ extern int fdps_map_actor_score_best_spell(int unit_index, int side_select);
    the flag byte fdps_unit_item_count counted with, so it reads entries
    0..count-1 and assumes the eight are packed (rebuild_info/pitfalls.md).
 
-   The item's use_distance byte carries the reach in its low nibble and the
-   straight-line shape in bit 0x10, and the two halves of the search read it
-   differently.  The aim search takes the byte as the reach with a minimum
+   The item's use_distance byte is the reach below 0x10 and a straight line of
+   use_distance - 0x10 tiles from 0x10 up, and the two halves of the search read
+   it differently.  The aim search takes the byte as the reach with a minimum
    distance of 0, which keeps the actor's own tile among the candidates; a line
    item instead searches with reach 1 and minimum distance 1, so its aim tiles
    are its passable orthogonal neighbours.  The shape test then reads the byte

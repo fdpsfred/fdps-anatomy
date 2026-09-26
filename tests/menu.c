@@ -349,7 +349,7 @@ static void ring_stage(void)
    blocks the program's own loaders release -- fdps_field_load_chapter_
    resources frees data_fdps_map_unit_array_ptr when data_fdps_map_unit_count
    is non-zero and data_fdps_cel_sprite_cache_ptr when data_fdps_cel_sprite_
-   cache_count is, fdps_deploy_map_units does the same, and
+   cache_count is, fdps_build_map_unit_array does the same, and
    fdps_shutdown_free_resources frees data_fdps_command_sprite_sheet_ptr
    unguarded.  A case that walks away leaving one of them pointing at a static
    in this file hands a later test's call of one of those loaders a free() of

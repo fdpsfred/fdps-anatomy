@@ -668,11 +668,18 @@ void fdps_chapter_03_event_turn_limit_game_over(int unit_index)
    a last index that are equal.
 
    Nothing bounds the five indices and nothing reads data_fdps_map_unit_count;
-   they are literals in the instruction stream and they are correct for map03's
-   own deployment.  map03.dat already authors all five at behaviour code 0
-   (deployment record byte 0x11, copied into record byte 0x34 at 0002379d), so
-   against the shipped data the merges change nothing unless play has moved one
-   of those units off mode 0.
+   they are literals in the instruction stream and they are runtime unit
+   indices, not deployment record numbers.  The unit array only grows and a
+   retired unit keeps its index, so slots 0..2, the guest hero at 3, the
+   heroine ICON03.DAT deploys at 4, the five cliff-top pursuers at 5..9 and the
+   stand-in at 10 all hold their places even though the cutscene retires the
+   pursuers and the stand-in, and wave 1 lands at 11..0x19 in record order.
+   That puts 0x0d on record 3 (the ice mage) and 0x0f..0x12 on records 6..9,
+   the eastern group map03.dat authors at behaviour code 2 (deployment record
+   byte 0x11, copied into record byte 0x34 at 0002379d).  The merges therefore
+   really take that group off holding position; they are not a no-op, and
+   recomputing the constants from wave 1's record order alone would land them
+   on other units.
 
    fdps_draw_text hands back a cursor in EAX and both call sites discard it:
    after the first the next instruction is the JMP to the epilogue, and after
@@ -756,11 +763,14 @@ void fdps_chapter_04_event_for_turn(int unit_index)
 
    The compare at 00037133 -- CMP EAX,dword ptr [EBP-0x10] / JLE -- is signed
    and inclusive, so the range is unit indices 6 through 0x22 and 0x22 is the
-   last index written, not one past the end.  Chapter 5's map04.dat deploys 33
-   records behind the 5 party slots and the opening script has all of them on
-   the field before a unit can reach the trigger tile, so the walk stays inside
-   the unit array; nothing here reads data_fdps_map_unit_count and nothing
-   bounds the index.
+   last index written, not one past the end.  Chapter 5's map04.dat has 33
+   deployment records, three of them wave 0xff and never deployed.  The guest
+   hero (wave 0) takes index 5 behind the 5 party slots and the opening script
+   appends the other 29 at indices 6..0x22 before a unit can reach the trigger
+   tile -- the wave 2 and wave 3 units among them are retired again inside the
+   cutscene but keep their indices -- so the walk ends on the last unit and
+   stays inside the unit array; nothing here reads data_fdps_map_unit_count
+   and nothing bounds the index.
 
    The merge is the same read-modify-write of the one byte as the chapter 2
    handler's -- MOV DL,[EAX+0x34] / AND DL,0xf0 / MOV DH,[EBP-0x14] / OR DH,DL /

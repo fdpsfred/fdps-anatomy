@@ -966,7 +966,10 @@ def main():
            "emitted C. Regenerate with tools/code_emit/build_routing.py, whose "
            "tables hold the decisions; rebuild_info/code_layout.md explains "
            "them and owns the rule for what to do when a file outgrows its "
-           "budget.")
+           "budget. Every `status` field is the fixed value written here "
+           "(pending, or skip under `skipped`) and no tool reads it: function "
+           "emit progress lives in tools/code_emit/data/emit_state.json and "
+           "landed globals in tools/data_emit/data/manifest.json.")
     out = {
         "_doc": doc,
         "line_budget": LINE_BUDGET,

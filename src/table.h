@@ -117,12 +117,12 @@ extern struct fdps_item_effect *fdps_get_item_record(int item_id);
 
    record_index is the row number in the file and NOT the class code: row 0 is
    a default row -- eight movement costs of 1, critical 0, magic resistance
-   complement 0 -- and class 0x00 lives in row 1, so every caller that has a
-   unit in hand forms the argument as its class code plus one
-   (assets/tables/classes.md).  The two callers that are not asking about a
-   particular unit, fdps_collect_targets_in_range and
-   fdps_map_actor_score_best_item, push a literal 0 and get the default row on
-   purpose.  One caller,
+   complement 0 -- and class 0x00 lives in row 1, so seven of the eleven
+   callers, each with a unit in hand, form the argument as its class code plus
+   one (assets/tables/classes.md).  The three callers that are not asking about
+   a particular unit, fdps_collect_targets_in_range,
+   fdps_map_actor_score_best_item and fdps_map_actor_score_best_spell, push a
+   literal 0 and get the default row on purpose.  The eleventh caller,
    fdps_map_actor_move_toward_nearest_reachable_opponent at 000126b0, omits the
    INC and so reads the previous class's row; that is an original defect the
    rebuild copies rather than repairs (rebuild_info/pitfalls.md).
@@ -147,7 +147,7 @@ extern struct fdps_class_record *fdps_get_class_record(int record_index);
    of struct fdps_class_equip_record.
 
    class_index is the class code RAW -- byte +0x20 of the unit record, pushed
-   without the INC that every caller of fdps_get_class_record applies, because
+   without the INC that the per-unit callers of fdps_get_class_record apply, because
    PROEQU.DAT has no leading default row and class 0x00 is record 0
    (assets/tables/classes.md covers the PROMAP.DAT bias this table does not
    share).  Nothing is checked: the 216-byte file holds 36 records covering
@@ -158,7 +158,8 @@ extern struct fdps_class_record *fdps_get_class_record(int record_index);
 
    The record is a variable-length set and not six fixed slots: the types used
    are stored in ascending order and the unused positions hold 0xFF, never
-   0x00, which is itself a live item type.  The one caller,
+   0x00, which is the type byte of the 25 all-zero ITEM.DAT records 0xE2-0xFA
+   (no item with content carries it).  The one caller,
    fdps_unit_can_equip_item, scans all six positions with no sentinel test at
    all and returns 1 when one of them equals the type byte at +0x00 of the item
    record it was asked about (rebuild_info/pitfalls.md).
