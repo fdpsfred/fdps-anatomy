@@ -14,7 +14,7 @@
 | `map_decode/map_decode.py` | 地圖的全部檔：`MAPnn.DAT`／`.COD`（`parse_map_dat`、`parse_map_cod`）、圖層（`parse_dtl`、`parse_mpl`、`parse_attr`、`parse_dsc`）、整張地圖的載入與一格的判讀（`load_map`、`tile_info`、`classify_cell`、`searchable_cells`）、全圖算圖（`render_map`） | `data_tables`、`data_skill`；需要地圖、部署記錄或寶物的工作（票 25.2 的 `cutscene_script` 待改、25.8、25.14 等） |
 | `text_decode/text_decode.py` | `FDETXTnn.TXT` 的解析、token 分類與文字呈現，以及 `assets/text/glyph_table.json` 的讀取 | `glyph`、`data_tables`；需要遊戲文字的工作（票 25.6、25.8、25.14 等） |
 | `global_text/global_text.py` | `FDETXT00` 各條目的讀取端（`scan_readers`）、額外場景區塊哪些條目由哪支腳本顯示（`classify_scene_block`、`scene_refs`），以及 `src/` 裡 `fdps_draw_text` 條目運算式的解析（`_draw_calls`、`_resolve`、剔除被守衛擋掉的值的 `guarded_out_values` 等）；`FDETXT00` 的分區（`REGIONS`、`MESSAGE_GROUPS`）與兩張文字頁的重建（`build_pages`） | `chapter_docs`、`cut_content`、`data_skill` |
-| `data_tables/data_tables.py` | 名稱（`FDETXT00` 的條目基底）、`ENEMYDAT`／`RANKUP`／`SHOPnn` 與部署記錄的載入（`load` → `Game`）、使用效果代碼的說明（`USE_EFFECTS`），以及 `assets/` 產生表的閘門（`check`）與每張產生表的表頭（`TABLES`） | `chapter_docs`、`cut_content`、`cut_items`、`data_skill`、`kb_verify` |
+| `data_tables/data_tables.py` | 名稱（`FDETXT00` 的條目基底）、`ENEMYDAT`／`RANKUP`／`SHOPnn`／`FRIAPRDA`／`FRILEVUP`／`GETMGTAB`／`ITEM` 與部署記錄的載入（`load` → `Game`）、使用效果代碼的說明（`USE_EFFECTS`），以及 `assets/` 產生表的閘門（`check`）與每張產生表的表頭（`TABLES`） | `chapter_docs`、`cut_content`、`cut_items`、`data_skill`、`growth_table`、`kb_verify` |
 | `cut_content/cut_content.py` | `cut_content/` 的頁面結構（`collect`、`exclusion_ids`、`TOPICS`）與遊戲檔的讀取（`read_game_file`） | `cut_content` 的各產生器、`cut_traces`、`chapter_docs`、`data_skill` |
 | `cut_content/story.py` | 永遠不會顯示的文字與它歸哪個 `cut_content/` 條目（`never_shown_text`、`OWNERS`），以及把遊戲檔的容器解到暫存樹（`dump_tree`，給讀 `vfs_dump` 佈局的工具用） | `data_skill` |
 | `game_mechanics/check_mechanics.py` | 知識庫頁面的共通規則：function 引用對快照、未知符號、相對連結（含 `cut_content/` 的待建連結）、禁引 `workspace/`／`legacy/`、流水帳字眼 | `chapter_docs`、`kb_verify` |
@@ -22,7 +22,7 @@
 | `chapter_docs/chapter_facts.py` | 每一章的機械事實（`facts`）：部署與波次、可搜尋格、事件 slot、本章的過場腳本、章節文字區塊每一條的讀取端（`text_readers`），以及章節頁的產生區塊（`render_block`） | `data_skill` |
 | `chapter_docs/check_chapter.py`、`index.py` | 章節頁與 `chapters/_index.md` 產生區塊的填入與切分（`fill`、`regions`、`build_text`） | `data_skill` |
 
-儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，字模對照表、全域文字頁與額外場景文字頁寫到 `assets/text/`，`data_tables` 產生的表寫進 `assets/` 各正典檔裡標定的表格位置。刪減與未用的素材（PNG、SAF 內嵌音效的 WAV）寫到 `cut_content/media/`，CD 音軌轉成的 WAV 寫到不進版控的 `cut_content/media/cdda/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`，章節頁的逐章判定（波次會不會部署、文字條目的讀取端）寫到 `tools/chapter_docs/judgements/`。
+儲存慣例：腳本放 `tools/{工作名稱}/`，所有可重生的中間產物與輸出放 `workspace/{工作名稱}/`。知識庫不得引用 `workspace/` 下的路徑。例外是本身就要進版控的產物：Ghidra 文字快照寫到 `ghidra_snapshot/`，攻略站鏡像寫到 `docs/guide/`，遊戲資料查詢 skill 的資料集寫到 `.claude/skills/fdps-data/`，角色屬性比較網頁寫到 `docs/character-stat-comparison/`，字模對照表、全域文字頁與額外場景文字頁寫到 `assets/text/`，`data_tables` 產生的表寫進 `assets/` 各正典檔裡標定的表格位置。刪減與未用的素材（PNG、SAF 內嵌音效的 WAV）寫到 `cut_content/media/`，CD 音軌轉成的 WAV 寫到不進版控的 `cut_content/media/cdda/`。人工輸入、無法重生的資料與讀它的腳本放在一起進版控：開發者在字模校對網頁填的字寫到 `tools/glyph/developer_answers.json`，章節頁的逐章判定（波次會不會部署、文字條目的讀取端）寫到 `tools/chapter_docs/judgements/`。
 
 | 子資料夾 | 用途 |
 | --- | --- |
@@ -53,6 +53,7 @@
 | [`ghidra_config/`](ghidra_config/_index.md) | Ghidra MCP 專案設定的正本：把命名檢查調成本專案的慣例 |
 | [`ghidra_snapshot/`](ghidra_snapshot/_index.md) | 把 Ghidra 的分析狀態匯出成文字快照 |
 | [`glyph/`](glyph/_index.md) | `FDETXT.FON` 字模對倚天字型逐像素比對、不吻合的字做成校對網頁讓開發者填字、合併成字模對照表（票 25.1） |
+| [`growth_table/`](growth_table/_index.md) | 角色屬性數值比較網頁：從遊戲資料推導每名可加入角色 × 加入方式 × 轉職路線 × 轉職等級的逐級數值範圍，照 `src/` 逐級重播逐值驗證，產生自足的單檔網頁到 `docs/character-stat-comparison/`，並在 headless Chrome 裡比對頁面 JS 與 Python、操作每個控制項（票 28） |
 | [`guide_offsets/`](guide_offsets/_index.md) | 把攻略站給的資料表偏移對回 `MISC.VFS` 成員，解表並與攻略站數值逐筆比對 |
 | [`guide_scrape/`](guide_scrape/_index.md) | 把攻略站的內容頁抓成原文鏡像並提供搜尋入口 |
 | [`kb_verify/`](kb_verify/_index.md) | 全知識庫逐條驗證（人手寫的文件一份或一段一個 agent，對照 `src/`、Ghidra 與遊戲檔）與跨文件一致性（修正的擴散、重複的擁有者、矛盾、踩雷點候選、刪減分類重判，一組一個 agent），落地時被拒收的修正逐筆重判，驗證者留在頁面外的修正（`src/`／`tests/` 註解、產生器、Ghidra）分組判定後落地；每段都是判定寫檔、第二位 agent 確認後才落地；另有全知識庫的確定性檢查、`_index.md` 一致性檢查與 plate 改動的 Ghidra 轉錄 script（票 25.17） |

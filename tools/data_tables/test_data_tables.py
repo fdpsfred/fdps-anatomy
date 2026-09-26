@@ -38,6 +38,24 @@ class RecordDecoders(unittest.TestCase):
         (rec,) = data_tables.decode_promotions(raw)
         self.assertEqual(rec, [(0x0F, 1, 1), (0x0F, 1, 1), (0x18, 2, 1), (0x21, 3, 2)])
 
+    def test_appearance_record_carries_the_six_base_figures(self):
+        # src/fdpstype.h struct fdps_character_base_record: HP/MP words at +3/+5,
+        # move at +7, AP/DP/DX words at +0x12/+0x14/+0x16, all little-endian.
+        raw = (bytes([0, 0x0D, 3]) + struct.pack("<hh", 42, 40) + bytes([4])
+               + struct.pack("<I", 1 << 5) + bytes([0x2F, 0x82, 0xB7, 0xB4, 0xFF, 0xFF])
+               + struct.pack("<hhh", 20, 10, 3))
+        (rec,) = data_tables.decode_appearance(raw)
+        self.assertEqual((rec["race"], rec["class"], rec["level"], rec["spells"]), (0, 0x0D, 3, [5]))
+        self.assertEqual({k: rec[k] for k in ("hp", "mp", "move", "ap", "dp", "dx")},
+                         {"hp": 42, "mp": 40, "move": 4, "ap": 20, "dp": 10, "dx": 3})
+
+    def test_growth_record_is_five_min_max_pairs_in_ap_dp_dx_hp_mp_order(self):
+        # src/fdpstype.h struct fdps_character_growth; 蘭迪斯's row of assets/characters.md.
+        raw = bytes([4, 6, 3, 5, 2, 3, 9, 11, 3, 4, 0x00])
+        (rec,) = data_tables.decode_growth(raw)
+        self.assertEqual(rec, {"ap": (4, 6), "dp": (3, 5), "dx": (2, 3), "hp": (9, 11),
+                               "mp": (3, 4), "learn": 0x00})
+
     def test_shop_rows_skip_empty_slots_but_keep_stock_after_them(self):
         # src/gamedata.h: SHOP01.DAT's weapon row, stock after two empty slots.
         raw = (bytes([0xB4, 0xDE]) + b"\xff" * 10

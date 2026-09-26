@@ -157,16 +157,33 @@ def decode_shop(data):
 
 
 def decode_appearance(data):
+    """src/fdpstype.h struct fdps_character_base_record; the five base figures
+    are signed words, as fdps_roster_add_character reads them (MOVSX)."""
     out = []
     for r in _records(data, 24, "FRIAPRDA.DAT"):
+        hp, mp = struct.unpack_from("<hh", r, 3)
+        ap, dp, dx = struct.unpack_from("<hhh", r, 0x12)
         out.append({"race": r[0], "class": r[1], "level": r[2],
+                    "hp": hp, "mp": mp, "move": r[7], "ap": ap, "dp": dp, "dx": dx,
                     "spells": [i for i in range(32) if struct.unpack_from("<I", r, 8)[0] >> i & 1],
                     "raw": bytes(r)})
     return out
 
 
+# src/fdpstype.h struct fdps_character_growth: five {min, max} byte pairs.
+GROWTH_ORDER = ("ap", "dp", "dx", "hp", "mp")
+
+
 def decode_growth(data):
-    return [{"learn": r[10]} for r in _records(data, 11, "FRILEVUP.DAT")]
+    """Each stat's two bytes as the file holds them: when they differ the
+    upper one is the exclusive bound of a level-up roll, when they are equal
+    the level-up gains exactly that value (assets/tables/characters.md)."""
+    out = []
+    for r in _records(data, 11, "FRILEVUP.DAT"):
+        rec = {s: (r[k * 2], r[k * 2 + 1]) for k, s in enumerate(GROWTH_ORDER)}
+        rec["learn"] = r[10]
+        out.append(rec)
+    return out
 
 
 def decode_learning(data):

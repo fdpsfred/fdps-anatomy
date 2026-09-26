@@ -19,11 +19,13 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 產生器從遊戲資料推導全部可加入角色 × 轉職路線的逐級成長（最小／最大），與 `src/` 逐項獨立重算 0 誤差
-- [ ] 自足單檔網頁（資料、CSS、JS 全內嵌，零外部引用），三分頁的功能涵蓋面照前作，淺／深主題
-- [ ] 以 `frontend-design:frontend-design` skill 改良介面，設計決定與相對前作的差異記在 `tools/growth_table/_index.md`
-- [ ] 網頁內 JS 的計算結果與 Python 產生器全量比對 0 誤差
-- [ ] `docs/character-stat-comparison/` 發佈檔、`docs/.nojekyll`、`docs/README.md`（含上面的公開範圍說明）；`tools/growth_table/_index.md`、`tools/_index.md`、`README.md` 同步
-- [ ] 發現「照直覺寫就會與原版不同」的事寫進 `rebuild_info/pitfalls.md`；devlog 一篇
+- [x] 產生器從遊戲資料推導全部可加入角色 × 轉職路線的逐級成長（最小／最大），與 `src/` 逐項獨立重算 0 誤差——`src_replay.py` 照 `src/` 逐級重播，涵蓋每種加入等級 × 轉職等級 20–40 × 徽章組合，164,370 個值一致
+- [x] 自足單檔網頁（資料、CSS、JS 全內嵌，零外部引用），三分頁的功能涵蓋面照前作，淺／深主題
+- [x] 以 `frontend-design:frontend-design` skill 改良介面，設計決定與相對前作的差異記在 `tools/growth_table/_index.md`
+- [x] 網頁內 JS 的計算結果與 Python 產生器全量比對 0 誤差——`verify_js.py` 在 headless Chrome 跑頁面原樣的計算 script，164,370 個值一致，另操作每個控制項無例外
+- [x] `docs/character-stat-comparison/` 發佈檔、`docs/.nojekyll`、`docs/README.md`（含上面的公開範圍說明）；`tools/growth_table/_index.md`、`tools/_index.md`、`README.md` 同步
+- [x] 發現「照直覺寫就會與原版不同」的事寫進 `rebuild_info/pitfalls.md`；devlog 一篇——這次碰到的規則 `pitfalls.md` 都已有對應列，沒有新增；devlog `2026-09-26-character-growth-page.md`
+
+超出票面的項目（都寫在 `tools/growth_table/_index.md`）：全頁的轉職等級設定（LV20–40，前作固定 LV40）；蘭斯洛特與珊兩種加入等級都列，法蓮娜、費塔加、瑪麗安用實際留隊的等級；逐級表標出學會的法術；角色明細的小圖在轉職等級早於 40 時多一條「不轉職」；分頁記在網址、深淺色記在瀏覽器本機；比較圖可展開數值表；`verify_js.py` 另操作每個控制項。`src_replay.py` 的加入等級取自 `gen_growth.JOINS`（知識庫的輸入，不是公式），由部署記錄核對與攻略站數值測試把關。

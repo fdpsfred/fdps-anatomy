@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>炎龍騎士團外傳 角色成長</title>
+<meta name="description" content="炎龍騎士團外傳十二名可加入角色，沿每條轉職路線、每一級的 HP／MP／AP／DP／DX 範圍：排名、成長曲線比較、角色明細。">
+<style>
+/* ---------------------------------------------------------------- tokens
+   Cool slate paper and indigo ink; vermilion is kept for one thing only, the
+   church promotion (the seal).  Stat and series colours are the dataviz
+   reference palette, validated on these two chart surfaces. */
+:root{
+  color-scheme:light;
+  --paper:#e8ecf1; --sheet:#fbfcfd; --sheet-2:#f0f3f7;
+  --ink:#18223a; --ink-2:#48536d; --ink-3:#687288;
+  --rule:#d3d9e2; --rule-2:#aeb8c7;
+  --act:#18223a; --act-ink:#fbfcfd;
+  --seal:#b8321f; --seal-ink:#fff7f2;
+  --hp:#e34948; --mp:#2a78d6; --ap:#eb6834; --dp:#1baf7a; --dx:#4a3aa7;
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100;
+  --c5:#e87ba4; --c6:#008300; --c7:#4a3aa7; --c8:#e34948;
+  --neutral:#8c95a8;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#121722; --sheet:#1a2030; --sheet-2:#222a3c;
+    --ink:#e6eaf3; --ink-2:#b3bbcd; --ink-3:#8b95ab;
+    --rule:#2c3447; --rule-2:#46516b;
+    --act:#e6eaf3; --act-ink:#1a2030;
+    --seal:#f0674c; --seal-ink:#1a1210;
+    --hp:#e66767; --mp:#3987e5; --ap:#d95926; --dp:#199e70; --dx:#9085e9;
+    --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500;
+    --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767;
+    --neutral:#6f7a92;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#121722; --sheet:#1a2030; --sheet-2:#222a3c;
+  --ink:#e6eaf3; --ink-2:#b3bbcd; --ink-3:#8b95ab;
+  --rule:#2c3447; --rule-2:#46516b;
+  --act:#e6eaf3; --act-ink:#1a2030;
+  --seal:#f0674c; --seal-ink:#1a1210;
+  --hp:#e66767; --mp:#3987e5; --ap:#d95926; --dp:#199e70; --dx:#9085e9;
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500;
+  --c5:#d55181; --c6:#008300; --c7:#9085e9; --c8:#e66767;
+  --neutral:#6f7a92;
+}
+:root{
+  --f-ming:"Noto Serif TC","Source Han Serif TC","Source Han Serif","Songti TC","PMingLiU","MingLiU",serif;
+  --f-sans:"Microsoft JhengHei UI","Microsoft JhengHei","PingFang TC","Noto Sans TC","Heiti TC",system-ui,sans-serif;
+  --f-num:"Bahnschrift","DIN Alternate","Segoe UI",system-ui,sans-serif;
+}
+
+/* ---------------------------------------------------------------- base */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0; background:var(--paper); color:var(--ink); font:15px/1.6 var(--f-sans)}
+button,input,select{font:inherit; color:inherit}
+h1,h2,h3{margin:0; font-weight:700; line-height:1.25}
+p{margin:0}
+.num{font-family:var(--f-num); font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+.wrap{max-width:1600px; margin:0 auto; padding:0 28px}
+@media (max-width:640px){ .wrap{padding:0 16px} }
+
+/* ---------------------------------------------------------------- masthead */
+.mast{background:var(--sheet); border-bottom:1px solid var(--rule)}
+.mast-in{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:24px 40px; align-items:end; padding:28px 0 20px}
+.title .series{font:400 16px/1.2 var(--f-ming); color:var(--ink-2); letter-spacing:.12em}
+.title h1{font:400 clamp(34px,5vw,50px)/1.1 var(--f-ming); letter-spacing:.06em; margin-top:6px}
+.title .lede{margin-top:12px; max-width:62ch; color:var(--ink-2); font-size:14px}
+.global{display:flex; align-items:flex-end; gap:22px; flex-wrap:wrap}
+.promote{display:grid; gap:4px; min-width:260px}
+.promote label{font-size:13px; color:var(--ink-2)}
+.promote .row{display:flex; align-items:center; gap:12px}
+.promote output{font:600 22px/1 var(--f-num); min-width:3.6em}
+.promote .hint{font-size:12px; color:var(--ink-3); max-width:32ch; line-height:1.45}
+input[type=range]{accent-color:var(--seal); width:170px}
+.theme{border:1px solid var(--rule-2); background:transparent; border-radius:3px; padding:6px 12px; font-size:13px; color:var(--ink-2); cursor:pointer}
+.theme:hover{color:var(--ink); border-color:var(--ink-2)}
+.tabs{display:flex; gap:28px; margin-top:4px}
+.tab{appearance:none; background:none; border:0; border-bottom:3px solid transparent; padding:10px 0 9px;
+  font:500 16px/1 var(--f-sans); color:var(--ink-3); cursor:pointer}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--ink); font-weight:700}
+@media (max-width:760px){ .mast-in{grid-template-columns:1fr} .tabs{gap:18px} .tab{font-size:15px} }
+
+main.wrap{padding-top:28px; padding-bottom:48px}
+[role=tabpanel][hidden]{display:none}
+
+/* ---------------------------------------------------------------- shared controls */
+.seg{display:inline-flex; border:1px solid var(--rule-2); border-radius:3px; overflow:hidden}
+.seg button{appearance:none; border:0; background:transparent; padding:5px 11px; font-size:13px; color:var(--ink-2); cursor:pointer}
+.seg button + button{border-left:1px solid var(--rule-2)}
+.seg button:hover{color:var(--ink); background:var(--sheet-2)}
+.seg button[aria-pressed="true"]{background:var(--act); color:var(--act-ink)}
+.ctlrow{display:flex; flex-wrap:wrap; gap:14px 26px; align-items:center; margin-bottom:18px}
+.ctl{display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink-2)}
+.linkbtn{appearance:none; border:0; background:none; padding:0; color:var(--ink-2); text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-size:13px}
+.linkbtn:hover{color:var(--ink)}
+.intro{max-width:78ch; color:var(--ink-2); font-size:14px; margin-bottom:20px}
+
+/* the seal: the one mark that means "promoted at the church" */
+.seal{display:inline-grid; place-items:center; width:18px; height:18px; border-radius:2px; background:var(--seal); color:var(--seal-ink);
+  font:400 12px/1 var(--f-ming); flex:none}
+
+/* ---------------------------------------------------------------- ranking */
+.rankgrid{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:0; background:var(--sheet); border:1px solid var(--rule)}
+.rcol{padding:14px 14px 16px; min-width:0}
+.rcol + .rcol{border-left:1px solid var(--rule)}
+.rhead{display:grid; gap:9px; padding-bottom:10px; border-bottom:1px solid var(--rule-2); margin-bottom:6px}
+.rhead h2{display:flex; align-items:baseline; gap:8px; font-size:18px}
+.rhead h2 i{width:10px; height:10px; border-radius:2px; align-self:center; flex:none}
+.rhead h2 small{font-size:12px; font-weight:400; color:var(--ink-3)}
+.rctl{display:flex; gap:6px; flex-wrap:wrap}
+.rctl .seg button{padding:3px 8px; font-size:12px}
+.rrow{display:grid; grid-template-columns:22px minmax(0,1fr) auto; grid-template-rows:auto 10px; column-gap:6px; padding:6px 0 7px; border-bottom:1px solid var(--rule)}
+.rrow:last-child{border-bottom:0}
+.rk{grid-row:1/3; font:500 12px/20px var(--f-num); color:var(--ink-3); text-align:right}
+.rname{font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:20px}
+.rname .cl{color:var(--ink-2); font-size:12.5px; margin-left:5px}
+.rname .tag{font-size:11px; color:var(--ink-3); margin-left:5px}
+.rval{font:12px/20px var(--f-num); color:var(--ink-3); white-space:nowrap; text-align:right}
+.rval b{font-weight:600; font-size:14px; color:var(--ink)}
+.rbar{grid-column:2/4; position:relative; height:10px}
+.rbar .track{position:absolute; left:0; right:0; top:4px; height:2px; background:var(--rule)}
+.rbar .span{position:absolute; top:1px; height:8px; border-radius:1px; opacity:.45}
+.rbar .end{position:absolute; top:0; width:3px; height:10px; border-radius:1px}
+.rbar .lo{position:absolute; top:1px; width:2px; height:8px; background:var(--ink-3); opacity:.7}
+.rstat{display:none}
+@media (max-width:1180px){ .rankgrid{grid-template-columns:repeat(3,minmax(0,1fr))} .rcol:nth-child(4){border-left:0} .rcol:nth-child(n+4){border-top:1px solid var(--rule)} }
+@media (max-width:760px){
+  .rstat{display:flex; margin-bottom:12px}
+  .rankgrid{grid-template-columns:minmax(0,1fr)}
+  .rcol{display:none; border-left:0 !important; border-top:0 !important}
+  .rcol.on{display:block}
+}
+
+/* ---------------------------------------------------------------- compare */
+.cmp{display:grid; grid-template-columns:340px minmax(0,1fr); gap:24px; align-items:start}
+.picker{position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; background:var(--sheet); border:1px solid var(--rule); padding:14px 16px 16px}
+.picker h2{font-size:14px; font-weight:500; color:var(--ink-2); display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px}
+.pgroup{display:grid; grid-template-columns:92px minmax(0,1fr); gap:8px; padding:8px 0; border-top:1px solid var(--rule)}
+.pgroup .who{font-size:14px; line-height:1.3}
+.pgroup .who small{display:block; font-size:11.5px; color:var(--ink-3)}
+.pchips{display:flex; flex-wrap:wrap; gap:5px; align-content:start}
+.chip{appearance:none; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--rule-2); background:transparent; border-radius:3px;
+  padding:3px 8px; font-size:13px; color:var(--ink-2); cursor:pointer}
+.chip:hover{border-color:var(--ink-2); color:var(--ink)}
+.chip .dot{width:9px; height:9px; border-radius:50%; border:1.5px solid var(--rule-2)}
+.chip[aria-pressed="true"]{color:var(--ink); border-color:var(--ink-2); background:var(--sheet-2)}
+.chip[aria-pressed="true"] .dot{border-color:transparent}
+.chip:disabled{opacity:.45; cursor:not-allowed}
+.plot{background:var(--sheet); border:1px solid var(--rule); padding:16px 18px 12px; min-width:0}
+.plot h2{font-size:18px}
+.plot .sub{font-size:12.5px; color:var(--ink-3); margin:2px 0 8px}
+.chartbox{position:relative}
+svg.chart{display:block; width:100%; height:auto}
+.legend{display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; color:var(--ink-2); padding-top:8px}
+.legend span{display:inline-flex; align-items:center; gap:7px}
+.legend i{width:16px; height:3px; border-radius:1px}
+.legend i.dash{height:0; border-top:2px dashed var(--ink-3); background:none !important}
+.empty{padding:70px 12px; text-align:center; color:var(--ink-3)}
+.tip{position:absolute; pointer-events:none; background:var(--sheet); border:1px solid var(--rule-2); padding:8px 10px; font-size:12.5px; min-width:150px; z-index:3; opacity:0}
+.tip h3{font-size:12px; font-weight:500; color:var(--ink-3); margin-bottom:4px}
+.tip .r{display:flex; justify-content:space-between; gap:14px; align-items:center; line-height:1.55}
+.tip .r span{display:inline-flex; align-items:center; gap:6px}
+.tip .r i{width:8px; height:8px; border-radius:50%}
+.tip .r em{font-style:normal; color:var(--ink-3); font-size:11.5px}
+.tip b{font-family:var(--f-num); font-weight:600}
+.tview{margin-top:14px; overflow:auto; max-height:460px; border-top:1px solid var(--rule)}
+@media (max-width:900px){ .cmp{grid-template-columns:minmax(0,1fr)} .picker{position:static; max-height:none} }
+
+/* ---------------------------------------------------------------- detail */
+.detail{display:grid; grid-template-columns:200px minmax(0,1fr); gap:28px; align-items:start}
+.roster{position:sticky; top:12px; display:grid; gap:0; border-top:1px solid var(--rule-2)}
+.roster button{appearance:none; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:6px; text-align:left;
+  background:transparent; border:0; border-bottom:1px solid var(--rule); padding:8px 6px; cursor:pointer}
+.roster button:hover{background:var(--sheet)}
+.roster button .n{font-size:15px}
+.roster button .c{font-size:12px; color:var(--ink-3)}
+.roster button .ch{font:12px var(--f-num); color:var(--ink-3)}
+.roster button[aria-current="true"]{background:var(--sheet); box-shadow:inset 3px 0 0 var(--ink)}
+.roster button[aria-current="true"] .n{font-weight:700}
+.dhead{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px 30px; align-items:end; padding-bottom:16px; border-bottom:1px solid var(--rule-2)}
+.dhead h2{font:400 42px/1.1 var(--f-ming); letter-spacing:.05em}
+.dhead .who{margin-top:6px; color:var(--ink-2); font-size:14px}
+.facts{display:grid; grid-template-columns:repeat(3,auto); gap:4px 26px; font-size:13px; color:var(--ink-2)}
+.facts b{display:block; font:600 20px/1.2 var(--f-num); color:var(--ink)}
+.joinpick{margin-top:14px; display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; font-size:13px; color:var(--ink-2)}
+.dsec{margin-top:26px}
+.dsec > h3{font-size:16px; margin-bottom:10px; display:flex; align-items:center; gap:10px}
+.basegrid{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule)}
+.basegrid div{background:var(--sheet); padding:8px 10px}
+.basegrid .k{font-size:12px; color:var(--ink-3)}
+.basegrid .v{font:600 20px/1.3 var(--f-num)}
+.multiples{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
+.mult{background:var(--sheet); border:1px solid var(--rule); padding:10px 10px 4px; min-width:0}
+.mult h4{margin:0 0 2px; font-size:13px; font-weight:600}
+@media (max-width:640px){ .multiples{grid-template-columns:1fr} }
+.forms{width:100%; border-collapse:collapse; font-size:13px; background:var(--sheet); border:1px solid var(--rule)}
+.forms th,.forms td{padding:6px 10px; border-bottom:1px solid var(--rule); text-align:right; white-space:nowrap}
+.forms th:first-child,.forms td:first-child{text-align:left}
+.forms thead th{font-weight:500; color:var(--ink-3); font-size:12px; background:var(--sheet-2)}
+.forms th:last-child{text-align:left}
+.xscroll{overflow-x:auto}
+.forms td.note{text-align:left; color:var(--ink-3); white-space:normal; min-width:14em}
+.routetabs{margin-bottom:10px}
+.lvtable{width:100%; border-collapse:collapse; font-size:13.5px; background:var(--sheet); border:1px solid var(--rule)}
+.lvtable th,.lvtable td{padding:4px 12px; text-align:right; white-space:nowrap}
+.lvtable thead th{position:sticky; top:0; background:var(--sheet-2); color:var(--ink-3); font-weight:500; font-size:12px; border-bottom:1px solid var(--rule-2); z-index:1}
+.lvtable td:first-child,.lvtable th:first-child{text-align:left}
+.lvtable td.sp,.lvtable th:last-child{text-align:left; width:22%}
+.lvtable td.sp{ color:var(--ink-2); font-size:12.5px; white-space:normal}
+.lvtable tbody tr.m10 td{border-bottom:1px solid var(--rule-2)}
+.lvtable tr.promo td{background:color-mix(in srgb,var(--seal) 9%,var(--sheet)); color:var(--ink); border-top:1px solid var(--seal); border-bottom:1px solid var(--seal); padding:7px 12px; text-align:left; white-space:normal}
+.lvtable tr.promo td .seal{margin-right:8px; vertical-align:-3px}
+.rng{font-family:var(--f-num); font-variant-numeric:tabular-nums}
+.rng .lo{color:var(--ink-3)}
+.rng .hi{color:var(--ink); font-weight:600}
+.rng .dash{color:var(--ink-3); margin:0 2px}
+.tscroll{max-height:560px; overflow:auto; border:1px solid var(--rule)}
+.tscroll .lvtable{border:0}
+@media (max-width:900px){ .detail{grid-template-columns:minmax(0,1fr)} .roster{position:static; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); border-top:0}
+  .roster button{min-width:0} .roster button > span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .dhead{grid-template-columns:1fr} }
+@media (max-width:640px){ .basegrid{grid-template-columns:repeat(3,minmax(0,1fr))} .facts{grid-template-columns:repeat(2,auto)} }
+
+/* ---------------------------------------------------------------- method */
+.method{margin-top:40px; background:var(--sheet); border:1px solid var(--rule)}
+.method summary{cursor:pointer; padding:14px 18px; font-size:15px; font-weight:600}
+.method .body{padding:0 18px 18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px 34px; font-size:13.5px; color:var(--ink-2)}
+.method h3{font-size:14px; color:var(--ink); margin-bottom:4px; display:flex; gap:8px; align-items:center}
+.method p + p{margin-top:6px}
+.method code{font-family:var(--f-num); background:var(--sheet-2); padding:0 4px; border-radius:2px; color:var(--ink)}
+footer{padding:22px 0 0; font-size:12.5px; color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+<header class="mast">
+  <div class="wrap">
+    <div class="mast-in">
+      <div class="title">
+        <p class="series">炎龍騎士團外傳</p>
+        <h1>角色成長</h1>
+        <p class="lede">可加入隊伍的十二名角色，從加入那一級到等級上限，沿每一條轉職路線的 HP、MP、AP、DP、DX。升級時每項屬性在一段範圍內隨機成長，所以每個數值都是一段區間：每次都擲到最小的下限，和每次都擲到最大的上限。</p>
+      </div>
+      <div class="global">
+        <div class="promote">
+          <label for="promoteAt">在教會轉職時的等級</label>
+          <div class="row"><input type="range" id="promoteAt" min="20" max="40" step="1" value="40"><output id="promoteOut" for="promoteAt" class="num">LV 40</output></div>
+          <p class="hint">LV20 起可以轉職，轉職後等級回到 1。這個設定套用到三個分頁。</p>
+        </div>
+        <button class="theme" id="themeBtn" type="button">切換深淺色</button>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="檢視">
+      <button class="tab" role="tab" id="tab-rank" aria-controls="panel-rank" aria-selected="true">屬性排名</button>
+      <button class="tab" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false" tabindex="-1">成長曲線比較</button>
+      <button class="tab" role="tab" id="tab-detail" aria-controls="panel-detail" aria-selected="false" tabindex="-1">角色明細</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
+    <p class="intro" id="rankIntro"></p>
+    <div class="rstat seg" id="rankStatPick" role="group" aria-label="屬性"></div>
+    <div class="rankgrid" id="rankGrid"></div>
+  </section>
+
+  <section role="tabpanel" id="panel-compare" aria-labelledby="tab-compare" hidden>
+    <div class="ctlrow">
+      <div class="ctl">屬性 <div class="seg" id="cmpStat" role="group" aria-label="屬性"></div></div>
+      <div class="ctl">數值 <div class="seg" id="cmpVer" role="group" aria-label="數值">
+        <button type="button" data-v="max" aria-pressed="true">上限</button><button type="button" data-v="min" aria-pressed="false">下限</button><button type="button" data-v="band" aria-pressed="false">範圍</button></div></div>
+      <button type="button" class="linkbtn" id="cmpTable" aria-pressed="false">顯示數值表</button>
+    </div>
+    <div class="cmp">
+      <div class="picker">
+        <h2><span>選擇路線（最多 8 條）</span><button type="button" class="linkbtn" id="cmpClear">全部取消</button></h2>
+        <div id="pickList"></div>
+      </div>
+      <div class="plot">
+        <h2 id="cmpTitle"></h2>
+        <p class="sub" id="cmpSub"></p>
+        <div class="chartbox" id="cmpChart"></div>
+        <div class="legend" id="cmpLegend"></div>
+        <div class="tview" id="cmpTableView" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section role="tabpanel" id="panel-detail" aria-labelledby="tab-detail" hidden>
+    <div class="detail">
+      <nav class="roster" id="roster" aria-label="角色"></nav>
+      <div id="dpanel"></div>
+    </div>
+  </section>
+
+  <details class="method">
+    <summary>數值怎麼算出來的</summary>
+    <div class="body">
+      <div>
+        <h3>加入時的數值</h3>
+        <p>角色建立時，AP、DP、DX ＝ 基礎值 ＋ 等級 × 最小成長，HP、MP ＝ 基礎值 ＋（等級 − 1）× 最小成長。兩組公式確實不同。</p>
+        <p>加入等級不一定是資料表的等級欄：法蓮娜、費塔加、瑪麗安在加入那一章的戰場上有同一名角色，過關時以戰場上的記錄留隊；蘭斯洛特與珊要看到場前有沒有過關，兩種等級都列出。</p>
+      </div>
+      <div>
+        <h3>每一級的成長</h3>
+        <p>升級時五項屬性依序各擲一次：成長表記著一對數字 <code>(a, b)</code>，兩數不同時成長落在 a 到 b − 1，<b>擲不到 b</b>；兩數相同時固定成長 a。</p>
+        <p>下限是每次都擲到 a，上限是每次都擲到最大值。實際遊玩會落在兩者之間。</p>
+      </div>
+      <div>
+        <h3><span class="seal" aria-hidden="true">轉</span>教會轉職</h3>
+        <p>蘭迪斯到布蘭多九人在 LV20 以上可轉職。轉職當下各項屬性直接加上新職業成長表的 b（比升級最多擲得到的多 1），等級回到 1，之後依新職業的成長升到 LV40。</p>
+        <p>路線由身上的徽章決定：勇者徽章只對蘭迪斯有效；同時帶光之徽章與暗之徽章時走光之徽章那條。走到和不帶徽章相同的職業時，徽章不會被用掉。</p>
+      </div>
+      <div>
+        <h3>等級上限</h3>
+        <p>蓋亞可以升到 LV99，其他人 LV40。蓋亞升上 LV40 那一次會丟掉累積到一半的經驗值（原版的 bug），不影響這裡的數值。蓋亞、珊、蘭斯洛特不能轉職。</p>
+      </div>
+      <div>
+        <h3>沒有算進來的</h3>
+        <p>裝備、以道具提高的屬性（AP、DP、DX 各 +7，HP、MP 上限 +15，以及蓋亞專用的強化道具）都不在內。這裡的 AP、DP 是不含裝備的基礎值；命中與迴避等於 DX 加上裝備的加成，所以不另外列。</p>
+      </div>
+      <div>
+        <h3>資料來源</h3>
+        <p>基礎值、成長表與轉職路線取自遊戲資料檔 <code>FRIAPRDA.DAT</code>、<code>FRILEVUP.DAT</code>、<code>RANKUP.DAT</code>，公式取自逆向還原的遊戲程式；每一個數值都與照程式逐級模擬的結果核對過。</p>
+      </div>
+    </div>
+  </details>
+  <footer>炎龍騎士團外傳（Flame Dragon Plus）逆向工程專案。數值是界限，不是平均。</footer>
+</main>
+
+<script id="growthData" type="application/json">{"stats":["hp","mp","ap","dp","dx"],"promote_min":20,"cap_normal":40,"chars":[{"id":0,"name":"蘭迪斯","cls":"劍士","race":"人類","chapter":1,"move":4,"cap":40,"base":{"hp":56,"mp":0,"ap":14,"dp":4,"dx":3},"growth":{"hp":[9,11],"mp":[3,4],"ap":[4,6],"dp":[3,5],"dx":[2,3]},"learn":[[16,"狂暴巨燄"],[30,"烈獄之火"]],"joins":[{"level":1,"how":"roster"}],"routes":[{"form":15,"cls":"劍聖","move_bonus":1,"badge":null,"routes":[0,1],"growth":{"hp":[14,20],"mp":[7,10],"ap":[6,9],"dp":[10,14],"dx":[2,3]},"learn":[[8,"爆炎狂龍"]]},{"form":24,"cls":"劍帝","move_bonus":1,"badge":"暗之徽章","routes":[2],"growth":{"hp":[11,14],"mp":[5,7],"ap":[9,13],"dp":[6,8],"dx":[2,3]},"learn":[[8,"魔龍霸炎"],[15,"爆炎狂龍"]]},{"form":33,"cls":"英雄","move_bonus":2,"badge":"勇者徽章","routes":[3],"growth":{"hp":[18,20],"mp":[14,18],"ap":[15,18],"dp":[10,13],"dx":[3,4]},"learn":[[3,"魔龍霸炎"],[6,"痊癒之泉"],[10,"爆炎狂龍"],[15,"傳送術"],[20,"聖龍烈霸斬"]]}]},{"id":6,"name":"尤利安","cls":"僧侶","race":"人類","chapter":2,"move":4,"cap":40,"base":{"hp":48,"mp":30,"ap":10,"dp":3,"dx":2},"growth":{"hp":[8,10],"mp":[4,6],"ap":[4,6],"dp":[2,4],"dx":[1,2]},"learn":[[10,"封魔咒術"],[16,"治癒之風"],[28,"痊癒之泉"]],"joins":[{"level":3,"how":"roster"}],"routes":[{"form":21,"cls":"大僧侶","move_bonus":1,"badge":null,"routes":[0,1],"growth":{"hp":[11,17],"mp":[6,10],"ap":[6,9],"dp":[6,10],"dx":[2,2]},"learn":[[5,"甦癒術"],[10,"鎮魂之歌"]]},{"form":30,"cls":"大祭司","move_bonus":1,"badge":"暗之徽章","routes":[2],"growth":{"hp":[12,15],"mp":[9,15],"ap":[9,13],"dp":[4,8],"dx":[2,2]},"learn":[[2,"光之箭"],[10,"神之祝福"],[15,"鎮魂之歌"],[20,"聖光柱"],[25,"甦癒術"]]}]},{"id":4,"name":"亞克","cls":"騎士","race":"人類","chapter":3,"move":6,"cap":40,"base":{"hp":64,"mp":0,"ap":16,"dp":5,"dx":4},"growth":{"hp":[10,13],"mp":[2,4],"ap":[5,7],"dp":[3,5],"dx":[2,2]},"learn":[],"joins":[{"level":7,"how":"roster"}],"routes":[{"form":19,"cls":"聖騎士","move_bonus":1,"badge":null,"routes":[0,1],"growth":{"hp":[13,18],"mp":[5,9],"ap":[7,11],"dp":[9,13],"dx":[2,3]},"learn":[[15,"痊癒之泉"]]},{"form":28,"cls":"大地騎士","move_bonus":1,"badge":"暗之徽章","routes":[2],"growth":{"hp":[15,20],"mp":[3,4],"ap":[10,16],"dp":[6,10],"dx":[2,3]},"learn":[[10,"強力衝擊"]]}]},{"id":1,"name":"法蓮娜","cls":"魔導士","race":"人類","chapter":4,"move":4,"cap":40,"base":{"hp":42,"mp":40,"ap":20,"dp":10,"dx":3},"growth":{"hp":[6,9],"mp":[7,10],"ap":[2,4],"dp":[2,4],"dx":[2,3]},"learn":[[11,"麻痺術"],[15,"奔雷彈"],[20,"恢復之光"],[25,"暴雷絕擊"]],"joins":[{"level":8,"how":"stays","roster_level":3}],"routes":[{"form":16,"cls":"法師","move_bonus":1,"badge":null,"routes":[0,1],"growth":{"hp":[12,16],"mp":[11,16],"ap":[3,6],"dp":[6,10],"dx":[2,3]},"learn":[[2,"治癒之風"],[6,"光之箭"],[12,"聖光柱"],[15,"痊癒之泉"],[20,"審判之雷"]]},{"form":25,"cls":"巫師","move_bonus":1,"badge":"暗之徽章","routes":[2],"growth":{"hp":[10,12],"mp":[12,16],"ap":[7,12],"dp":[6,9],"dx":[2,2]},"learn":[[2,"治癒之風"],[6,"震空重力彈"],[12,"審判之雷"],[18,"超重力黑洞"],[25,"萬神降臨"]]}]},{"id":3,"name":"裘娜","cls":"戰士","race":"人類","chapter":7,"move":4,"cap":40,"base":{"hp":85,"mp":0,"ap":30,"dp":0,"dx":0},"growth":{"hp":[10,16],"mp":[2,4],"ap":[5,11],"dp":[4,6],"dx":[1,2]},"learn":[],"joins":[{"level":15,"how":"roster"}],"routes":[{"form":27,"cls":"狂戰士","move_bonus":1,"badge":null,"routes":[0,2],"growth":{"hp":[15,24],"mp":[3,4],"ap":[15,22],"dp":[7,10],"dx":[2,2]},"learn":[[8,"金剛斬"]]},{"form":18,"cls":"聖戰士","move_bonus":1,"badge":"光之徽章","routes":[1],"growth":{"hp":[12,18],"mp":[4,6],"ap":[10,16],"dp":[10,16],"dx":[2,2]},"learn":[[5,"金剛斬"]]}]},{"id":2,"name":"費塔加","cls":"魔導士","race":"人類","chapter":8,"move":4,"cap":40,"base":{"hp":78,"mp":65,"ap":8,"dp":6,"dx":8},"growth":{"hp":[6,8],"mp":[7,10],"ap":[3,6],"dp":[2,6],"dx":[2,4]},"learn":[[15,"絕殺冰封"],[20,"裂地術"],[28,"冰魔超速彈"]],"joins":[{"level":15,"how":"stays","roster_level":13}],"routes":[{"form":26,"cls":"巫師","move_bonus":1,"badge":null,"routes":[0,2],"growth":{"hp":[8,12],"mp":[8,11],"ap":[4,7],"dp":[5,10],"dx":[2,2]},"learn":[[13,"封神裂震"],[17,"極度冰凍"]]},{"form":17,"cls":"法師","move_bonus":1,"badge":"光之徽章","routes":[1],"growth":{"hp":[12,14],"mp":[13,17],"ap":[6,10],"dp":[8,14],"dx":[2,3]},"learn":[[2,"治癒之風"],[6,"光之箭"],[12,"聖光柱"],[17,"極度冰凍"],[22,"痊癒之泉"],[26,"神行術"]]}]},{"id":8,"name":"布蘭多","cls":"技師","race":"人類","chapter":9,"move":5,"cap":40,"base":{"hp":50,"mp":0,"ap":34,"dp":8,"dx":0},"growth":{"hp":[9,11],"mp":[3,5],"ap":[4,6],"dp":[3,5],"dx":[3,3]},"learn":[],"joins":[{"level":14,"how":"roster"}],"routes":[{"form":23,"cls":"機械伯爵","move_bonus":1,"badge":null,"routes":[0,1],"growth":{"hp":[13,17],"mp":[4,6],"ap":[7,10],"dp":[7,10],"dx":[3,3]},"learn":[[10,"麻痺術"]]},{"form":32,"cls":"機械大師","move_bonus":1,"badge":"暗之徽章","routes":[2],"growth":{"hp":[11,15],"mp":[7,12],"ap":[10,15],"dp":[6,8],"dx":[3,3]},"learn":[[12,"獄炎烈破彈"]]}]},{"id":9,"name":"蓋亞","cls":"機兵","race":"機械","chapter":9,"move":4,"cap":99,"base":{"hp":60,"mp":0,"ap":0,"dp":0,"dx":0},"growth":{"hp":[12,15],"mp":[3,5],"ap":[7,9],"dp":[5,7],"dx":[0,0]},"learn":[],"joins":[{"level":16,"how":"roster"}],"routes":[]},{"id":7,"name":"琴琴","cls":"武道家","race":"人類","chapter":11,"move":5,"cap":40,"base":{"hp":60,"mp":12,"ap":60,"dp":16,"dx":0},"growth":{"hp":[12,15],"mp":[2,4],"ap":[8,11],"dp":[5,7],"dx":[3,4]},"learn":[],"joins":[{"level":15,"how":"roster"}],"routes":[{"form":31,"cls":"武神","move_bonus":1,"badge":null,"routes":[0,2],"growth":{"hp":[10,15],"mp":[2,4],"ap":[12,17],"dp":[5,9],"dx":[3,4]},"learn":[]},{"form":22,"cls":"武聖","move_bonus":1,"badge":"光之徽章","routes":[1],"growth":{"hp":[14,20],"mp":[3,4],"ap":[11,14],"dp":[9,14],"dx":[3,3]},"learn":[]}]},{"id":5,"name":"瑪麗安","cls":"弓兵","race":"人類","chapter":15,"move":4,"cap":40,"base":{"hp":98,"mp":0,"ap":50,"dp":20,"dx":10},"growth":{"hp":[8,10],"mp":[2,4],"ap":[5,7],"dp":[3,5],"dx":[3,4]},"learn":[],"joins":[{"level":20,"how":"stays","roster_level":10}],"routes":[{"form":29,"cls":"狙擊王","move_bonus":1,"badge":null,"routes":[0,2],"growth":{"hp":[12,15],"mp":[3,4],"ap":[10,17],"dp":[5,8],"dx":[3,3]},"learn":[[10,"腐毒術"],[20,"麻痺術"]]},{"form":20,"cls":"神箭手","move_bonus":1,"badge":"光之徽章","routes":[1],"growth":{"hp":[14,18],"mp":[4,6],"ap":[9,13],"dp":[7,10],"dx":[3,3]},"learn":[[2,"治癒之風"],[13,"流星箭"]]}]},{"id":11,"name":"蘭斯洛特","cls":"聖騎士","race":"人類","chapter":19,"move":8,"cap":40,"base":{"hp":420,"mp":0,"ap":220,"dp":140,"dx":60},"growth":{"hp":[14,16],"mp":[0,0],"ap":[10,16],"dp":[10,16],"dx":[3,4]},"learn":[],"joins":[{"level":2,"how":"arrives","turn":6},{"level":15,"how":"early","turn":6}],"routes":[]},{"id":10,"name":"珊","cls":"法師","race":"人類","chapter":24,"move":5,"cap":40,"base":{"hp":266,"mp":232,"ap":80,"dp":100,"dx":55},"growth":{"hp":[11,14],"mp":[12,14],"ap":[6,8],"dp":[6,8],"dx":[4,5]},"learn":[[20,"超重力黑洞"]],"joins":[{"level":15,"how":"arrives","turn":7},{"level":10,"how":"early","turn":7}],"routes":[]}]}</script>
+<script id="model">
+"use strict";
+/* The level model, the only part of the page that computes figures.  Kept in
+   its own script so tools/growth_table/verify_js.py can run it unchanged
+   against the Python generator. */
+const GROWTH = (function(){
+  const STATS = ["hp","mp","ap","dp","dx"];
+  const ENTRY_BY_LEVEL = {ap:true, dp:true, dx:true};
+  function gainRange(pair){ return pair[1] === pair[0] ? [pair[0], pair[0]] : [pair[0], pair[1] - 1]; }
+  function entry(c, level){
+    const o = {};
+    for (const s of STATS) o[s] = c.base[s] + c.growth[s][0] * (ENTRY_BY_LEVEL[s] ? level : level - 1);
+    return o;
+  }
+  function baseRows(c, join){
+    const start = entry(c, join), rows = [];
+    for (let lv = join; lv <= c.cap; lv++){
+      const n = lv - join, mn = {}, mx = {};
+      for (const s of STATS){ const g = gainRange(c.growth[s]); mn[s] = start[s] + g[0] * n; mx[s] = start[s] + g[1] * n; }
+      rows.push({lv, min:mn, max:mx});
+    }
+    return rows;
+  }
+  function promoRows(carry, route, cap){
+    const rows = [];
+    for (let lv = 1; lv <= cap; lv++){
+      const n = lv - 1, mn = {}, mx = {};
+      for (const s of STATS){
+        const g = gainRange(route.growth[s]), bonus = route.growth[s][1];
+        mn[s] = carry.min[s] + bonus + g[0] * n; mx[s] = carry.max[s] + bonus + g[1] * n;
+      }
+      rows.push({lv, min:mn, max:mx});
+    }
+    return rows;
+  }
+  function promoteLevels(join, promoteMin, cap){
+    const out = [];
+    for (let p = Math.max(promoteMin, join); p <= cap; p++) out.push(p);
+    return out;
+  }
+  return {STATS, gainRange, baseRows, promoRows, promoteLevels};
+})();
+</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("growthData").textContent);
+const {STATS} = GROWTH;
+const CAP = DATA.cap_normal, PROMOTE_MIN = DATA.promote_min;
+const LABEL = {hp:"HP", mp:"MP", ap:"AP", dp:"DP", dx:"DX"};
+/* "上限／下限" on this page mean the ceiling and floor of a figure, so the stat
+   names avoid them: HP and MP are the full values, AP and DP are without
+   equipment. */
+const NAME = {hp:"生命", mp:"魔力", ap:"攻擊", dp:"防禦", dx:"敏捷"};
+const FULL = {hp:"HP", mp:"MP", ap:"AP（不含裝備）", dp:"DP（不含裝備）", dx:"DX"};
+const CHARS = DATA.chars, BY_ID = {};
+CHARS.forEach(c => BY_ID[c.id] = c);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
+
+let promoteAt = 40;
+
+/* ---------------------------------------------------------------- builds
+   A build is one way a character can be played: a join level and, for the
+   nine who can promote, one route.  Its path is the base rows up to the
+   promotion level and then the promoted rows; x runs on continuously
+   (promoted LV n sits at promotion level + n). */
+const BUILDS = [];
+CHARS.forEach(c => c.joins.forEach((j, ji) => {
+  if (c.routes.length) c.routes.forEach((r, ri) => BUILDS.push({key:c.id+"/"+ji+"/"+ri, c, ji, ri}));
+  else BUILDS.push({key:c.id+"/"+ji+"/-", c, ji, ri:-1});
+}));
+const BUILD_BY_KEY = {}; BUILDS.forEach(b => BUILD_BY_KEY[b.key] = b);
+const baseCache = {};
+function baseRowsOf(c, ji){
+  const k = c.id + "/" + ji;
+  return baseCache[k] || (baseCache[k] = GROWTH.baseRows(c, c.joins[ji].level));
+}
+function effectivePromote(c, ji){ return Math.max(promoteAt, PROMOTE_MIN, c.joins[ji].level); }
+function pathOf(b){
+  const base = baseRowsOf(b.c, b.ji);
+  if (b.ri < 0) return {base, promo:null, at:null};
+  const at = effectivePromote(b.c, b.ji);
+  const carry = base.find(r => r.lv === at);
+  return {base: base.filter(r => r.lv <= at), promo: GROWTH.promoRows(carry, b.c.routes[b.ri], CAP), at};
+}
+function points(b){
+  const p = pathOf(b), cls0 = b.c.cls, pts = [];
+  p.base.forEach(r => pts.push({x:r.lv, lv:r.lv, cls:cls0, min:r.min, max:r.max}));
+  if (p.promo){ const cl = b.c.routes[b.ri].cls; p.promo.forEach(r => pts.push({x:p.at + r.lv, lv:r.lv, cls:cl, min:r.min, max:r.max})); }
+  return pts;
+}
+function finalRow(b){ const pts = points(b); return pts[pts.length - 1]; }
+function joinTag(b){ return b.c.joins.length > 1 ? "LV" + b.c.joins[b.ji].level + " 加入" : ""; }
+function buildName(b){ return b.ri < 0 ? b.c.name : b.c.name + "　" + b.c.routes[b.ri].cls; }
+function buildLong(b){
+  const t = joinTag(b);
+  return (b.ri < 0 ? b.c.name + "（" + b.c.cls + "）" : b.c.name + "（" + b.c.cls + "→" + b.c.routes[b.ri].cls + "）") + (t ? " " + t : "");
+}
+function rng(lo, hi){
+  if (lo === hi) return '<span class="rng"><span class="hi">' + hi + '</span></span>';
+  return '<span class="rng"><span class="lo">' + lo + '</span><span class="dash">–</span><span class="hi">' + hi + '</span></span>';
+}
+
+/* ---------------------------------------------------------------- tabs, theme, promotion level */
+const TABS = ["rank","compare","detail"];
+function selectTab(name, focus){
+  TABS.forEach(t => {
+    const tab = document.getElementById("tab-" + t), on = t === name;
+    tab.setAttribute("aria-selected", on); tab.tabIndex = on ? 0 : -1;
+    document.getElementById("panel-" + t).hidden = !on;
+    if (on && focus) tab.focus();
+  });
+  try { history.replaceState(null, "", "#" + name); } catch (e) {}
+  renderActive();
+}
+TABS.forEach((t, i) => {
+  const tab = document.getElementById("tab-" + t);
+  tab.onclick = () => selectTab(t);
+  tab.onkeydown = e => {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft"){
+      e.preventDefault(); selectTab(TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length], true);
+    }
+  };
+});
+function activeTab(){ return TABS.find(t => !document.getElementById("panel-" + t).hidden); }
+function renderActive(){
+  const t = activeTab();
+  if (t === "rank") renderRanking(); else if (t === "compare") renderCompare(); else renderDetail();
+}
+document.getElementById("themeBtn").onclick = () => {
+  const root = document.documentElement, cur = root.getAttribute("data-theme");
+  const dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  const next = dark ? "light" : "dark";
+  root.setAttribute("data-theme", next);
+  try { localStorage.setItem("fdps-growth-theme", next); } catch (e) {}
+  renderActive();
+};
+try { const saved = localStorage.getItem("fdps-growth-theme"); if (saved) document.documentElement.setAttribute("data-theme", saved); } catch (e) {}
+const promoteInput = document.getElementById("promoteAt"), promoteOut = document.getElementById("promoteOut");
+promoteInput.min = PROMOTE_MIN; promoteInput.max = CAP;
+promoteInput.oninput = () => { promoteAt = +promoteInput.value; promoteOut.textContent = "LV " + promoteAt; renderActive(); };
+
+/* ---------------------------------------------------------------- ranking */
+const RANK = {}; STATS.forEach(s => RANK[s] = {key:"max", order:"desc"});
+let rankMobileStat = "hp";
+function renderRanking(){
+  document.getElementById("rankIntro").textContent =
+    "每一欄依該屬性在等級上限時的數值排列：可轉職的九人每條轉職路線各一列（在 LV" + promoteAt +
+    " 轉職），蓋亞到 LV99，其餘到 LV40。淺色條是下限到上限的範圍，粗的一端是目前排序用的那一端。";
+  const pick = document.getElementById("rankStatPick");
+  pick.innerHTML = STATS.map(s => '<button type="button" data-s="' + s + '" aria-pressed="' + (s === rankMobileStat) + '">' + LABEL[s] + '</button>').join("");
+  pick.querySelectorAll("button").forEach(b => b.onclick = () => { rankMobileStat = b.dataset.s; renderRanking(); });
+  document.getElementById("rankGrid").innerHTML = STATS.map(rankColumn).join("");
+}
+function rankColumn(stat){
+  const st = RANK[stat];
+  const items = BUILDS.map(b => { const f = finalRow(b); return {b, lo:f.min[stat], hi:f.max[stat], v:f[st.key][stat]}; });
+  const top = Math.max(1, ...items.map(i => i.hi));
+  items.sort((a, z) => st.order === "desc" ? z.v - a.v || z.hi - a.hi : a.v - z.v || a.hi - z.hi);
+  const rows = items.map((it, i) => {
+    const b = it.b, t = joinTag(b), clsText = b.ri < 0 ? b.c.cls : b.c.routes[b.ri].cls;
+    const L = it.lo / top * 100, H = it.hi / top * 100, E = (st.key === "max" ? H : L);
+    return '<div class="rrow" title="' + esc(buildLong(b)) + '">' +
+      '<span class="rk">' + (i + 1) + '</span>' +
+      '<span class="rname">' + esc(b.c.name) + '<span class="cl">' + esc(clsText) + '</span>' + (t ? '<span class="tag">' + t + '</span>' : '') + '</span>' +
+      '<span class="rval">' + (it.lo === it.hi ? '<b>' + it.hi + '</b>' :
+        (st.key === "max" ? it.lo + ' – <b>' + it.hi + '</b>' : '<b>' + it.lo + '</b> – ' + it.hi)) + '</span>' +
+      '<span class="rbar" aria-hidden="true"><span class="track"></span>' +
+        '<span class="span" style="left:' + L.toFixed(2) + '%;width:' + Math.max(H - L, .6).toFixed(2) + '%;background:var(--' + stat + ')"></span>' +
+        '<span class="end" style="left:calc(' + E.toFixed(2) + '% - 1.5px);background:var(--' + stat + ')"></span></span>' +
+      '</div>';
+  }).join("");
+  const seg = (kind, opts) => '<div class="seg" role="group" data-stat="' + stat + '" data-kind="' + kind + '">' +
+    opts.map(([v, label]) => '<button type="button" data-v="' + v + '" aria-pressed="' + (st[kind] === v) + '">' + label + '</button>').join("") + '</div>';
+  return '<div class="rcol' + (stat === rankMobileStat ? ' on' : '') + '" data-stat="' + stat + '">' +
+    '<div class="rhead"><h2><i style="background:var(--' + stat + ')"></i>' + LABEL[stat] + '<small>' + NAME[stat] + '</small></h2>' +
+    '<div class="rctl">' + seg("key", [["max","依上限"],["min","依下限"]]) + seg("order", [["desc","高到低"],["asc","低到高"]]) + '</div></div>' +
+    rows + '</div>';
+}
+document.getElementById("rankGrid").addEventListener("click", e => {
+  const btn = e.target.closest(".seg button"); if (!btn) return;
+  const g = btn.parentElement; RANK[g.dataset.stat][g.dataset.kind] = btn.dataset.v;
+  const col = document.querySelector('.rcol[data-stat="' + g.dataset.stat + '"]');
+  col.outerHTML = rankColumn(g.dataset.stat);
+  const again = document.querySelector('.rcol[data-stat="' + g.dataset.stat + '"] .seg[data-kind="' + g.dataset.kind + '"] button[data-v="' + btn.dataset.v + '"]');
+  if (again) again.focus();
+});
+
+/* ---------------------------------------------------------------- line chart (SVG) */
+/* A y axis of four or five round steps: the step is 1, 2, 2.5 or 5 times a
+   power of ten, and the top is the first multiple of it at or above the data. */
+function yScale(v){
+  const rough = Math.max(v, 1) / 4, p = Math.pow(10, Math.floor(Math.log10(rough))), n = rough / p;
+  const step = Math.max(1, (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p);
+  return {step, top: Math.ceil(Math.max(v, 1) / step) * step};
+}
+/* series: [{name, color, pts:[{x, lv, cls, lo, hi}]}]; opt: {mode:"max"|"min"|"band", h, promoteX, labels, compact} */
+function lineChart(box, series, opt){
+  const W = Math.max(280, box.clientWidth || 640), H = opt.h || Math.round(Math.max(300, Math.min(520, W * .5)));
+  /* Line-end labels for up to four lines, where there is room for them; the
+     legend below the chart names every line either way. */
+  const labels = opt.labels && series.length <= 4 && W >= 560;
+  const m = {t: opt.compact ? 8 : 22, r: labels ? 150 : 14, b: opt.compact ? 22 : 38, l: opt.compact ? 36 : 46};
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  let xmax = 10, ymax = 1;
+  series.forEach(s => s.pts.forEach(p => { if (p.x > xmax) xmax = p.x; if (p.hi > ymax) ymax = p.hi; }));
+  const ys = yScale(ymax); ymax = ys.top;
+  const X = x => m.l + (x - 1) / Math.max(1, xmax - 1) * iw, Y = y => m.t + ih - y / ymax * ih;
+  const grid = css("--rule"), ink3 = css("--ink-3"), ink2 = css("--ink-2"), seal = css("--seal"), sheet = css("--sheet");
+  const font = 'font-family="' + esc(css("--f-num") || "sans-serif") + '"';
+  let svg = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opt.aria || "") + '">';
+  for (let v = 0; v <= ymax + 1e-9; v += ys.step){
+    const y = Y(v);
+    svg += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y + '" y2="' + y + '" stroke="' + grid + '"/>';
+    svg += '<text x="' + (m.l - 6) + '" y="' + (y + 4) + '" text-anchor="end" font-size="11" fill="' + ink3 + '" ' + font + '>' + Math.round(v) + '</text>';
+  }
+  const step = xmax <= 30 ? 5 : xmax <= 60 ? 10 : 20;
+  for (let v = step; v <= xmax; v += step){
+    svg += '<text x="' + X(v) + '" y="' + (m.t + ih + 15) + '" text-anchor="middle" font-size="11" fill="' + ink3 + '" ' + font + '>' + v + '</text>';
+  }
+  if (!opt.compact) svg += '<text x="' + (m.l + iw / 2) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="12" fill="' + ink2 + '">' + esc(opt.xTitle || "等級") + '</text>';
+  if (opt.promoteX){
+    const px = X(opt.promoteX);
+    svg += '<line x1="' + px + '" x2="' + px + '" y1="' + m.t + '" y2="' + (m.t + ih) + '" stroke="' + seal + '" stroke-width="1.5"/>';
+    if (!opt.compact){
+      svg += '<rect x="' + (px - 9) + '" y="' + (m.t - 20) + '" width="18" height="18" rx="2" fill="' + seal + '"/>';
+      svg += '<text x="' + px + '" y="' + (m.t - 6.5) + '" text-anchor="middle" font-size="12" fill="' + css("--seal-ink") + '" font-family="' + esc(css("--f-ming")) + '">轉</text>';
+    }
+  }
+  const pathOf = (pts, key) => pts.map((p, i) => (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p[key]).toFixed(1)).join("");
+  series.forEach(s => {
+    const col = s.color.startsWith("--") ? css(s.color) : s.color;
+    if (opt.mode === "band"){
+      const up = s.pts.map((p, i) => (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.hi).toFixed(1)).join("");
+      const dn = s.pts.slice().reverse().map(p => "L" + X(p.x).toFixed(1) + " " + Y(p.lo).toFixed(1)).join("");
+      svg += '<path d="' + up + dn + 'Z" fill="' + col + '" opacity="' + (s.faint ? .07 : .14) + '"/>';
+      svg += '<path d="' + pathOf(s.pts, "lo") + '" fill="none" stroke="' + col + '" stroke-width="1.2" stroke-dasharray="4 3" opacity="' + (s.faint ? .5 : .8) + '"/>';
+      svg += '<path d="' + pathOf(s.pts, "hi") + '" fill="none" stroke="' + col + '" stroke-width="' + (s.faint ? 1.2 : 2) + '"/>';
+    } else {
+      const key = opt.mode === "min" ? "lo" : "hi";
+      svg += '<path d="' + pathOf(s.pts, key) + '" fill="none" stroke="' + col + '" stroke-width="' + (s.faint ? 1.2 : 2) + '"' + (s.faint ? ' stroke-dasharray="4 3"' : '') + '/>';
+      const last = s.pts[s.pts.length - 1];
+      if (last.x < xmax && !opt.compact)
+        svg += '<path d="M' + X(last.x) + ' ' + Y(last[key]) + 'H' + X(xmax) + '" stroke="' + col + '" stroke-width="1.2" stroke-dasharray="1 4" opacity=".7"/>';
+    }
+    const last = s.pts[s.pts.length - 1], ly = Y(opt.mode === "min" ? last.lo : last.hi);
+    svg += '<circle cx="' + X(last.x) + '" cy="' + ly + '" r="3.5" fill="' + col + '" stroke="' + sheet + '" stroke-width="2"/>';
+  });
+  if (labels){
+    const key = opt.mode === "min" ? "lo" : "hi";
+    const tags = series.map(s => { const last = s.pts[s.pts.length - 1]; return {s, y:Y(last[key]), v:last[key]}; }).sort((a, z) => a.y - z.y);
+    for (let i = 1; i < tags.length; i++) if (tags[i].y - tags[i - 1].y < 15) tags[i].y = tags[i - 1].y + 15;
+    tags.forEach(t => {
+      const col = t.s.color.startsWith("--") ? css(t.s.color) : t.s.color;
+      svg += '<rect x="' + (W - m.r + 8) + '" y="' + (t.y - 4) + '" width="8" height="8" rx="4" fill="' + col + '"/>';
+      svg += '<text x="' + (W - m.r + 20) + '" y="' + (t.y + 4) + '" font-size="12" fill="' + ink2 + '">' + esc(t.s.short || t.s.name) + ' <tspan ' + font + ' fill="' + css("--ink") + '">' + t.v + '</tspan></text>';
+    });
+  }
+  svg += '<line class="hx" y1="' + m.t + '" y2="' + (m.t + ih) + '" stroke="' + css("--rule-2") + '" opacity="0"/>';
+  svg += '<rect class="hit" x="' + m.l + '" y="' + m.t + '" width="' + iw + '" height="' + ih + '" fill="transparent"/></svg><div class="tip"></div>';
+  box.innerHTML = svg;
+  attachHover(box, series, opt, {W, m, iw, xmax, X});
+}
+function attachHover(box, series, opt, g){
+  const svg = box.querySelector("svg"), tip = box.querySelector(".tip"), hx = svg.querySelector(".hx"), hit = svg.querySelector(".hit");
+  function show(clientX, clientY){
+    const r = svg.getBoundingClientRect(), px = (clientX - r.left) / r.width * g.W;
+    const x = Math.max(1, Math.min(g.xmax, Math.round(1 + (px - g.m.l) / g.iw * (g.xmax - 1))));
+    let rows = "";
+    series.forEach(s => {
+      let p = s.pts.find(q => q.x === x);
+      if (!p){ const last = s.pts[s.pts.length - 1]; if (x > last.x) p = last; }
+      if (!p) return;
+      const col = s.color.startsWith("--") ? css(s.color) : s.color;
+      const val = opt.mode === "band" ? (p.lo === p.hi ? p.hi : p.lo + "–" + p.hi) : (opt.mode === "min" ? p.lo : p.hi);
+      rows += '<div class="r"><span><i style="background:' + col + '"></i>' + esc(s.short || s.name) + ' <em>' + esc(p.cls) + ' LV' + p.lv + '</em></span><b>' + val + '</b></div>';
+    });
+    if (!rows){ tip.style.opacity = 0; hx.setAttribute("opacity", 0); return; }
+    hx.setAttribute("x1", g.X(x)); hx.setAttribute("x2", g.X(x)); hx.setAttribute("opacity", 1);
+    tip.innerHTML = '<h3>' + (opt.xTitle ? "第 " + x + " 級（累計）" : "LV" + x) + '</h3>' + rows;
+    tip.style.opacity = 1;
+    const b = box.getBoundingClientRect();
+    let tx = clientX - b.left + 14; if (tx + tip.offsetWidth > b.width) tx = clientX - b.left - tip.offsetWidth - 14;
+    tip.style.left = Math.max(0, tx) + "px"; tip.style.top = Math.max(0, clientY - b.top - 10) + "px";
+  }
+  hit.addEventListener("mousemove", e => show(e.clientX, e.clientY));
+  hit.addEventListener("mouseleave", () => { tip.style.opacity = 0; hx.setAttribute("opacity", 0); });
+  hit.addEventListener("touchmove", e => { if (e.touches[0]){ show(e.touches[0].clientX, e.touches[0].clientY); e.preventDefault(); } }, {passive:false});
+}
+function legendHtml(series, mode){
+  let h = series.map(s => '<span><i style="background:' + (s.color.startsWith("--") ? "var(" + s.color + ")" : s.color) + '"></i>' + esc(s.name) + '</span>').join("");
+  if (mode === "band") h += '<span><i style="background:var(--ink-2)"></i>實線是上限</span><span><i class="dash"></i>虛線是下限</span>';
+  return h;
+}
+
+/* ---------------------------------------------------------------- compare */
+let cmpStat = "ap", cmpVer = "max", cmpShowTable = false;
+const SLOTS = 8;
+/* selection: key -> colour slot, kept for as long as the build stays selected */
+const selected = new Map();
+function defaultSelection(){
+  const want = [["00","英雄"],["03","狂戰士"],["09",null],["0B",null]];
+  want.forEach(([id, cls]) => {
+    const b = BUILDS.find(b => b.c.id === parseInt(id, 16) && b.ji === 0 && (cls ? b.ri >= 0 && b.c.routes[b.ri].cls === cls : b.ri < 0));
+    if (b) selected.set(b.key, freeSlot());
+  });
+}
+function freeSlot(){ for (let i = 1; i <= SLOTS; i++) if (![...selected.values()].includes(i)) return i; return 0; }
+function buildPicker(){
+  const full = selected.size >= SLOTS;
+  document.getElementById("pickList").innerHTML = CHARS.map(c => {
+    const chips = BUILDS.filter(b => b.c === c).map(b => {
+      const on = selected.has(b.key), label = (b.ri < 0 ? b.c.cls : b.c.routes[b.ri].cls) + (c.joins.length > 1 ? " LV" + c.joins[b.ji].level : "");
+      const dot = on ? ' style="background:var(--c' + selected.get(b.key) + ')"' : '';
+      return '<button type="button" class="chip" data-key="' + b.key + '" aria-pressed="' + on + '"' + (!on && full ? " disabled" : "") +
+        ' title="' + esc(buildLong(b)) + '"><span class="dot"' + dot + '></span>' + esc(label) + '</button>';
+    }).join("");
+    return '<div class="pgroup"><div class="who">' + esc(c.name) + '<small>' + esc(c.cls) + '　' + c.chapter + ' 章</small></div><div class="pchips">' + chips + '</div></div>';
+  }).join("");
+  document.querySelectorAll("#pickList .chip").forEach(ch => ch.onclick = () => {
+    const k = ch.dataset.key;
+    if (selected.has(k)) selected.delete(k); else if (selected.size < SLOTS) selected.set(k, freeSlot());
+    renderCompare();
+    const again = document.querySelector('#pickList .chip[data-key="' + k + '"]'); if (again) again.focus();
+  });
+}
+function compareSeries(){
+  return [...selected.entries()].map(([k, slot]) => {
+    const b = BUILD_BY_KEY[k];
+    return {name: buildLong(b), short: buildName(b), color: "--c" + slot,
+      pts: points(b).map(p => ({x:p.x, lv:p.lv, cls:p.cls, lo:p.min[cmpStat], hi:p.max[cmpStat]}))};
+  });
+}
+function renderCompare(){
+  const segS = document.getElementById("cmpStat");
+  segS.innerHTML = STATS.map(s => '<button type="button" data-s="' + s + '" aria-pressed="' + (s === cmpStat) + '">' + LABEL[s] + '</button>').join("");
+  segS.querySelectorAll("button").forEach(b => b.onclick = () => { cmpStat = b.dataset.s; renderCompare(); });
+  document.querySelectorAll("#cmpVer button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === cmpVer));
+  buildPicker();
+  const verText = {max:"每級都擲到最大的上限", min:"每級都擲到最小的下限", band:"下限到上限的範圍"}[cmpVer];
+  document.getElementById("cmpTitle").textContent = FULL[cmpStat] + "的成長";
+  document.getElementById("cmpSub").textContent = verText + "。橫軸是累計等級：在 LV" + promoteAt + " 轉職，轉職後的 LV1 接在第 " + (promoteAt + 1) + " 級。";
+  const box = document.getElementById("cmpChart"), legend = document.getElementById("cmpLegend"), tv = document.getElementById("cmpTableView");
+  const series = compareSeries();
+  const anyPromo = [...selected.keys()].some(k => BUILD_BY_KEY[k].ri >= 0);
+  if (!series.length){ box.innerHTML = '<p class="empty">從左邊選一條路線，就會畫出它的成長曲線。</p>'; legend.innerHTML = ""; tv.hidden = true; return; }
+  lineChart(box, series, {mode:cmpVer, labels:true, promoteX: anyPromo ? promoteAt : null, xTitle:"累計等級", aria:FULL[cmpStat] + "的成長曲線"});
+  legend.innerHTML = legendHtml(series, cmpVer);
+  tv.hidden = !cmpShowTable;
+  document.getElementById("cmpTable").textContent = cmpShowTable ? "隱藏數值表" : "顯示數值表";
+  if (cmpShowTable) tv.innerHTML = compareTable(series);
+}
+function compareTable(series){
+  let xmax = 0; series.forEach(s => s.pts.forEach(p => { if (p.x > xmax) xmax = p.x; }));
+  const xs = []; for (let x = 5; x <= xmax; x += 5) xs.push(x); if (xs[xs.length - 1] !== xmax) xs.push(xmax);
+  let h = '<table class="lvtable"><thead><tr><th>累計等級</th>' + series.map(s => '<th>' + esc(s.short) + '</th>').join("") + '</tr></thead><tbody>';
+  xs.forEach(x => {
+    h += '<tr><td class="num">' + x + '</td>' + series.map(s => {
+      const p = s.pts.find(q => q.x === x);
+      if (!p) return '<td></td>';
+      return '<td>' + (cmpVer === "band" ? rng(p.lo, p.hi) : '<span class="num">' + (cmpVer === "min" ? p.lo : p.hi) + '</span>') + ' <small style="color:var(--ink-3)">' + esc(p.cls) + p.lv + '</small></td>';
+    }).join("") + '</tr>';
+  });
+  return h + '</tbody></table>';
+}
+document.querySelectorAll("#cmpVer button").forEach(b => b.onclick = () => { cmpVer = b.dataset.v; renderCompare(); });
+document.getElementById("cmpClear").onclick = () => { selected.clear(); renderCompare(); };
+document.getElementById("cmpTable").onclick = e => { cmpShowTable = !cmpShowTable; e.target.setAttribute("aria-pressed", cmpShowTable); renderCompare(); };
+
+/* ---------------------------------------------------------------- detail */
+let curId = CHARS[0].id, curJoin = 0, curRoute = 0;
+function renderRoster(){
+  const el = document.getElementById("roster");
+  el.innerHTML = CHARS.map(c => '<button type="button" data-id="' + c.id + '"' + (c.id === curId ? ' aria-current="true"' : '') + '>' +
+    '<span><span class="n">' + esc(c.name) + '</span> <span class="c">' + esc(c.cls) + '</span></span><span class="ch">' + c.chapter + ' 章</span></button>').join("");
+  el.querySelectorAll("button").forEach(b => b.onclick = () => { curId = +b.dataset.id; curJoin = 0; curRoute = 0; renderDetail(); });
+}
+function joinNote(c, j){
+  const ch = "第 " + c.chapter + " 章";
+  if (j.how === "stays") return ch + "加入，以戰場上的 LV" + j.level + " 單位留隊（名冊的 LV" + j.roster_level + " 記錄被蓋過）";
+  if (j.how === "arrives") return ch + "第 " + j.turn + " 回合到場，以 LV" + j.level + " 加入";
+  if (j.how === "early") return ch + "在第 " + j.turn + " 回合他到場之前過關，以名冊的 LV" + j.level + " 加入";
+  return ch + "加入";
+}
+function learnMap(list){ const m = {}; list.forEach(([lv, name]) => (m[lv] = m[lv] || []).push(name)); return m; }
+function renderDetail(){
+  renderRoster();
+  const c = BY_ID[curId], j = c.joins[curJoin];
+  const builds = BUILDS.filter(b => b.c === c && b.ji === curJoin);
+  const at = c.routes.length ? effectivePromote(c, curJoin) : null;
+  const first = baseRowsOf(c, curJoin)[0];
+  let h = '<div class="dhead"><div><h2>' + esc(c.name) + '</h2><p class="who">' + esc(c.race) + '　' + esc(c.cls) + '　' + esc(joinNote(c, j)) + '</p></div>' +
+    '<div class="facts"><span>加入等級<b>LV' + j.level + '</b></span><span>等級上限<b>LV' + c.cap + '</b></span><span>移動力<b>' + c.move + '</b></span></div></div>';
+  if (c.joins.length > 1){
+    h += '<div class="joinpick">加入方式 <div class="seg" role="group" aria-label="加入方式">' +
+      c.joins.map((jj, i) => '<button type="button" data-j="' + i + '" aria-pressed="' + (i === curJoin) + '">LV' + jj.level + ' 加入</button>').join("") + '</div></div>';
+  }
+  h += '<div class="dsec"><h3>加入時的數值</h3><div class="basegrid">' +
+    STATS.map(s => '<div><div class="k">' + FULL[s] + '</div><div class="v">' + first.min[s] + '</div></div>').join("") + '</div></div>';
+  h += '<div class="dsec"><h3>成長曲線' + (at ? '<span class="seal" aria-hidden="true">轉</span><small style="font-weight:400;font-size:12.5px;color:var(--ink-3)">在 LV' + at + ' 轉職</small>' : '') + '</h3>' +
+    '<div class="legend" id="multLegend" style="padding:0 0 8px"></div><div class="multiples" id="multiples"></div></div>';
+  h += '<div class="dsec"><h3>每一級的成長範圍</h3><div class="xscroll"><table class="forms"><thead><tr><th>職業</th><th>HP</th><th>MP</th><th>AP</th><th>DP</th><th>DX</th><th>說明</th></tr></thead><tbody>' +
+    formRow(c.cls, c.growth, "加入時的職業") +
+    c.routes.map(r => formRow(r.cls, r.growth, (r.badge ? "需要" + r.badge + "。" : "不需徽章。") + "轉職時各加 " +
+      STATS.map(s => LABEL[s] + " " + r.growth[s][1]).join("、") + "，移動力 +" + r.move_bonus)).join("") + '</tbody></table></div></div>';
+  h += '<div class="dsec"><h3>逐級數值</h3>';
+  if (c.routes.length){
+    h += '<div class="routetabs seg" role="group" aria-label="轉職路線">' + c.routes.map((r, i) => '<button type="button" data-r="' + i + '" aria-pressed="' + (i === curRoute) + '">轉職為' + esc(r.cls) + '</button>').join("") + '</div>';
+  }
+  h += '<div class="tscroll">' + levelTable(c, builds.find(b => b.ri === (c.routes.length ? curRoute : -1))) + '</div></div>';
+  const dp = document.getElementById("dpanel");
+  dp.innerHTML = h;
+  dp.querySelectorAll(".joinpick button").forEach(b => b.onclick = () => { curJoin = +b.dataset.j; renderDetail(); });
+  dp.querySelectorAll(".routetabs button").forEach(b => b.onclick = () => { curRoute = +b.dataset.r; renderDetail(); });
+  drawMultiples(c, builds);
+}
+function formRow(cls, g, note){
+  return '<tr><td>' + esc(cls) + '</td>' + STATS.map(s => { const r = GROWTH.gainRange(g[s]); return '<td class="num">' + (r[0] === r[1] ? r[0] : r[0] + '–' + r[1]) + '</td>'; }).join("") +
+    '<td class="note">' + esc(note) + '</td></tr>';
+}
+function drawMultiples(c, builds){
+  const series = [];
+  const base = baseRowsOf(c, curJoin);
+  /* Staying in the first class only parts from the promoted paths when the
+     promotion comes before LV40; at LV40 it is the same line. */
+  if (c.routes.length && effectivePromote(c, curJoin) < CAP)
+    series.push({name:"不轉職（" + c.cls + "）", color:"--neutral", faint:true, b:{c, ji:curJoin, ri:-1}});
+  builds.forEach(b => series.push(b.ri < 0 ? {name:c.cls, color:"--c1", b} : {name:c.cls + "→" + c.routes[b.ri].cls, color:"--c" + (b.ri + 1), b}));
+  const at = c.routes.length ? effectivePromote(c, curJoin) : null;
+  document.getElementById("multLegend").innerHTML = legendHtml(series, "band");
+  document.getElementById("multiples").innerHTML = STATS.map(s => '<div class="mult"><h4>' + FULL[s] + '</h4><div class="chartbox" data-s="' + s + '"></div></div>').join("");
+  document.querySelectorAll("#multiples .chartbox").forEach(box => {
+    const s = box.dataset.s;
+    const ser = series.map(x => {
+      const pts = x.b.ri < 0 && c.routes.length
+        ? base.map(r => ({x:r.lv, lv:r.lv, cls:c.cls, lo:r.min[s], hi:r.max[s]}))
+        : points(x.b).map(p => ({x:p.x, lv:p.lv, cls:p.cls, lo:p.min[s], hi:p.max[s]}));
+      return {name:x.name, short:x.b.ri < 0 ? c.cls : c.routes[x.b.ri].cls, color:x.color, faint:x.faint, pts};
+    });
+    lineChart(box, ser, {mode:"band", compact:true, h:210, promoteX:at, xTitle:c.routes.length ? "累計等級" : null, aria:c.name + " " + FULL[s]});
+  });
+}
+function levelTable(c, b){
+  const p = pathOf(b), learn0 = learnMap(c.learn);
+  let h = '<table class="lvtable"><thead><tr><th>等級</th>' + STATS.map(s => '<th>' + LABEL[s] + '</th>').join("") + '<th>學會的法術</th></tr></thead><tbody>';
+  const row = (lv, r, sp) => '<tr' + (r.lv % 10 === 0 ? ' class="m10"' : '') + '><td class="num">' + (lv) + '</td>' + STATS.map(s => '<td>' + rng(r.min[s], r.max[s]) + '</td>').join("") + '<td class="sp">' + (sp ? esc(sp.join("、")) : "") + '</td></tr>';
+  p.base.forEach(r => h += row(esc(c.cls) + " " + r.lv, r, r.lv > c.joins[b.ji].level ? learn0[r.lv] : null));
+  if (p.promo){
+    const route = c.routes[b.ri], learn1 = learnMap(route.learn);
+    h += '<tr class="promo"><td colspan="7"><span class="seal" aria-hidden="true">轉</span>在 LV' + p.at + ' 轉職為' + esc(route.cls) +
+      (route.badge ? '（需要' + esc(route.badge) + '）' : '') + '：各項加上 ' + STATS.map(s => LABEL[s] + ' +' + route.growth[s][1]).join('、') + '，等級回到 1，移動力 +' + route.move_bonus + '</td></tr>';
+    p.promo.forEach(r => h += row(esc(route.cls) + " " + r.lv, r, r.lv > 1 ? learn1[r.lv] : null));
+  }
+  return h + '</tbody></table>';
+}
+
+/* ---------------------------------------------------------------- start */
+defaultSelection();
+{
+  const want = (location.hash || "").slice(1);
+  if (TABS.includes(want)) selectTab(want); else renderRanking();
+}
+window.addEventListener("resize", () => { clearTimeout(window.__rz); window.__rz = setTimeout(() => { if (activeTab() !== "rank") renderActive(); }, 160); });
+</script>
+</body>
+</html>

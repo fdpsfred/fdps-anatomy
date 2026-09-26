@@ -12,6 +12,7 @@
 - **可以玩的重建版。** `src/` 連結成取代原版的 `FDE.EXE`，與原版在同一套環境下並排遊玩；開發者已實機玩過前兩章，基本沒有問題。每支 function 另有連結生產程式碼的單元測試（`tests/`）。
 - **Ghidra 的分析狀態**：每個 function 的名稱、calling convention、參數名與描述行為的 plate comment，以文字快照進版控（[`ghidra_snapshot/`](ghidra_snapshot/_index.md)）。
 - **知識庫**：程式行為、資源格式、數值表、30 章的關卡內容與全文對白、刪減與未用的內容（附圖、音效與文字全文）、重建時會踩的雷，全部對照 `src/`、Ghidra 與遊戲檔逐條驗證過。
+- **角色屬性比較網頁**：十二名可加入角色沿每條轉職路線、每一級的 HP／MP／AP／DP／DX 範圍，可排名、疊圖比較、看單一角色明細，轉職等級可調（[`docs/character-stat-comparison/`](docs/character-stat-comparison/index.html)，由 [`tools/growth_table/`](tools/growth_table/_index.md) 從遊戲資料產生，每個數值都與照 `src/` 逐級重播的結果核對過；發佈方式見 [`docs/README.md`](docs/README.md)）。
 - **查詢工具**：`fdps-data` skill 可依名稱、代碼、數值查物品、法術、人物、職業、敵人、商店，查每一章的敵人、寶物、事件與過場腳本，以及 66 個文字區塊的全文與「這條文字由誰顯示、為什麼不會顯示」（資料集由 [`tools/data_skill/`](tools/data_skill/_index.md) 從遊戲檔現解產生）。
 
 ## 知識庫怎麼讀
@@ -80,7 +81,7 @@ python tools/game_build/play.py run original          # 開原版來玩
 | `libs/` | 重建要連進去的第三方程式庫與標頭 | ✓ |
 | `ghidra_snapshot/` | Ghidra 分析狀態的文字快照 | ✓ |
 | [`tools/`](tools/_index.md) | 工作腳本，一項工作一個子資料夾 | ✓ |
-| `docs/` | 決策記錄、攻略站鏡像、前作研究筆記 | ✓ |
+| [`docs/`](docs/README.md) | 決策記錄、攻略站鏡像、前作研究筆記、角色屬性比較網頁 | ✓ |
 | `.claude/skills/` | `fdps-data` 查詢 skill 與 `ghidra-usage` 操作慣例 | ✓ |
 | [`devlog/`](devlog/_conventions.md) | 怎麼走到這些結論的敘事記錄，workflow 的原始回報在 `devlog/runs/` | ✓ |
 | [`.scratch/`](.scratch/fdps-rebuild/spec.md) | 專案 spec 與工作票（`fdps-rebuild/issues/`） | ✓ |

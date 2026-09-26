@@ -29,6 +29,10 @@ python -m unittest tools/data_tables/test_data_tables.py
 | `shops` | `assets/shops.md` | 有村莊的 21 個 `SHOPnn.DAT` |
 | `use_effects` | `assets/items.md` | 使用效果代碼與帶這個碼的物品 |
 
+## 給其他工具用的解碼
+
+`load()` 回傳的 `Game` 也是其他工具讀這幾張表的入口，不必各自再寫解析：`appearance` 每筆有種族、職業、等級、HP／MP／移動力／AP／DP／DX 基礎值與法術遮罩，`growth` 每筆有五項成長的兩個原始 byte（`ap`、`dp`、`dx`、`hp`、`mp`；兩值不同時後一個是升級擲骰不含的上界，相同時固定成長這個值）與習得索引，`learning`、`promotions`、`deployments()` 與名稱查詢同理。[`growth_table`](../growth_table/_index.md) 的成長數值網頁就是由此讀資料。
+
 ## 寫在程式裡的知識
 
 有三樣東西不是從資料檔讀的，而是從 `src/` 轉錄成常數，改之前要回去讀原始碼：
@@ -39,4 +43,4 @@ python -m unittest tools/data_tables/test_data_tables.py
 
 ## 對應的前作成果
 
-前作 `fd2-anatomy/assets/` 的敵人、種族、譯名表是人工轉錄，沒有產生器；`fd2-anatomy/tools/growth_table/` 只做成長表的網頁。本工具只沿用它們的涵蓋面，資料格式與產生方式照 FDPS 自己的檔案寫。
+前作 `fd2-anatomy/assets/` 的敵人、種族、譯名表是人工轉錄，沒有產生器；`fd2-anatomy/tools/growth_table/` 只做成長表的網頁（本專案對應的是 [`growth_table`](../growth_table/_index.md)）。本工具只沿用它們的涵蓋面，資料格式與產生方式照 FDPS 自己的檔案寫。
