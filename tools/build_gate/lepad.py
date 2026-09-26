@@ -15,11 +15,14 @@ left behind -- and only where that can be proved:
 
   literal gap   in CONST.  Every literal the program uses is the target of a
                 relocation, so its start is known.  An item counts as a string
-                only when it starts on a 4-byte boundary and every reference to
-                it takes its address as a value (a pointer stored in a data
-                object, or the imm32 of `push imm32` / `mov r32,imm32`).  That
+                only when it starts on a 4-byte boundary, carries no name,
+                every reference to it takes its address as a value (a pointer
+                stored in a data object, or the imm32 of `push imm32` /
+                `mov r32,imm32`), and its bytes before the NUL are text.  That
                 excludes the floating-point constants wcc386 also puts in CONST,
-                which are read through an x87 memory operand.  The gap is the
+                which are read through an x87 memory operand.  A compiled
+                source holding a literal with an embedded NUL makes the whole
+                analysis refuse rather than mask that literal's tail.  The gap is the
                 bytes after the first NUL up to the next 4-byte boundary, and
                 only when the next referenced item or symbol starts exactly at
                 that boundary.
@@ -169,8 +172,16 @@ def read_obj(data, label="object"):
 
     Returns {"segments": {name: length}, "symbols": [(segment, name, offset,
     is_static)]}.  Statics are LPUBDEF records: wcc386 writes one for every
-    file-scope `static`, and the map never lists them.
+    file-scope `static`, and the map never lists them.  A record that does not
+    parse raises PadError, never an IndexError the gate would not catch.
     """
+    try:
+        return _read_obj(data, label)
+    except (IndexError, struct.error) as exc:
+        raise PadError("%s: malformed OMF record (%s)" % (label, exc))
+
+
+def _read_obj(data, label):
     lnames, segs = [None], [None]
     seglen, symbols = {}, []
     off = 0
@@ -311,9 +322,13 @@ def address_taken(image, objects, site):
 
     A site inside a data object is a stored pointer.  In code the byte before
     the imm32 has to be the opcode of `push imm32` (68) or `mov r32,imm32`
-    (B8-BF).  An x87 load of a CONST double is `D8-DF modrm disp32`, whose byte
-    before the site is a ModRM, never one of these.  Any other encoding is not
-    proof, and an item without proof keeps its bytes compared.
+    (B8-BF).  An x87 load of a CONST double through an absolute operand is
+    `D8-DF 05|0D|.. disp32`, whose byte before the site is a ModRM outside that
+    set.  The test does not decode instructions, so a `[reg+disp32]` operand
+    whose ModRM or SIB happens to be B8-BF or 68 also passes; analyse()
+    therefore additionally requires the item's bytes before its NUL to be text.
+    Any other encoding is not proof, and an item without proof keeps its bytes
+    compared.
     """
     for obj in objects.values():
         if obj["start"] <= site < obj["end"]:
@@ -324,6 +339,70 @@ def address_taken(image, objects, site):
     return False
 
 
+# Bytes a string literal of this program may hold before its NUL: printable
+# ASCII, the control characters the game's text uses (BEL, BS, TAB, LF, CR,
+# ESC), and every byte >= 0x80 (Big5).
+TEXT_BYTES = frozenset(range(0x20, 0x7F)) | {7, 8, 9, 10, 13, 27} \
+    | frozenset(range(0x80, 0x100))
+
+
+def embedded_nuls(text):
+    """Line numbers of string literals that hold a NUL before their end.
+
+    The literal-gap rule measures a literal to its first NUL, so a `"a\\0b"`
+    would have its tail masked.  Such a literal makes the whole analysis
+    refuse (analyse() raises) instead of masking real bytes.
+    """
+    found, i, n, line = [], 0, len(text), 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            line += text.count("\n", i, j)
+            i = j
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif c == "'":
+            j = i + 1
+            while j < n and text[j] != "'":
+                j += 2 if text[j] == "\\" else 1
+            i = j + 1
+        elif c == '"':
+            j, start_line, nul = i + 1, line, False
+            while j < n and text[j] != '"':
+                if text[j] == "\\" and j + 1 < n:
+                    esc = text[j + 1]
+                    if esc in "01234567":
+                        m = re.match(r"[0-7]{1,3}", text[j + 1:])
+                        nul = nul or int(m.group(0), 8) == 0
+                        j += 1 + len(m.group(0))
+                        continue
+                    if esc in "xX":
+                        m = re.match(r"[0-9a-fA-F]+", text[j + 2:])
+                        if m:
+                            nul = nul or int(m.group(0), 16) == 0
+                            j += 2 + len(m.group(0))
+                            continue
+                    if esc == "\n":
+                        line += 1
+                    j += 2
+                    continue
+                if text[j] == "\n":
+                    line += 1
+                j += 1
+            if nul:
+                found.append(start_line)
+            i = j + 1
+        else:
+            i += 1
+    return found
+
+
 def analyse(image, map_text, objs, sources):
     """The provable alignment gaps of one linked image.
 
@@ -331,9 +410,17 @@ def analyse(image, map_text, objs, sources):
     maps a source file's upper-case basename to its text -- both from the build
     that produced `image`.  Returns a dict: `ranges` [(file offset, length)],
     `literal_gaps`, `symbol_gaps`, `bytes`, `unsized` (symbols of a compiled
-    module whose size is unknown), `unplaced` (objects whose statics could not
-    be placed), `unproved` (CONST targets not proved to be strings).
+    module whose size is unknown), `unplaced` (module segments whose symbols
+    could not be placed), `unproved` (CONST targets not proved to be strings).
+    Raises PadError when a compiled source holds a string literal with an
+    embedded NUL: that literal's tail would be indistinguishable from padding.
     """
+    for name, text in sorted(sources.items()):
+        lines = embedded_nuls(text)
+        if lines:
+            raise PadError("%s line %s: a string literal holds a NUL before its "
+                           "end, so its tail cannot be told from padding"
+                           % (name, ", ".join(map(str, lines))))
     lay = parse_map(map_text)
     objects = le_objects(image)
 
@@ -369,8 +456,9 @@ def analyse(image, map_text, objs, sources):
             bases = {(where[n][0], where[n][1] - off)
                      for _, n, off, local in syms if not local and n in where}
             if len(bases) != 1:
-                if any(local for *_, local in syms):
-                    unplaced.append("%s:%s" % (mod["file"], segname))
+                # Nothing of this module's segment is named or sized; say so
+                # rather than letting its symbols vanish from the report.
+                unplaced.append("%s:%s" % (mod["file"], segname))
                 continue
             o, base = bases.pop()
             for _, name, off, local in syms:
@@ -420,13 +508,16 @@ def analyse(image, map_text, objs, sources):
         if obj is None or seg["name"] not in LITERAL_SEGMENTS:
             continue
         for t in sorted(off for (to, off) in refs if to == o and lo <= off < hi):
-            if t % ALIGN:
-                continue
+            if t % ALIGN or (o, t) in named:
+                continue                        # a named item is not a literal
             if not all(address_taken(image, objects, s) for s in refs[(o, t)]):
                 unproved += 1
                 continue
             nul = image.find(b"\0", obj["start"] + t, obj["start"] + hi)
             if nul < 0:
+                continue
+            if not all(b in TEXT_BYTES for b in image[obj["start"] + t:nul]):
+                unproved += 1
                 continue
             end = nul - obj["start"] + 1                # one past the NUL
             gap_end = align(end, ALIGN)
@@ -590,6 +681,7 @@ def _synth_obj(static=True):
 
 
 def _synth_build(gap=b"\xa5\x5a\x3c\xc3\x96\x69\x0f", ok=b"ok", cusor=b"Cusor.cel",
+                 map_text=MAP, source_extra="",
                  double=b"\x41\x42\x43\x44\x00\x01\xf0\x3f", table1=4, ret=0xC3,
                  blob_gap=b"\x11\x22\x33", mode_type="unsigned char",
                  mode_bytes=None, ptr_target=0x1c):
@@ -654,8 +746,8 @@ def _synth_build(gap=b"\xa5\x5a\x3c\xc3\x96\x69\x0f", ok=b"ok", cusor=b"Cusor.ce
     image[le + frt:le + imt] = recs[0] + recs[1]
     image[0x400:0x400 + len(code)] = code
     image[DATA_FILE:] = data
-    return (bytes(image), MAP, {"GAMEDATA.OBJ": _synth_obj()},
-            {"GAMEDATA.C": GAMEDATA_C % mode_type})
+    return (bytes(image), map_text, {"GAMEDATA.OBJ": _synth_obj()},
+            {"GAMEDATA.C": GAMEDATA_C % mode_type + source_extra})
 
 
 def _verdict(base_build, got_build, base_pad=True):
@@ -711,6 +803,36 @@ def _selftest_rows():
                  and all(not (DATA_FILE + 0x26 <= a < DATA_FILE + 0x2c)
                          for a, _ in no_static["ranges"]),
                  "%d gaps" % len(no_static["ranges"])))
+    for text, want in (('char *s = "a\\0b";', [1]),
+                       ('char *s = "a\\x00";', [1]),
+                       ('char *s = "a\\x00b";', []),     # hex is greedy: 0x0b
+                       ('char *s = "a\\000";', [1]),
+                       ("char c = '\\0';", []),
+                       ('char *s = "a\\\\0b";', []),
+                       ('char *s = "\\x41\\101";', []),
+                       ('/* "a\\0b" */\nchar *s =\n    "x" "y\\0";', [3])):
+        got = embedded_nuls(text)
+        rows.append(("embedded NUL in %-24s" % text.splitlines()[-1][:24],
+                     got == want, "%s (want %s)" % (got, want)))
+    try:
+        analyse(*_synth_build(source_extra='char *pair = "a\\0b";\n'))
+        rows.append(("a literal with an embedded NUL refuses the analysis",
+                     False, "no error"))
+    except PadError as exc:
+        rows.append(("a literal with an embedded NUL refuses the analysis",
+                     True, str(exc)[:40]))
+    named_map = MAP.replace("0001:00000000  read_flag",
+                            "0001:00000000  read_flag\n0002:00000004  data_name_table")
+    named = analyse(*_synth_build(map_text=named_map))
+    rows.append(("a named CONST item is not a literal",
+                 (DATA_FILE + 0x0e, 2) not in named["ranges"]
+                 and len(named["ranges"]) == 3,
+                 "%d gaps" % len(named["ranges"])))
+    binary = analyse(*_synth_build(cusor=b"\x01\x02\x03\x04\x05\x06\x0b\x0c\x0e"))
+    rows.append(("an item that is not text is not a literal",
+                 (DATA_FILE + 0x0e, 2) not in binary["ranges"]
+                 and binary["unproved"] == 2,
+                 "%d gaps, %d unproved" % (len(binary["ranges"]), binary["unproved"])))
     inside = analyse(*_synth_build(ptr_target=0x1e))
     rows.append(("a referenced byte after a NUL is not a gap",
                  (DATA_FILE + 0x1e, 2) not in inside["ranges"]

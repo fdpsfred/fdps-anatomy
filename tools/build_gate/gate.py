@@ -376,6 +376,22 @@ def _context(watcom, disc, timeout, targets):
             "disc": disc if disc_available(disc) else None}
 
 
+def alignment_gaps(exe, inputs):
+    """(lepad analysis, None), or (None, why) when it cannot be computed.
+
+    `inputs` is a target's {"map", "objs", "sources"}.  Every way this can go
+    wrong -- no map, an unreadable file, a malformed object, a literal with an
+    embedded NUL -- comes back as a reason for a failed `pad` check.
+    """
+    try:
+        if inputs["map"] is None:
+            raise lepad.PadError("the build wrote no linker map")
+        return lepad.analyse_build(exe, inputs["map"], inputs["objs"],
+                                   inputs["sources"]), None
+    except (lepad.PadError, lefixup.LeError, struct.error, OSError) as exc:
+        return None, "alignment gaps not computable: %s" % exc
+
+
 def build_and_compare(name, ctx, baselines):
     """Build one target and judge it against its baseline."""
     spec = TARGETS[name]
@@ -428,14 +444,9 @@ def build_and_compare(name, ctx, baselines):
         # own map, objects and staged sources (lepad.py).  A target that says
         # it has them and cannot produce them fails here rather than quietly
         # losing the `pad` tier.
-        inputs = built["pad"]
-        try:
-            if inputs["map"] is None:
-                raise lepad.PadError("the build wrote no linker map")
-            found = lepad.analyse_build(exe, inputs["map"], inputs["objs"],
-                                        inputs["sources"])
-        except (lepad.PadError, lefixup.LeError, struct.error, OSError) as exc:
-            add("pad", False, "alignment gaps not computable: %s" % exc)
+        found, why = alignment_gaps(exe, built["pad"])
+        if found is None:
+            add("pad", False, why)
             row["equivalence"] = None
             return settle()
         pad = found["ranges"]
@@ -951,9 +962,41 @@ def _selftest_real_images():
     return rows
 
 
+def _selftest_pad_check():
+    """The `pad` check fails, with a reason, when the gaps cannot be computed.
+
+    Which bytes are gaps and that `pad` is produced only by gap-only edits is
+    lepad.py's own selftest (suite build_gate.pad_selftest); this covers the
+    gate's side of it.
+    """
+    import tempfile
+    rows = []
+    img, _truth, _geom = _synth_le()
+    tmp = Path(tempfile.mkdtemp(prefix="fdps_gate_selftest_"))
+    try:
+        exe = tmp / "X.EXE"
+        exe.write_bytes(img)
+        found, why = alignment_gaps(exe, {"map": None, "objs": tmp, "sources": tmp})
+        rows.append(("no linker map fails the pad check",
+                     found is None and "no linker map" in why, why))
+        found, why = alignment_gaps(exe, {"map": tmp / "MISSING.MAP", "objs": tmp,
+                                          "sources": tmp})
+        rows.append(("an unreadable map fails the pad check", found is None, why))
+        (tmp / "X.MAP").write_text("not a wlink map\n", encoding="latin-1")
+        found, why = alignment_gaps(exe, {"map": tmp / "X.MAP", "objs": tmp,
+                                          "sources": tmp})
+        rows.append(("a map without segments fails the pad check",
+                     found is None, why))
+    finally:
+        import shutil
+        shutil.rmtree(str(tmp), ignore_errors=True)
+    return rows
+
+
 def selftest():
     parser_rows, img, truth, geom = _selftest_parser()
     rows = (parser_rows + _selftest_compare(img, truth, geom)
+            + _selftest_pad_check()
             + _selftest_diagnostics() + _selftest_real_images())
     ok = True
     for name, passed, detail in rows:

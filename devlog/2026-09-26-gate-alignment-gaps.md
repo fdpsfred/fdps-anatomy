@@ -87,3 +87,23 @@
 `ailsmoke` 原本不寫 map，連結檔加了 `option map`（`AILSMOK.MAP`）。它編到的 `src/dpmi.c` 沒有任何資料段內容，空隙全來自凍結的 `ailsmoke.c` 的字面值，所以實務上幾乎不會觸發，但規則一致。`smoke` 不編 `src/`、沒有 map，維持原樣。
 
 `pad_diff.py` 原本自帶一條較寬的字面值規則，會與閘門的判定分歧。改寫成吃兩個儲存庫根目錄、用 `lepad.py` 算兩邊的空隙，把每個不同的 byte 分成重定位／空隙／無法解釋，無法解釋的列出前後 map 符號——閘門報 `different` 時用它找原因。
+
+## 推進與交叉驗證
+
+主工作目錄跑完整閘門（新程式、舊基準值）：四個目標全 `identical`，全部測試通過。以此推進 `game` 與 `ailsmoke` 的基準值（映像雜湊沒變，只多了空隙指紋），commit `955ad6a`。接著把 worktree 切到 `955ad6a`（CRLF 取出）跑完整閘門：`game` 判 `pad`、`ailsmoke`／`smoke` `identical`，全部通過。這就是票面要的「任何工作目錄狀態都重現得出來」。
+
+## 審查後的修正
+
+兩軸審查（標準／規格）指出的 `lepad.py` 問題，採納的：
+
+- 字面值的證明只看 site 前一個 byte，`[reg+disp32]` 運算元的 ModRM 或 SIB 剛好是 `B8`–`BF`／`68` 時也會過關（例如 `DC B8 disp32` 是 `fdivr qword [eax+disp32]`）。docstring 原本寫「不可能是這幾個值」，只對絕對位址運算元成立。不去解整套指令編碼，改成再加一道：NUL 之前的 byte 必須是文字（可印字元、BEL／BS／TAB／LF／CR／ESC、`0x80` 以上）。
+- `CONST` 裡帶名稱的項目（例如組語或程式庫的位元組表）也會被當字面值；加上「起點有名稱就不是字面值」。
+- 字面值中間帶 NUL 原本只寫成「閘門看不到」並列一條 pitfall 要人別寫。改成直接偵測：被編譯的原始碼裡只要有字串字面值在結尾之前帶 NUL，分析就拒絕、`pad` 檢查失敗並指出行號。寫偵測時自己的測試寫錯過一次——以為 `"a\x00b"` 帶 NUL，實際上 C 的十六進位跳脫是貪婪的，那是 `0x0B`，偵測器是對的。
+- `read_obj` 遇到壞掉的記錄會丟 `IndexError`，閘門只接 `PadError` 等，會變成 traceback；包成 `PadError`。
+- 閘門的 `pad` 檢查失敗路徑沒有 selftest；把計算抽成 `alignment_gaps()`，`gate.py selftest` 補三列（沒有 map、map 讀不到、map 沒有 segment 表）。
+- 模組 public 定位不到時整段符號從報告裡消失；改為列進 `unplaced`。
+- `tools/ail_link/_index.md` 沒寫 `build` 會多寫 map。
+
+修正後遊戲映像的空隙仍是同樣的 520 byte、同樣位置，基準值指紋不受影響，不必再推進。沒採納的：`le_objects` 與 `lefixup.header` 重複讀兩個 header 欄位、`pad_diff.py` 的路徑表與 `gate.py` 各寫一份——都是小重複，動它們要改到別人的建置模組；以及「`static` 在函式範圍、只經由內部位移引用」的無名物件可能落進空隙——`src/` 沒有這種物件，而且它要同時滿足「大小小於對齊單位、緊接在已知大小符號之後、下一個起點剛好在對齊邊界」才會被抹，列為已知界線。另外「worktree 的 `HEAD`」嚴格說是 `66735c4`，實驗期間 main 往前走了幾個別票的 commit，但 `src/`、`tools/game_build/` 在 `66735c4..14a5e44` 之間沒有改動，推進後又在 `955ad6a` 的 worktree 重跑過一次，這一點不影響結論。
+
+審查修正之後在主工作目錄再跑一次完整閘門確認。
