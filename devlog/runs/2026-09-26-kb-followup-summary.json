@@ -1,0 +1,52 @@
+{
+ "items": 10,
+ "fixes": 11,
+ "complete": 10,
+ "unfinished": [],
+ "by_status": {
+  "done_already": 3,
+  "fixed": 8
+ },
+ "edits_landing": 10,
+ "ghidra": [],
+ "declined": [],
+ "developer_questions": [
+  {
+   "id": "O1",
+   "question": "DPMI 模組（src/dpmi.c 的 6 支）確切的最佳化選項要不要追到定案？重建版以統一旗標編譯、依 ADR-0001 不影響功能等價，所以這只是史料層面的問題。若要定案，做法是以 tools/build_flags/fn_match.py --units dpmi 搭配 --set 逐一試 `-s` 之上的最佳化組合（-ox、-os、-ot、-oa、-oi、-ol、-or、-oe 及其組合，並比較 EBX 可破壞的 modify 宣告有無），直到 6 支全部逐 byte 相同，再把結果寫回 build_flags.md 的 DPMI 段落。"
+  }
+ ],
+ "rejected": [],
+ "not_reread": [],
+ "still_open": [
+  {
+   "id": "O1",
+   "open_question": "近似規則（相鄰 `MOV EAX,[EBP-n]`/`PUSH EAX`）量到的經中轉區域變數是 1,346，頁面是 1,353，相差 7；差異落在 `0x3c000` 以前、與本組的範圍問題無關，可能出自原量測的判定規則較寬（例如中間夾指令或計入函式間的未歸屬 byte，後者有 6 處 `8B 45 xx 50` 形樣），若要讓數字可重現需保留原量測腳本。"
+  },
+  {
+   "id": "O2",
+   "open_question": "界線為何是 10 而非 0x0b 或 0x0e（設計者意圖）無法從程式或資料得知；行為本身已完全確立，重建照 > 10 寫即功能等價，所以不需要開發者決定，也不需寫進 open_issues.md。"
+  },
+  {
+   "id": "O5",
+   "open_question": "src/chinit1.h 的 fdps_chapter_01_init 註解仍寫「The roster add comes first because the state rebuild deploys the map's player slots out of the roster array」，暗示必須在 reset 之前，與 src/chinit1.c:83-93 的說法不一致；不在本組檔案範圍內，未修改。"
+  },
+  {
+   "id": "O7",
+   "open_question": "src/spellmnu.c:646-651 的 CAST_RANGE_LAST_RADIUS 註解同樣寫「a straight line whose length is the low nibble」，且說此編碼與 fdps_collect_targets_in_range 相同，程式實際是 cast_range - 0x10；該檔不在本組檔案內，未改，需另一組處理。"
+  },
+  {
+   "id": "O8",
+   "open_question": "若要照原請求從產生器拿掉 status 欄位，需同時改 build_routing.py 的三處與 _doc 並執行 python tools/code_emit/build_routing.py 重產 routing.json／routing.md；已驗證現行輸入重產與提交版除 status 外完全相同，但 routing.json 的重產不在本輪的 regenerate 選項內，故未動產生器以免產生器與輸出不同步。"
+  },
+  {
+   "id": "O9",
+   "open_question": "同一張表的 L$N_emu387_state 一列寫所在 0x613c8、「必須當成一塊連續記錄」，但 ghidra_snapshot/data.txt 目前在 0x613c8 起是拆開的 L$N_emu387_control_word／tag_word／register_stack／source_operand 等個別資料項，沒有套用 L$N_emu387_state；另外 L$N_emu387_extended_real 與 long_double_80 是兩個佈局相同的 10 byte 型別，前者同樣沒有被引用。這兩點不在本組範圍，未處理。"
+  },
+  {
+   "id": "O10",
+   "open_question": "合併後 000447a6 沒命中是由程式庫沒有同長度 body 推得，未在目前 Ghidra 狀態上實際重跑 FidQuery／FidHashDump（重跑需執行 Ghidra 腳本，本段只能唯讀）。"
+  }
+ ],
+ "stopped": ""
+}

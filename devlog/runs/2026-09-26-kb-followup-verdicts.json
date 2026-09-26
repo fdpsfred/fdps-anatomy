@@ -1,0 +1,585 @@
+[
+ {
+  "id": "O1",
+  "item_sha1": "98ef9e41e10e40d5121de810dd35eb1950dca3fa",
+  "members": [
+   {
+    "ref": "C:P56",
+    "status": "done_already",
+    "note": "頁面已把掃描範圍寫成遊戲 C 程式碼 `0x10000`–`0x3cbc0` 並註明 CD 與 DPMI 模組沒有 `[EBP±n]` 推送點；重量確認 `0x3bade`–`0x3cbc0` 的 39 支 fdps function 連一個 `[EBP±n]` 運算元都沒有，兩個範圍的計數完全相同，2,587 這個數字不必重量，票 22.2 也沒有寫範圍，不需連動。"
+   },
+   {
+    "ref": "C:X146",
+    "status": "done_already",
+    "note": "頁面的旗標組區塊寫「開最佳化、帶 -s、不帶 -d2（確切組合未定案）」，DPMI 段落寫「確切的最佳化選項沒有定案」，只重現 3 支也照實寫出，沒有把未定案的旗標寫成定論。"
+   }
+  ],
+  "edits": [],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "build_flags.md 對推送點範圍與 DPMI 模組旗標的描述都已與現況一致：2,587 個推送點的範圍寫成 `0x10000`–`0x3cbc0`，而 CD／DPMI 模組以 ESP 定址、沒有任何 `[EBP±n]` 運算元，所以不論以 `0x3c000` 或 `0x3cbc0` 為終點計數都相同；DPMI 模組的確切最佳化選項在頁面上明寫為未定案。本組無需修改。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "python tools/build_flags/parse_le_header.py fdps_game_files/FDPS.LE（取 data_pages_off 0xc7b0 定位 object 1），再 python workspace/kb_followup/scratch/O1/pushscan.py 3bade 3cbc1（capstone 反組譯，函式清單取自 ghidra_snapshot/functions.txt 的 pool_fdps）",
+    "observation": "0x3bade–0x3cbc0 的 33 支 CD 與 6 支 DPMI function：`[EBP` 記憶體運算元 0 個、直接推送 0、經 EAX 中轉 0；以 `[ESP` 定址的運算元 270 個。"
+   },
+   {
+    "source": "tool",
+    "location": "python tools/build_flags/parse_le_header.py fdps_game_files/FDPS.LE（取 data_pages_off 0xc7b0 定位 object 1），再 python workspace/kb_followup/scratch/O1/pushscan.py 10000 3c000 與 10000 3cbc1",
+    "observation": "兩個範圍的結果逐項相同：直接推區域變數 150、直接推參數 0、`MOV EAX,[EBP+n]`/`PUSH EAX` 1,084，`MOV EAX,[EBP-n]`/`PUSH EAX` 相鄰形式 1,346（此近似規則比頁面 1,353 少 7，差異與範圍無關）。"
+   },
+   {
+    "source": "ghidra",
+    "location": "ghidra_snapshot/functions.txt 0003c984–0003cbc1",
+    "observation": "0003c984–0003ca22 為 pool_ail 5 支，0003ca49–0003cbaa 為 pool_fdps 的 6 支 DPMI 常式，最後一支 0003cbaa 長 0x17，止於 0x3cbc0；0003cbc1 起為 pool_ail。"
+   },
+   {
+    "source": "kb",
+    "location": "rebuild_info/build_flags.md「旗標組不是全域統一的」一節與「引數推送形式」一節",
+    "observation": "旗標組區塊寫 `DPMI 模組  開最佳化、帶 -s、不帶 -d2（確切組合未定案）`；DPMI 段落寫只帶 -s 並宣告 EBX 可破壞時 6 支中 3 支逐 byte 相同、「確切的最佳化選項沒有定案」；推送點段落寫「遊戲 C 程式碼（`0x10000`–`0x3cbc0`）……（`0x3bade` 起的 CD 模組與 DPMI 模組以 ESP 定址，沒有 `[EBP±n]` 推送點）」。"
+   },
+   {
+    "source": "kb",
+    "location": ".scratch/fdps-rebuild/issues/22.2-align-compile-flags.md",
+    "observation": "票面只寫「引數推送形式 2,587 處全部對上」，沒有寫掃描範圍，不需要連動修改。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "近似規則（相鄰 `MOV EAX,[EBP-n]`/`PUSH EAX`）量到的經中轉區域變數是 1,346，頁面是 1,353，相差 7；差異落在 `0x3c000` 以前、與本組的範圍問題無關，可能出自原量測的判定規則較寬（例如中間夾指令或計入函式間的未歸屬 byte，後者有 6 處 `8B 45 xx 50` 形樣），若要讓數字可重現需保留原量測腳本。",
+  "developer_question": "DPMI 模組（src/dpmi.c 的 6 支）確切的最佳化選項要不要追到定案？重建版以統一旗標編譯、依 ADR-0001 不影響功能等價，所以這只是史料層面的問題。若要定案，做法是以 tools/build_flags/fn_match.py --units dpmi 搭配 --set 逐一試 `-s` 之上的最佳化組合（-ox、-os、-ot、-oa、-oi、-ol、-or、-oe 及其組合，並比較 EBX 可破壞的 modify 宣告有無），直到 6 支全部逐 byte 相同，再把結果寫回 build_flags.md 的 DPMI 段落。",
+  "_landed": true,
+  "item": "Group O1: 2 fix(es) the verification passes could not make in the page they judged.\nFiles named: rebuild_info/build_flags.md\n\n[C:P56] (found while verifying rebuild_info/build_flags.md)\n  the fix asked for: rebuild_info/build_flags.md 的 2,587 個推送點（PUSH 計數）沒有涵蓋 0x3c000–0x3cbc0 的 CD 與 DPMI 常式；若數字要代表全部遊戲 C 程式碼，就要重新量過，並連動同檔其他引用這個數字的句子與票 22.2 的敘述。確認這個數字現在說的範圍與頁面寫的範圍是否一致，不一致就改成一致（重量或改寫範圍）。\n\n[C:X146] (found while verifying rebuild_info/build_flags.md)\n  the fix asked for: DPMI 那一組常式的確切最佳化選項（-s 之外）沒有定案：預設最佳化加 EBX 可破壞的宣告只重現 6 支中的 3 支。確認 rebuild_info/build_flags.md 對這一組的描述與這個現況一致（沒有把未定案的旗標寫成定論）；需要進一步的差分編譯才能定案時，在 developer_question 寫明要做什麼。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O2",
+  "item_sha1": "107ac93c7411ee2c0d503b819be91c07a3e12905",
+  "members": [
+   {
+    "ref": "C:X106",
+    "status": "done_already",
+    "note": "program_info/battle.md、spell.md、ch30.md、src 與 tests 的註解及 Ghidra plate 對「肖像編號 > 10」都只寫它涵蓋 0x0b 蘭斯洛特與 0x0f 起的轉職形態（src/unitatk.c 與 plate 另寫明 00..0b 是十二名我方人物、10 不是名冊分界），沒有任何一處暗示它是名冊界線，無需再改。"
+   }
+  ],
+  "edits": [],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "物理攻擊經驗的除數加 30 以攻方肖像編號 > 10 為界，知識庫只記載已確立的涵蓋範圍（0x0b 蘭斯洛特、0x0c..0x0e 非隊伍肖像與 0x0f 起的轉職形態），src/combat.c 與 src/unitatk.c 的註解已明寫 10 不是名冊分界；這一組不需要任何修改。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/combat.c:98-106",
+    "observation": "XP_PENALTY_PORTRAIT_ID_THRESHOLD 10 的註解寫明測試對象是肖像編號本身、涵蓋 0x0b 與 0x0f 起，並說 10 的其他意義未確立、00..0b 是十二名我方人物所以不是名冊分界。"
+   },
+   {
+    "source": "src",
+    "location": "src/unitatk.c:122-129",
+    "observation": "同一常數的註解同樣寫明涵蓋 0x0b、0x0f 起與非隊伍肖像，10 不是名冊與其他東西的分界。"
+   },
+   {
+    "source": "src",
+    "location": "src/combat.c:303, src/unitatk.c:575",
+    "observation": "比較是 attacker->portrait_id > XP_PENALTY_PORTRAIT_ID_THRESHOLD。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「物理攻擊」節",
+    "observation": "只寫「肖像編號 > 10 的判定涵蓋 0x0b 蘭斯洛特與所有轉職後的形態（0x0f 起）」，沒有稱其為名冊分界。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/spell.md 法術經驗段",
+    "observation": "明寫物理攻擊 > 10、法術 > 8、回復 0x0f..0x21 三處各自獨立，不是同一條規則。"
+   },
+   {
+    "source": "kb",
+    "location": "assets/characters.md 名冊表",
+    "observation": "00..0b 是十二名我方人物（0A 珊、0B 蘭斯洛特），0C..0E 是索爾／卡里斯／亞雷斯，0F 起為轉職形態與空白列，證實 10 不落在名冊分界上。"
+   },
+   {
+    "source": "kb",
+    "location": "ghidra_snapshot/comments.txt（fdps_combat_compute_hit_outcome 與 fdps_unit_resolve_attack_hit 的 plate）",
+    "observation": "兩段 plate 只描述涵蓋範圍，後者另寫明 10 is not the roster boundary。"
+   },
+   {
+    "source": "src",
+    "location": "tests/combat.c:939, tests/unitatk.c:820",
+    "observation": "測試註解只說明 > 10 而非 >= 10、肖像 10 不受懲罰，沒有名冊的含意。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "界線為何是 10 而非 0x0b 或 0x0e（設計者意圖）無法從程式或資料得知；行為本身已完全確立，重建照 > 10 寫即功能等價，所以不需要開發者決定，也不需寫進 open_issues.md。",
+  "developer_question": "",
+  "_landed": true,
+  "item": "Group O2: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: program_info/battle.md, src/combat.c, src/unitatk.c\n\n[C:X106] (found while verifying program_info/battle.md)\n  the fix asked for: src/combat.c 與 src/unitatk.c 的經驗懲罰以肖像編號 > 10 為界，10 在程式裡還有什麼意義沒有確立（00..0b 是十二名我方人物，10 不是名冊的分界）。確認知識庫（program_info/battle.md 等）對這個界線的描述只寫已確立的事實、沒有暗示它是名冊分界；若這是真的無法從程式與資料回答的問題，在 developer_question 寫明。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O3",
+  "item_sha1": "a15947d810c319a0f0a271c7ead6a29b0ad5b758",
+  "members": [
+   {
+    "ref": "C:X13",
+    "status": "fixed",
+    "note": "攻略站 list 頁的成長範圍表確有一格不符（英雄 HP 寫 12-19，資料檔 0x12 0x14 即 18、20，範圍 18-19），但比對工具與第 7 行的 31 列指的是 modify2 頁的原值表，那一列 0F 12 0A 0D 03 04 12 14 0E 12 21 與資料檔相符；改寫第 7 行分清兩頁並記下這一格，ACCEPTED 與 DISCREPANCIES 不必收，因為 crosscheck 不比對 list 頁的成長範圍表。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "assets/characters.md",
+    "old": "- **數值**：四個 `.DAT` 的實際 byte。攻略站列出的 31 列升級成長、34 列法術習得、以及 12 名人物第一次出場的 LV／AP／DP／DX／HP／MP 全部與資料檔逐筆相符。",
+    "new": "- **數值**：四個 `.DAT` 的實際 byte。攻略站 `modify2` 頁的 31 列升級成長原值與 34 列法術習得、`list` 頁 12 名人物第一次出場的 LV／AP／DP／DX／HP／MP 全部與資料檔逐筆相符。`list` 頁另有一張 31 列的每級成長範圍表，只有一格不符：**`21` 蘭迪斯／英雄的 HP 攻略站寫 12-19，資料檔的原值是 `0x12`、`0x14`（18、20），每級成長 18–19**，以資料檔為準；攻略站的 12 與原值的十六進位寫法相同，`modify2` 頁印的這一列原值也是 `12 14`。",
+    "why": "C:X13"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "assets/characters.md 第 7 行原本把攻略站兩張 31 列的成長表混為一談：modify2 頁的原值表（crosscheck 的 GUIDE_LEVELUP 比對對象）與資料檔完全相符，list 頁的每級成長範圍表只有 21 蘭迪斯／英雄的 HP 下限寫 12 而資料檔是 18（0x12）。第 7 行改為分別說明兩頁並點出這一格；crosscheck 不比對 list 頁的成長範圍表，所以 ACCEPTED 與鏡像它的 DISCREPANCIES 都不需要新增條目。",
+  "evidence": [
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/MISC/FRILEVUP.DAT@0x16B (record 0x21)",
+    "observation": "0f 12 0a 0d 03 04 12 14 0e 12 21：HP 原值 0x12、0x14 = 18、20，每級成長 18–19"
+   },
+   {
+    "source": "kb",
+    "location": "docs/guide/fdps/list.txt:12",
+    "observation": "英雄 15-17 10-12 03 12-19 14-17：HP 下限 12 與資料檔的 18 不符，其餘四欄相符"
+   },
+   {
+    "source": "kb",
+    "location": "docs/guide/fdps/modify2.txt:114",
+    "observation": "789A03 蘭迪斯 英雄 0F 12 0A 0D 03 04 12 14 0E 12 21，十六進位原值與資料檔逐 byte 相同"
+   },
+   {
+    "source": "data",
+    "location": "workspace/vfs_dump/MISC/FRILEVUP.DAT@0x000-0x293 vs docs/guide/fdps/list.txt:9-39 (compared by workspace/kb_followup/scratch/O3/listcmp.py)",
+    "observation": "list 頁 31 列成長範圍表對 FRILEVUP.DAT（上限取原值減 1、相等取原值）逐格比對，唯一不符是 0x21 HP guide (12,19) data (18,19)"
+   },
+   {
+    "source": "tool",
+    "location": "tools/guide_offsets/crosscheck.py:186-219, 386-390",
+    "observation": "GUIDE_LEVELUP 取自 modify2.htm 的原值表（0x21 為 18,20），check_levelup 只比對這張；list.htm 只用到滿級屬性表的第一行（GUIDE_APPEARANCE），成長範圍表不在比對範圍"
+   },
+   {
+    "source": "tool",
+    "location": "tools/data_skill/build.py:55-65",
+    "observation": "DISCREPANCIES 鏡像 crosscheck 的 ACCEPTED，而 ACCEPTED 只收 crosscheck 比對過的欄位，list 頁成長範圍表不在其中，不需新增"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "親自以 workspace/vfs_dump/MISC/FRILEVUP.DAT 逐 record dump，record 0x21 為 0f 12 0a 0d 03 04 12 14 0e 12 21（HP 原值 18、20）；依 src/fdpstype.h:103 的 {min, exclusive max} 語意寫腳本把 docs/guide/fdps/list.txt:9-39 的 31 列成長範圍表對資料檔逐格比對，唯一不符正是 0x21 英雄 HP（攻略站 12-19、資料 18-19），其餘 154 格全中。modify2.txt:84-114 的 31 列原值表與資料檔逐 byte 相同（第 114 行 0F 12 0A 0D 03 04 12 14 0E 12 21）。crosscheck.py 的 GUIDE_LEVELUP（186 行）取自 modify2、GUIDE_APPEARANCE（167 行）取自 list 滿級表第一行，check_levelup 不比對 list 頁的成長範圍表，故 ACCEPTED 與鏡像它的 DISCREPANCIES 不需收這一筆。第 7 行為手寫段落、無產生區塊，不需重產；新文字與 assets/classes.md:7 記錄攻略站單格不符的寫法一致，數值與頁面第 166 行、表格 161 行（18-20）相符。確認。"
+  },
+  "_landed": true,
+  "item": "Group O3: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: assets/characters.md, tools/data_skill/build.py, tools/guide_offsets/crosscheck.py\n\n[C:X13] (found while verifying assets/characters.md)\n  the fix asked for: assets/characters.md 第 7 行寫「攻略站列出的 31 列升級成長……全部與資料檔逐筆相符」。攻略站 fdps/list 印英雄（FRILEVUP.DAT 索引 21）HP 12-19，資料檔的 HP 原值是 12 14。查證攻略站與資料在這一格是否不符；不符就改正第 7 行的說法（並確認 tools/data_skill/build.py 的 DISCREPANCIES 與 tools/guide_offsets/crosscheck.py 的 ACCEPTED 是否需要收這一筆）。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O4",
+  "item_sha1": "8f0d8ef5427c8a71d3657e6a661d5b1ab10c3973",
+  "members": [
+   {
+    "ref": "C:X141",
+    "status": "fixed",
+    "note": "兩頁的驗證對象確實重複列入同七支；依公式實際寫在哪一頁分配：六支 HP／MP 增減、法術狀態與已學法術收集歸 spell.md，異常免疫判定 0x29080（物理攻擊的武器附加異常與法術共用、完整規則已在 battle.md）歸 battle.md，另一頁改成連結，spell.md 重複的免疫清單也改成連結。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "program_info/battle.md",
+    "old": "`0x1dd30`、`0x1e370`、`0x1fa30`、`0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70`、`0x29080`（經驗、升級、HP／MP 增減、狀態異常與計時器，`src/unitstat.c`）",
+    "new": "`0x1dd30`、`0x1e370`、`0x1fa30`、`0x29080`（經驗、升級、狀態計時器與異常免疫判定，`src/unitstat.c`；同檔的 HP／MP 增減、法術狀態與已學法術收集 `0x27070`、`0x275a0`、`0x27840`、`0x28460`、`0x28ee0`、`0x28f70` 歸 [`spell.md`](spell.md)）",
+    "why": "C:X141：battle.md 只保留 0x29080，六支效果函式改成指向 spell.md"
+   },
+   {
+    "file": "program_info/spell.md",
+    "old": "另外本檔擁有下列在別的 `src/` 檔、但只為法術與道具服務的效果規則：`src/unitstat.c` 的 `0x27070`（`fdps_unit_apply_heal`）、`0x275a0`（`fdps_unit_restore_mp`）、`0x27840`（`fdps_unit_collect_known_spells`）、`0x28460`（`fdps_unit_apply_damage`）、`0x28ee0`（`fdps_unit_inflict_random_ailments`）、`0x28f70`（`fdps_unit_apply_status_effect`）、`0x29080`（`fdps_unit_is_ailment_immune`），與 `src/unit.c` 的 `0x282b0`（`fdps_set_flag_bit`）。`fdps_unit_recompute_combat_stats`（`0x24d70`）的戰鬥數值重算公式歸 [`battle.md`](battle.md)。",
+    "new": "另外本檔擁有下列在別的 `src/` 檔、屬於法術與道具的效果規則：`src/unitstat.c` 的 `0x27070`（`fdps_unit_apply_heal`）、`0x275a0`（`fdps_unit_restore_mp`）、`0x27840`（`fdps_unit_collect_known_spells`）、`0x28460`（`fdps_unit_apply_damage`）、`0x28ee0`（`fdps_unit_inflict_random_ailments`）、`0x28f70`（`fdps_unit_apply_status_effect`），與 `src/unit.c` 的 `0x282b0`（`fdps_set_flag_bit`）。異常免疫判定 `fdps_unit_is_ailment_immune`（`0x29080`）物理攻擊的武器附加異常也用，與 `fdps_unit_recompute_combat_stats`（`0x24d70`）的戰鬥數值重算公式同歸 [`battle.md`](battle.md)。",
+    "why": "C:X141：spell.md 拿掉 0x29080，改指向 battle.md"
+   },
+   {
+    "file": "program_info/spell.md",
+    "old": "免疫者由 `fdps_unit_is_ailment_immune`（`0x29080`）判定：職業代碼 `0x19`（機兵）、`0x21`–`0x22`、`0x24`–`0x26`，或肖像編號 `0x3c`–`0x44`（`ENEMYDAT.DAT` 前九筆）。`0x23` 傭兵夾在中間但**不**免疫。免疫只擋三種異常，神之祝福不受影響。",
+    "new": "免疫者由 `fdps_unit_is_ailment_immune`（`0x29080`）判定，哪些職業與肖像編號免疫見 [`battle.md` 的「武器附加的狀態異常」](battle.md#武器附加的狀態異常)。免疫只擋三種異常，神之祝福不受影響。",
+    "why": "C:X141：免疫清單的事實只留在擁有者 battle.md，spell.md 改成連結"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "src/unitstat.c 的七支函式在兩頁驗證對象的重複擁有定案為：0x27070、0x275a0、0x27840、0x28460、0x28ee0、0x28f70 的公式都寫在 spell.md，歸 spell.md；0x29080 異常免疫判定同時被物理攻擊（combat.c）與法術呼叫、完整規則已在 battle.md，歸 battle.md。兩頁驗證對象互相改成連結，spell.md 重複的免疫清單改為連到 battle.md。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/unitstat.c:577-628",
+    "observation": "fdps_unit_is_ailment_immune 的四個呼叫點是 fdps_combat_compute_hit_outcome 兩處（0001a194、0001a1e2）、fdps_unit_inflict_random_ailments、fdps_unit_apply_status_effect；判定為職業 0x19、0x21..0x22、0x24..0x26 或肖像 0x3c..0x44，與 battle.md 的敘述一致"
+   },
+   {
+    "source": "src",
+    "location": "src/combat.c:251,258",
+    "observation": "物理攻擊的全螢幕路徑呼叫 fdps_unit_is_ailment_immune，所以它不是只為法術服務"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/spell.md「回復公式」「傷害公式」「狀態效果」「施法的前提與法術選單」",
+    "observation": "0x27070、0x275a0、0x28460、0x28f70、0x28ee0 的公式與 0x27840 的用途都寫在 spell.md；battle.md 對這六支只有連回 spell.md 的引用與亂數表列項"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/battle.md「武器附加的狀態異常」、program_info/spell.md「狀態效果」",
+    "observation": "兩頁各寫一份完整的免疫職業／肖像清單，battle.md 的版本較完整（另列 0x1a 魔神與 0x27 不免疫）"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查 src：fdps_unit_is_ailment_immune（src/unitstat.c:603）除了 unitstat.c:438、540 兩個法術路徑，也被 src/combat.c:251、258 的物理攻擊呼叫，判定內容與 battle.md 第 126 行完整清單一致，歸 battle.md 合理；其餘六支的公式確實寫在 spell.md（第 15、122、144、163、190 行起），battle.md 對它們只有連回 spell.md 的引用與亂數表列項。fdps_unit_restore_mp 另被 src/btlturn.c:885–916 的每回合回復呼叫、fdps_unit_collect_known_spells 另被 aiscore.c、btlact.c、statwin.c 呼叫，所以把 spell.md 原句「只為法術與道具服務」改成「屬於法術與道具的效果規則」反而更準。三段 old 字串都逐字存在於 battle.md 第 3 行、spell.md 第 3 行與第 188 行；battle.md 第 112 行有「## 武器附加的狀態異常」標題，錨點成立；0x1dd30／0x1e370／0x1fa30 為經驗發放、升級加點、狀態計時器，新的說明「經驗、升級、狀態計時器與異常免疫判定」正確。移除 spell.md 的免疫清單不失資訊（battle.md 版本含 0x23 傭兵不免疫且更完整），pitfalls.md 連到 spell.md 的是判定順序，仍留在 spell.md。無 Ghidra 變更、無需重產，照原判定落地。"
+  },
+  "_landed": true,
+  "item": "Group O4: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: program_info/battle.md, program_info/spell.md, src/unitstat.c\n\n[C:X141] (found while verifying program_info/spell.md)\n  the fix asked for: program_info/spell.md 與 program_info/battle.md 的「驗證對象」都把 0x27070、0x275a0、0x27840、0x28460、0x28ee0、0x28f70、0x29080 列為自己擁有（battle.md 以 src/unitstat.c 列入，spell.md 以效果規則列入）。每個事實只能有一個擁有者：決定每一支歸哪一頁，另一頁的驗證對象拿掉或改成連結。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O5",
+  "item_sha1": "665750c273d2b7578dd7aebf08fffde2b4e6059c",
+  "members": [
+   {
+    "ref": "F:F22",
+    "status": "fixed",
+    "note": "ICON00.DAT 在 0x051c 的 SWITCH_MAP 會再呼叫一次 fdps_chapter_state_reset 依名冊重建地圖 0，所以名冊加入只需排在第 3 步（過場）之前，第 1 步原文「必須在下一步之前」不成立，已改正。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "chapters/ch01.md",
+    "old": "新遊戲時名冊剛被清空，所以他落在名冊第 0 格。這一步必須在下一步之前，否則地圖的我方 slot 取不到人。",
+    "new": "新遊戲時名冊剛被清空，所以他落在名冊第 0 格。這一步必須在第 3 步的過場之前：過場在 `0x051c` 以 `SWITCH_MAP` 再跑一次 reset、依名冊重建地圖 0，決定上場名單的是那一次重建，所以加入排在第 2 步之前或之後都一樣，排到過場之後蘭迪斯就不在本章地圖上。",
+    "why": "F:F22"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "第 1 章進入流程的名冊加入，約束是排在開場過場（其 0x051c 的 SWITCH_MAP 重建）之前，而非排在第 2 步 reset 之前；ch01.md 第 1 步改成與 program_info/chapter.md 及 src/chinit1.c 一致。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chinit1.c:83-93",
+    "observation": "註解明記 roster add 只有排在 cut-scene 之前是必要的；Icon00.dat 在 0x51c 的 SWITCH_MAP 0x00 再呼叫 fdps_chapter_state_reset 依名冊重建地圖 0，add 移到 reset 之後但在 fdps_icon_script_run 之前結果相同。"
+   },
+   {
+    "source": "src",
+    "location": "src/chinit1.c:116-118",
+    "observation": "原版順序是 fdps_roster_add_character(0)、fdps_chapter_state_reset()、fdps_icon_script_run(\"Icon00.dat\")。"
+   },
+   {
+    "source": "src",
+    "location": "src/icon.c:1053-1058",
+    "observation": "SCRIPT_OP_SWITCH_MAP 設定 data_fdps_chapter_current_chapter_id 後呼叫 fdps_chapter_state_reset()。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch01.md 過場腳本表 `051c` 列",
+    "observation": "051c 為 SWITCH_MAP → 0（MAP00）。"
+   },
+   {
+    "source": "kb",
+    "location": "program_info/chapter.md「名冊加入排在最後一次依名冊重建單位陣列之前」段",
+    "observation": "第 1 章加入排在第 2 步之前或之後都一樣，只要在第 3 步之前。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "src/chinit1.h 的 fdps_chapter_01_init 註解仍寫「The roster add comes first because the state rebuild deploys the map's player slots out of the roster array」，暗示必須在 reset 之前，與 src/chinit1.c:83-93 的說法不一致；不在本組檔案範圍內，未修改。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "查 src/chinit1.c:83-93 明寫加入只有排在過場之前才是必要的，Icon00.dat 在 0x51c 的 SWITCH_MAP 0x00 會再呼叫 fdps_chapter_state_reset 依名冊重建地圖 0，加入排到過場之後蘭迪斯就不在第 1 章地圖上；src/chinit1.c:116-118 是原版順序；src/icon.c:1053-1058 確認 SWITCH_MAP 設 chapter id 後呼叫 fdps_chapter_state_reset。program_info/chapter.md:63 與 ch01.md:547 的 051c 列一致。舊句在 ch01.md:167 逐字存在，新句與上述事實相符、不比事實含糊，無需 Ghidra 變更或重產。確認。"
+  },
+  "_landed": true,
+  "item": "Group O5: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: chapters/ch01.md, program_info/chapter.md\n\n[F:F22] (found while verifying chapters/ch01.md)\n  the fix asked for: chapters/ch01.md「進入」第 1 步寫「這一步必須在下一步之前，否則地圖的我方 slot 取不到人」，與同一頁第 3 步（0x051c 的重建）互相矛盾：依 program_info/chapter.md 的「名冊加入必須在最後一次依名冊重建單位陣列之前」，應該是必須在第 3 步之前。查證後改正。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O6",
+  "item_sha1": "af8038aa0de350d77b97bee9f05f5f095f066ad8",
+  "members": [
+   {
+    "ref": "O:O22",
+    "status": "fixed",
+    "note": "fdps_chapter_23_event_boss_defeat 無條件把死神狀態 byte 清 0，死神因此以 0 HP 未退場留到過關，fdps_chapter_23_end 第一步的 fdps_battle_destroy_remaining_enemies 會對它再播一次死亡動畫；與第 22 章只在交出契約路徑發生不同，本章每次過關都會，已補進勝利處理流程第 1 步。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "chapters/ch23.md",
+    "old": "1. `fdps_battle_destroy_remaining_enemies`（`0x39e10`）清掉陣營 0 的殘兵。",
+    "new": "1. `fdps_battle_destroy_remaining_enemies`（`0x39e10`）把陣營 0 每個單位的 HP 清成 0，再對所有未退場、HP 為 0 的單位播死亡動畫並設為退場；不跑死亡腳本。死神被擊倒時事件處理已把它的狀態 byte 清成 0（見下方「死神被擊倒」第 1 步），它以 0 HP 未退場留到這裡，所以每次過關都會再被播一次死亡動畫。",
+    "why": "O:O22"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "第 23 章過關時死神一定會再播一次死亡動畫：死亡事件無條件清掉它的狀態 byte，勝利處理第一步的殘兵清除把它當成未退場、HP 為 0 的單位處理；已寫進 ch23.md 手寫的勝利處理流程。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/chevt4.c:942-944",
+    "observation": "fdps_chapter_23_event_boss_defeat 在任何判斷之前取地圖單位 0x20 並把 flags 整個寫 0；註解 901-903 行明言因此 fdps_chapter_23_end 的 fdps_battle_destroy_remaining_enemies 會再播一次死亡動畫。"
+   },
+   {
+    "source": "src",
+    "location": "src/chevt4.c:807-811",
+    "observation": "第 22 章的對應清除只在法蓮娜且背包未滿的分支內，所以第 22 章只有交出契約的路徑才重播，第 23 章則無條件。"
+   },
+   {
+    "source": "src",
+    "location": "src/chend2.c:870",
+    "observation": "fdps_chapter_23_end 第一個呼叫就是 fdps_battle_destroy_remaining_enemies。"
+   },
+   {
+    "source": "src",
+    "location": "src/btlend.c:172-186",
+    "observation": "fdps_battle_destroy_remaining_enemies 把陣營 0 的 HP 清 0，再呼叫 fdps_play_death_animation_and_mark_dead，收集未退場且 HP 為 0 的單位播死亡動畫並設退場。"
+   },
+   {
+    "source": "kb",
+    "location": "chapters/ch23.md 部署表",
+    "observation": "死神（部署記錄 52）是敵方（陣營 0），所以在清除範圍內。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "逐項查 src：chevt4.c:942-944 在畫 0x1a 與任何判斷之前把地圖單位 0x20 的 flags 整個寫 0，901-903 行註解明言因此 fdps_chapter_23_end 的殘兵清除會再播一次死亡動畫；807-811 行確認第 22 章的清除只在交出契約分支內，所以「本章每次過關都會」與第 22 章的差別屬實。呼叫端順序 btlact.c:604-610、item.c:703-705、spellmnu.c:916-918、aiact.c:199-201／304-305 都是先收集死亡腳本、再播死亡動畫設退場、最後才跑死亡腳本，所以死神先被設退場、再由事件清回未退場。chend2.c:870 第一個呼叫就是 fdps_battle_destroy_remaining_enemies；btlend.c:179-185 只看陣營 0 把 HP 字清 0，再呼叫 fdps_play_death_animation_and_mark_dead；death.h:96-129 說它取狀態 bit 0 清除且 HP 等於 0 的單位、播動畫並把狀態 byte 設成 1，本身不收集也不跑死亡腳本。chevt4.c:880-886 另確認擊倒死神是本章唯一的勝利條件，「每次過關」成立。新文字與 ch22.md:246 同一步的寫法一致，沒有比事實模糊；ch23.md 該段是手寫段，不需重產，也沒有 Ghidra 改動。結論：照原判定落地。"
+  },
+  "_landed": true,
+  "item": "Group O6: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: chapters/ch23.md\n\n[O:O22] (found while verifying chapters/ch23.md)\n  the fix asked for: chapters/ch23.md 的過關處理沒有提到死神在過關時會再播一次死亡動畫，ch22.md 對巫湯婆婆有對應的一句。查證第 23 章是否同樣如此；是的話在 ch23.md 手寫的處理流程段補上。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O7",
+  "item_sha1": "6dda03a073a52447293a8a5efac1b545c6e0b83a",
+  "members": [
+   {
+    "ref": "O:O3",
+    "status": "fixed",
+    "note": "三個呼叫端都是把距離 byte 當數值與 0x10 比大小、再減 0x10 得到直線長度，沒有任何遮罩取 bit 或取低 nibble，aitarget.h 的「bit 0x10 標記形狀、低 nibble 是距離」說法與程式碼不符，已改成比較與相減的說法（只改註解）。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "src/aitarget.h",
+    "old": "   +0x03, minus 0x10; bit 0x10 of that byte is what marks the line shape and\n   the low nibble is the reach.",
+    "new": "   +0x03, minus 0x10.  Every caller compares that byte as a number, not as a\n   mask: from 0x10 up it is a line, below 0x10 it goes to\n   fdps_collect_targets_in_range instead, and line_length is the byte less\n   0x10, never a bit test or a low-nibble extract.",
+    "why": "O:O3"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "aitarget.h 對 fdps_collect_targets_in_line 的 line_length 來源說明改為：呼叫端把 ITEM.DAT +0x10／MAGICDAT.DAT +0x03 的距離 byte 當數值與 0x10 比較，0x10 以上走直線、長度是 byte 減 0x10，不是遮罩 bit 0x10 取低 nibble，與 item.c、aiact.c、aiscore.c 的註解及已改正的資料頁一致。",
+  "evidence": [
+   {
+    "source": "src",
+    "location": "src/item.c:804-810, 986-999",
+    "observation": "CMP dword ptr [EBP-0x34],0xf / JLE；use_distance < 0x10 走 range 收集，否則以 use_distance - ITEM_USE_DISTANCE_LINE_BIT 呼叫 fdps_collect_targets_in_line；註解明寫 compared as a number, not masked。"
+   },
+   {
+    "source": "src",
+    "location": "src/aiact.c:321-328, 470-476, 505",
+    "observation": "CMP EAX,0x10 / JGE；use_distance >= ITEM_LINE_SHAPE_BASE 走直線，長度 use_distance - 0x10。"
+   },
+   {
+    "source": "src",
+    "location": "src/aiscore.c:225-229, 344-357",
+    "observation": "use_distance < 0x10 走 range，否則以 use_distance - 0x10 呼叫 fdps_collect_targets_in_line。"
+   },
+   {
+    "source": "src",
+    "location": "src/spellmnu.c:646-653, 848-856",
+    "observation": "法術端同樣是 cast_range > 0x0f 時以 cast_range - 0x10 呼叫直線收集，屬比較加相減。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "src/spellmnu.c:646-651 的 CAST_RANGE_LAST_RADIUS 註解同樣寫「a straight line whose length is the low nibble」，且說此編碼與 fdps_collect_targets_in_range 相同，程式實際是 cast_range - 0x10；該檔不在本組檔案內，未改，需另一組處理。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "逐一讀了 fdps_collect_targets_in_line 的全部四個呼叫端：src/aiact.c:471-483（use_distance >= 0x10 走直線、長度 use_distance - 0x10，否則 fdps_collect_targets_in_range）、src/aiscore.c:344-358（< 0x10 走 range，否則減 0x10 走直線）、src/item.c:986-1000（同上）、src/spellmnu.c:848-859（cast_range > 0x0f 走直線、cast_range - 0x10，否則走 range）。四處都是數值比較加相減，沒有任何遮罩取 bit 0x10 或取低 nibble；src/aitarget.c:153 的迴圈直接以 line_length 為步數。舊註解「bit 0x10 標記形狀、低 nibble 是距離」在 byte 達 0x20 以上時會與程式行為不同，新註解每一句都與程式碼相符，只改註解、行寬與檔案風格一致。無 Ghidra 改動、無需重產。spellmnu.c:646-651 的同類說法屬另一組，第一位的 open_question 記錄正確。"
+  },
+  "_landed": true,
+  "item": "Group O7: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: assets/items.md, assets/spells.md, assets/tables/items.md, src/aiact.c, src/aiscore.c, src/aitarget.h, src/item.c\n\n[O:O3] (found while verifying program_info/spell.md)\n  the fix asked for: src/aitarget.h 約第 43–45 行以「bit 0x10 of that byte is what marks the line shape and the low nibble is the reach」描述距離欄位；實際的讀法是與 0x10 比大小、減 0x10（src/item.c、src/aiact.c、src/aiscore.c 的用法），同一說法已在 assets/items.md、assets/tables/items.md、assets/spells.md 改正。查證後把 aitarget.h 的註解改成一致（只改註解）。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O8",
+  "item_sha1": "17748ae11756874306ac939da32230cc8301e545",
+  "members": [
+   {
+    "ref": "O:O39",
+    "status": "fixed",
+    "note": "查證 routing.json 的 status 欄位（functions／globals 的 pending、skipped 的 skip）確實沒有任何工具讀取，產生器的 _doc 已寫明這點；移除欄位需要重產 routing.json 而這不在本輪可重產的清單內，故改在 tools/code_emit/_index.md 的 routing.json 那列寫明 status 是固定值、無讀者、進度在別處，消除「routing.json 記錄進度」的誤解。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "tools/code_emit/_index.md",
+    "old": "| `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改 |",
+    "new": "| `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改。每筆的 `status` 是產生時寫死的值（`functions`／`globals` 一律 `pending`，`skipped` 一律 `skip`），沒有任何工具讀它，**不代表進度**：function 的進度在 `data/emit_state.json`，全域的落地在 `tools/data_emit/data/manifest.json` |",
+    "why": "O:O39"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "routing.json 的 status 欄位沒有讀者：next_batch.py 的 status 取自 emit_state.json（routing 那邊只取 name 與 target），gen_stubs.py、land.py、worklist.py、fn_match.py、emit_order.py、sweep.py 讀 routing.json 時都不看 status。產生器與 routing.json 的 _doc 已寫明它是固定值、無工具讀取；本組在 tools/code_emit/_index.md 補上同樣的說明，讓查索引的人不會把它當成進度。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "tools/code_emit/build_routing.py 第 712、762、785 行與 _doc（第 969–972 行）",
+    "observation": "skipped 寫 \"status\": \"skip\"，globals 與 functions 寫 \"status\": \"pending\"；_doc 已說明 Every `status` field is the fixed value written here ... and no tool reads it，progress 在 emit_state.json 與 manifest.json。"
+   },
+   {
+    "source": "tool",
+    "location": "tools/code_emit/next_batch.py merged()",
+    "observation": "entry 由 emit_state.json 的 progress 複製，只從 routing 取 name 與 target；setdefault(\"status\",\"pending\") 作用在 state 的 entry，不讀 routing 的 status。"
+   },
+   {
+    "source": "tool",
+    "location": "Grep 'routing' 於 tools/**/*.{py,js,java}；Grep 'status' 於 gen_stubs.py、land.py、worklist.py、fn_match.py、oe_threshold.py、emit_order.py、emit_ticket23.js",
+    "observation": "所有讀 routing.json 的程式都不引用其 status 欄位（gen_stubs 讀 skipped 的 symbol／target／carried_by，land.py 比 addr／target 等）。"
+   },
+   {
+    "source": "tool",
+    "location": "python workspace/kb_followup/scratch/O8/cmp.py (imports tools/code_emit/build_routing.py, calls build() and compares with the committed routing.json)",
+    "observation": "functions 514、globals 232、skipped 159 筆與提交版逐筆相同，check() 無問題：若日後要拿掉 status，重產只會少掉該欄位與改 _doc。"
+   },
+   {
+    "source": "tool",
+    "location": "python -c 讀 tools/code_emit/data/routing.json",
+    "observation": "status 值只有 pending 746 筆、skip 159 筆；_doc 已含無讀者的說明。"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "若要照原請求從產生器拿掉 status 欄位，需同時改 build_routing.py 的三處與 _doc 並執行 python tools/code_emit/build_routing.py 重產 routing.json／routing.md；已驗證現行輸入重產與提交版除 status 外完全相同，但 routing.json 的重產不在本輪的 regenerate 選項內，故未動產生器以免產生器與輸出不同步。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "自行 grep 所有讀 routing.json 的工具（next_batch.py、gen_stubs.py、emit_order.py、sweep.py、data_emit/land.py、build_flags/fn_match.py、兩支 workflow 腳本）：next_batch.merged() 只從 routing 取 name／target，status 來自 emit_state.json；sweep.py 的 status 是 emit_issues 的欄位；其餘都不讀 status。routing.json 實際值為 functions 514 筆與 globals 232 筆全 pending、skipped 159 筆全 skip；build_routing.py 第 969–972 行的 _doc 已寫明無讀者、進度在 emit_state.json 與 tools/data_emit/data/manifest.json（檔案存在）。_index.md 第 27 行 old 字串逐字相符，new 文字與事實一致、符合該表風格。因 routing.json 重產不在本輪可重產清單，改以索引說明消除「routing.json 記錄進度」的誤解是請求允許範圍內的合理處置，status fixed 成立，無需重產或 Ghidra 變更。"
+  },
+  "_landed": true,
+  "item": "Group O8: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: tools/code_emit/_index.md, tools/code_emit/build_routing.py\n\n[O:O39] (found while verifying rebuild_info/emit_pipeline.md)\n  the fix asked for: tools/code_emit/build_routing.py 寫進 routing.json 的 functions 與 globals 的 \"status\": \"pending\" 沒有任何讀者，會讓人誤以為 routing.json 記錄進度。確認沒有讀者之後，從產生器拿掉這兩處（skip 區的 \"skip\" 若同樣沒有讀者一併處理，或在 _doc 註明它只是分類標記）並以 build_routing.py 重生 routing.json／routing.md；有讀者就維持並在 tools/code_emit/_index.md 說明。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O9",
+  "item_sha1": "2befe7337a3bad258de2cd88c55b2c1188610ecd",
+  "members": [
+   {
+    "ref": "O:O65",
+    "status": "fixed",
+    "note": "Ghidra 快照中沒有任何資料項、struct 欄位或函式簽章套用 long_double_80，10 byte 的浮點常數（如 0x42c30 的 2π、0x4e830 的零）都定義成 byte[10]，「多處浮點常數」不實，改寫成只是型別定義、未套用在任何位置。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "program_info/data_structures.md",
+    "old": "| `long_double_80` | 10 | 多處浮點常數 | 80-bit extended real，與 FD2 的同名型別相同 |",
+    "new": "| `long_double_80` | 10 | 只有型別定義，沒有套用在任何資料項、struct 欄位或函式簽章；10 byte 的浮點常數（如 `0x42c30` `L$1_trig387_two_pi`）都定義成 `byte[10]` | 80-bit extended real，與 FD2 的同名型別相同 |",
+    "why": "O:O65"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "long_double_80 在 Ghidra 只是一個 10 byte 的型別定義，沒有任何資料項、struct 欄位或函式簽章用到它；emu387／trig387 的 10 byte 常數與係數表都是 byte[N]。data_structures.md 程式庫記錄表的「所在」欄照此改正。",
+  "evidence": [
+   {
+    "source": "kb",
+    "location": "ghidra_snapshot/data_types.txt（struct /fdps/long_double_80）",
+    "observation": "型別定義存在，size=0xa，三個欄位 dwMantissa_lo／dwMantissa_hi／wSign_exp"
+   },
+   {
+    "source": "kb",
+    "location": "ghidra_snapshot/*.txt 全文搜尋 long_double_80",
+    "observation": "只在 data_types.txt 的型別定義本身出現；data.txt、functions.txt（含 prototype）、其他 struct 的欄位都沒有引用"
+   },
+   {
+    "source": "kb",
+    "location": "ghidra_snapshot/data.txt",
+    "observation": "00042c30 | 0xa | /byte[10] | L$1_trig387_two_pi；0004e830 | 0xa | /byte[10] | L$1_emu387_ftst_zero；係數表如 L$1_emu387_sin_taylor_coeff 為 byte[90]"
+   },
+   {
+    "source": "ghidra",
+    "location": "0x42c30",
+    "observation": "35 C2 68 21 A2 DA 0F C9 01 40，是 2π 的 80-bit extended real，佈局與 long_double_80 相同但未套用該型別"
+   }
+  ],
+  "confidence": "high",
+  "open_question": "同一張表的 L$N_emu387_state 一列寫所在 0x613c8、「必須當成一塊連續記錄」，但 ghidra_snapshot/data.txt 目前在 0x613c8 起是拆開的 L$N_emu387_control_word／tag_word／register_stack／source_operand 等個別資料項，沒有套用 L$N_emu387_state；另外 L$N_emu387_extended_real 與 long_double_80 是兩個佈局相同的 10 byte 型別，前者同樣沒有被引用。這兩點不在本組範圍，未處理。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "ghidra_snapshot（與 HEAD 一致、無未提交變更）全文只有 data_types.txt:641 的型別定義本身出現 long_double_80，data.txt、functions.txt 與其他 struct 欄位都沒有引用；data.txt:554 的 0x42c30 L$1_trig387_two_pi 與 :670 的 0x4e830 L$1_emu387_ftst_zero 都是 byte[10]。Ghidra 即時查 0x42c30 為 35 C2 68 21 A2 DA 0F C9 01 40（指數 0x4001、有效數 C90FDAA22168C235，即 2π），long_double_80 佈局為 dwMantissa_lo／dwMantissa_hi／wSign_exp 共 10 byte。原文「多處浮點常數」不實，新文字與事實相符、具體，且沿用本表「位址 + 符號」的寫法。無 Ghidra 變更與重產需求，結論成立。",
+   "edits": [],
+   "ghidra": [],
+   "regenerate": []
+  },
+  "_landed": true,
+  "item": "Group O9: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: program_info/data_structures.md\n\n[O:O65] (found while verifying program_info/data_structures.md)\n  the fix asked for: program_info/data_structures.md 的 long_double_80 一列「所在」欄寫「多處浮點常數」，但 ghidra_snapshot/data.txt 目前沒有任何資料項套用這個型別（10 byte 常數都是 byte[10]）。查證後改正那一欄（寫出這個型別實際用在哪裡，例如只是結構或函式簽章裡的型別）。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ },
+ {
+  "id": "O10",
+  "item_sha1": "28701cb99dd9a4c4372f04de9d77f638cf10f5a6",
+  "members": [
+   {
+    "ref": "V:program_info__code_pools__1#16",
+    "status": "fixed",
+    "note": "比對報告是在 442 個 ail 的舊邊界上跑的；照目前邊界 000447a6 已是 81 條指令的可雜湊 function 且程式庫沒有同長度的 body、0003f6c9 只有 3 條指令，三列改為 390／7／39，並寫明兩處邊界變動與分母 442→436 的組成。"
+   }
+  ],
+  "edits": [
+   {
+    "file": "program_info/code_pools.md",
+    "old": "436 個 `ail` function 對上 `ailv3.lib` 的 428 個 function：\n\n| | 數量 | |\n| --- | --- | --- |\n| 命中，且 full hash 完全相同 | 390 | 其中 332 個只對上一個程式庫 function |\n| 沒命中，短到算不出雜湊 | 8 | Function ID 的門檻是 4 個 code unit |\n| 沒命中，可雜湊 | 38 | |\n\n沒有任何一個是「命中但雜湊不同」——這套比對只有全等或不命中兩種結果。命中數 390 與程式庫那一側的 428 都不受覆核的改判影響（改判的六個全部落在沒命中的那一堆），變的是分母：442 → 436。",
+    "new": "436 個 `ail` function 對上 `ailv3.lib` 的 428 個 function。比對是在 442 個 `ail` 時的 function 邊界上跑的，之後有兩處邊界改變：當時 14 byte、算不出雜湊的 `000447a6` 與緊接其後 273 byte、可雜湊但沒命中的 `000447b4` 合併成 287 byte 的 `AIL_internal_timer_isr`；`0003f6c9`（11 byte、3 條指令）改判進 `ail`，不在比對範圍內。下表照目前的邊界分類：\n\n| | 數量 | |\n| --- | --- | --- |\n| 命中，且 full hash 完全相同 | 390 | 其中 332 個只對上一個程式庫 function |\n| 沒命中，短到算不出雜湊 | 7 | Function ID 的門檻是 4 個 code unit；`0003f6c9` 在內 |\n| 沒命中，可雜湊 | 39 | 合併後的 `000447a6` 在內 |\n\n沒有任何一個是「命中但雜湊不同」——這套比對只有全等或不命中兩種結果。命中的 390 個邊界都沒有變，數字直接沿用；合併後的 `000447a6` 有 81 條指令、可雜湊，但 `ailv3.lib` 裡沒有同長度的 function，full hash 不可能相同，所以歸沒命中。命中數 390 與程式庫那一側的 428 都不受覆核的改判影響（改判出去的六個全部落在沒命中的那一堆），變的是分母：442 扣掉改判出去的六個與合併掉的一個、加上改判進來的 `0003f6c9`，是 436。",
+    "why": "V:program_info__code_pools__1#16"
+   }
+  ],
+  "ghidra": [],
+  "regenerate": [],
+  "conclusion": "code_pools.md 的 AIL Function ID 三列數字原本混用舊邊界（000447a6 仍算 14 byte 不可雜湊）與新成員（0003f6c9），改成照目前邊界的 390／7／39，並寫明比對跑在 442 個 ail 的舊邊界上、兩處邊界變動、合併後的 000447a6 為何歸沒命中，以及分母 442→436 的組成。",
+  "evidence": [
+   {
+    "source": "tool",
+    "location": "output of tools/pool_triage/fid/analyze_ail_matches.py (workspace/pool_triage/fid_ail/report/ail_fid_report.json), read with python -c comparing its rows to pool_ail rows of ghidra_snapshot/functions.txt by address and body size",
+    "observation": "報告 442 列：命中 390、不可雜湊沒命中 7、可雜湊沒命中 45。與目前 436 個 pool_ail 相比，報告多出六支 DPMI（0003ca49、0003cad2、0003cb01、0003cb6e、0003cb93、0003cbaa，皆可雜湊沒命中）與 000447b4（273 byte，可雜湊沒命中）；目前多出 0003f6c9（不在報告）；邊界改變的只有 000447a6（14→287 byte）。沿用報告分類時目前成員是命中 390、不可雜湊 7（含舊的 000447a6）、可雜湊 38，加上 0003f6c9 即頁面的 8／38。"
+   },
+   {
+    "source": "ghidra",
+    "location": "FDPS.LE 0x447a6（disassemble_function）",
+    "observation": "000447a6–000448c4 共 81 條指令，從 CMP CS:[0x605f2],0 / JA 0x448c5 起、PUSHAD…IRETD 止，遠超過 4 個 code unit 的門檻。"
+   },
+   {
+    "source": "ghidra",
+    "location": "ghidra_snapshot/functions.txt 0003f6c9",
+    "observation": "0003f6c9 body 0xb、pool_ail；三條指令 MOV EAX,[0x69e7c] / PUSH EAX / JMP，不到 4 個 code unit，算不出雜湊。"
+   },
+   {
+    "source": "tool",
+    "location": "output of tools/pool_triage/fid/FidHashDump.java on ail_code.obj (workspace/pool_triage/fid_ail/hashes_ail_code.json), read with python -c listing functions named *timer_isr* or with body_size 273/287 or code_units 79-81",
+    "observation": "ailv3.lib 的 477 個 function 沒有任何一個 body 是 287 byte；最接近的 AIL_internal_timer_isr_master 是 294 byte、85 code unit，code unit 約 80 的只有 249 byte 的 AIL_internal_dig_apply_io_parms，合併後的 000447a6 不可能與任何一個 full hash 相同。"
+   },
+   {
+    "source": "tool",
+    "location": "output of tools/pool_triage/fid/FidHashDump.java on FDPS.LE: grep -n 000447a6 workspace/pool_triage/fid_ail/hashes_fdps.json",
+    "observation": "舊邊界：000447a6 body 14、hashable false；000447b4 body 273、hashable true、78 code unit。"
+   }
+  ],
+  "confidence": "medium",
+  "open_question": "合併後 000447a6 沒命中是由程式庫沒有同長度 body 推得，未在目前 Ghidra 狀態上實際重跑 FidQuery／FidHashDump（重跑需執行 Ghidra 腳本，本段只能唯讀）。",
+  "developer_question": "",
+  "_reread": {
+   "decision": "confirm",
+   "why": "重讀 ail_fid_report.json（summary 442 列：命中 390、不可雜湊沒命中 7、可雜湊沒命中 45）並逐位址對照 ghidra_snapshot/functions.txt 的 436 個 pool_ail：報告多出六支 DPMI 與 000447b4、目前多出 0003f6c9（舊 hashes_fdps.json 裡是 pool_binary_artifact、11 byte、hashable false，確為改判進 ail），body 改變的只有 000447a6（14→287，舊分類為不可雜湊沒命中），命中的 390 個邊界全未變；沿用舊分類得 390／7／38＋0003f6c9，照目前邊界即 390／7／39，分母 442−6−1+1=436。Ghidra disassemble_function 0x447a6 實數 81 條指令（CMP/JA 兩條加原 000447b4 段 79 條），遠超 4 code unit 門檻。hashes_ail_code.json 的 477 個程式庫 function 沒有 287 byte 的 body，code unit 79–82 只有 249 byte 的 AIL_internal_dig_apply_io_parms，合併後的 000447a6 不可能 full hash 全等，歸可雜湊沒命中成立。edit 文字與這些事實逐項相符，未寫出超出證據的數字，無 Ghidra 變更與重產需求。"
+  },
+  "_landed": true,
+  "item": "Group O10: 1 fix(es) the verification passes could not make in the page they judged.\nFiles named: program_info/code_pools.md\n\n[V:program_info__code_pools__1#16] (found while verifying program_info/code_pools.md)\n  the fix asked for: code_pools.md 的 AIL Function ID 報告（命中／不可雜湊／可雜湊的三列數字）是在舊的 function 邊界上跑的：000447a6 與 000447b4 已合併成 287 byte 的 AIL_internal_timer_isr、0003f6c9 新入 ail。照現在的邊界不可雜湊的應是 7 個、可雜湊 39 個，前提是合併後的 000447a6 仍未命中。能以唯讀方式重跑 tools/pool_triage/fid 的查詢就重跑並改正數字；不能就把頁面寫成只陳述當時的邊界與結果、指出兩處邊界已改變，不要寫出未經重跑的新數字。\n\nThe verdict that raised a fix is in workspace\\kb_verify\\verdicts\\<unit>.json (V:<unit>#<n>), workspace\\kb_consist\\verdicts\\<id>.json (C:<id>), workspace\\kb_refused\\verdicts\\<id>.json (F:<id>) or workspace\\kb_outside\\verdicts\\<id>.json (O:<id>)."
+ }
+]

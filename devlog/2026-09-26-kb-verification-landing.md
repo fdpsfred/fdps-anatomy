@@ -38,6 +38,10 @@ outside 段的判定裡有 19 項 Ghidra 改動：兩個參數改名（`fdps_aud
 
 四份收尾報告除了修正以外，還有十來條「驗證者看到了、但不在自己那一項裡所以沒處理」的問題：`build_flags.md` 的 2,587 個推送點沒涵蓋 CD 與 DPMI 那一段、`characters.md` 說攻略站的升級成長與資料逐筆相符但英雄的 HP 下限不符、`spell.md` 與 `battle.md` 的驗證對象重疊七支、`src/aitarget.h` 還是「bit 0x10 加低 4 位」的舊說法、`ch01.md` 第 1 步與第 3 步的先後矛盾、`data_structures.md` 的 `long_double_80` 所在欄、AIL 的 Function ID 數字是舊邊界的、`routing.json` 沒人讀的 status 欄等。原本想直接列給開發者，但它們多數是查得到答案的事實，不是只有開發者答得了的問題；照 CLAUDE.md，工作結束前 backlog 要處理掉。沒有自己逐條判斷，而是逐條寫成請求（`followups_25_17.json`），讓 `kbfollowup.py` 套用第四段的機制（分組、gate、回掃、落地、完整建置閘門）再跑一輪。`spell.md` 的「不可通行旗標擋住擴散」一條在寫請求前查過已被別組改掉，沒有列進去。
 
+第五段跑完：10 組全部定案，8 條修正、3 條查證後已涵蓋（`build_flags.md` 的推送點範圍與 DPMI 旗標、經驗懲罰的界線，頁面原本就寫對了），落地 10 筆，完整建置閘門 `game` 仍是 `pad`。AIL 的 Function ID 數字照目前邊界重算成 390／7／39——原本擔心要重跑 Ghidra 的查詢，agent 改從程式庫裡沒有同長度的 body 推得合併後的 `000447a6` 不會命中，所以原本列給開發者的那一題撤掉。`routing.json` 的 status 欄查證沒有讀者，但 agent 沒有拿掉它：重產 `routing.json` 不在允許的重產清單裡，拿掉產生器的欄位卻不重產會讓產生器與輸出不同步，所以改在產生器與 `_index.md` 寫明它是固定值、沒有讀者。
+
+它自己又留下三條組外的：`src/chinit1.h` 三處「名冊加入必須在重置之前」的註解（實際約束是在最後一次依名冊重建之前）、`src/spellmnu.c` 同樣的「低 nibble」說法、`data_structures.md` 的 `L$N_emu387_state` 與 `L$N_emu387_extended_real` 兩列（Ghidra 裡沒有套用）。用同一份請求檔再加一條、`freeze --refresh` 重新分組會讓第一批十組的判定全部對不上現行項目而變成過期，所以改成第二批一個檔、一個工作區（`kbfollowup.py --batch 2`），交 `followup2_ticket25_17.js`。
+
 ## lint 的剩餘
 
 兩段 workflow 後剩 15 筆，逐筆看過都是正當用法：README 的資料夾表列出 `workspace/`、`legacy/`、`fdps_game_files/`，詞彙表定義 devlog 這個詞，`build_gate.md` 說明基準值「不放在 `workspace/`」，`data_emit.md`／`emit_pipeline.md` 描述管線自己在 `workspace/` 的足跡與 devlog 的 commit 規則，`pitfalls.md` 範例裡的 `fdps_foo`。規則本身刻意粗，所以不改規則，改在 `kbverify.py` 加 `LINT_ACCEPTED`，每筆附理由，lint 歸零。

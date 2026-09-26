@@ -41,8 +41,10 @@ extern int fdps_collect_targets_in_area(int tile_x, int tile_y, int max_dist,
    the origin: the step is applied before the tile is examined, so the origin
    tile itself is never looked at, and 0 examines nothing at all.  It is the
    ITEM.DAT use_distance byte at +0x10, or the MAGICDAT.DAT distance byte at
-   +0x03, minus 0x10; bit 0x10 of that byte is what marks the line shape and
-   the low nibble is the reach.
+   +0x03, minus 0x10.  Every caller compares that byte as a number, not as a
+   mask: from 0x10 up it is a line, below 0x10 it goes to
+   fdps_collect_targets_in_range instead, and line_length is the byte less
+   0x10, never a bit test or a low-nibble extract.
 
    A tile outside the map -- the grid header's tile extents at
    data_fdps_battle_move_grid_ptr, times 0x18 -- is skipped rather than ending

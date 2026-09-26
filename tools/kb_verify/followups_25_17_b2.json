@@ -1,0 +1,8 @@
+[
+ {"ref": "O:kb_followup/O5", "home_doc": "chapters/ch01.md",
+  "text": "src/chinit1.h 的 fdps_chapter_01_init（約第 34 行）與同檔另外兩處（約第 52、71 行）的註解寫「The roster add comes first because the state rebuild deploys/fills the map's player slots out of the roster array」，暗示名冊加入必須在狀態重置之前；src/chinit1.c 約 83–93 行與 program_info/chapter.md 的說法是「必須在最後一次依名冊重建單位陣列之前」（開場過場的 SWITCH_MAP 會再重建一次）。逐一查證這三處各自的章節，改成與程式一致（只改註解）。"},
+ {"ref": "O:kb_followup/O7", "home_doc": "program_info/spell.md",
+  "text": "src/spellmnu.c 約第 646–651 行 CAST_RANGE_LAST_RADIUS 的註解寫「a straight line whose length is the low nibble」並說此編碼與 fdps_collect_targets_in_range 相同；程式實際以 cast_range 與 0x10 比大小、直線長度是 cast_range - 0x10（src/aitarget.h 的同一說法已改正）。查證後改成一致（只改註解）。"},
+ {"ref": "O:kb_followup/O9", "home_doc": "program_info/data_structures.md",
+  "text": "program_info/data_structures.md 的型別表：L$N_emu387_state 一列寫「所在 0x613c8、必須當成一塊連續記錄」，但 ghidra_snapshot/data.txt 在 0x613c8 起是拆開的 L$N_emu387_control_word／tag_word／register_stack／source_operand 等個別資料項，沒有套用 L$N_emu387_state；L$N_emu387_extended_real 與 long_double_80 是兩個佈局相同的 10 byte 型別，前者同樣沒有被引用。查證後把表改成與 Ghidra 狀態一致（型別存在於哪裡、有沒有被套用、「必須當成一塊連續記錄」是對重建的要求還是對 Ghidra 狀態的描述）；若該改的是 Ghidra（例如應該套用型別），列成 Ghidra 改動。"}
+]

@@ -77,7 +77,7 @@ CRT 與 AIL 的結構用**程式庫原名，不加前綴**（`tm`、`FILE`、`RE
 | `tm` | 36 | `0x6145c` `__start_dst`、`0x61480` `__end_dst` | Watcom 的 `tm` 是 36 byte |
 | `miniheapblkp` | 44 | `0x60388` `__nheapbeg` | 近端堆積的區塊標頭 |
 | `rt_init` | 6 | `0x638f0`、`0x63920` | XI／YI 啟動與收尾鏈的節點 |
-| `long_double_80` | 10 | 多處浮點常數 | 80-bit extended real，與 FD2 的同名型別相同 |
+| `long_double_80` | 10 | 只有型別定義，沒有套用在任何資料項、struct 欄位或函式簽章；10 byte 的浮點常數（如 `0x42c30` `L$1_trig387_two_pi`）都定義成 `byte[10]` | 80-bit extended real，與 FD2 的同名型別相同 |
 | `L$N_emu387_state` | 122 | `0x613c8` | 80x87 模擬器的完整狀態，**必須當成一塊連續記錄** |
 | `SAMPLE` | 2196 | `0x69d30` `data_fdps_audio_sample_handle_table` 的 8 個 handle 指向它 | Miles AIL 的取樣記錄，FD2 當成不透明 handle 沒有解開 |
 | `SEQUENCE` | 1748 | `0x6a0d8` `data_ail_mdi_serve_sequence` 指向它 | 同上 |

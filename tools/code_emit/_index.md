@@ -24,7 +24,7 @@
 
 | 檔案 | 內容 |
 | --- | --- |
-| `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改 |
+| `data/routing.json` | 每支 function 與每個遊戲全域的目標 `.c`，加上不 emit 的符號清單。由 `build_routing.py` 產生，不手改。每筆的 `status` 是產生時寫死的值（`functions`／`globals` 一律 `pending`，`skipped` 一律 `skip`），沒有任何工具讀它，**不代表進度**：function 的進度在 `data/emit_state.json`，全域的落地在 `tools/data_emit/data/manifest.json` |
 | `data/routing.md` | 同一份路由的逐檔清單，人讀用。同樣是產生物 |
 | `data/emit_state.json` | 進度的正本，進版控。續跑的唯一依據。**不記檔案落點** |
 | `data/emit_issues.json` | 等價性疑慮，一個 function 一組。由 bookkeeper 累加，全部 function 落地後由總掃逐條處理。每則的 `status` 與 `from` 是篩選依據，缺了就等於不存在；reviewer 與 emitter 記到同一件事時，reviewer 那則帶 `same_as` 指回去（`emit#N`），總掃據以併成一則。總掃落地後每則多一個 `sweep` 欄位（哪一群、什麼裁決），狀態多一種 `handoff`（帶 `handoff_to`：`23` 或 `24`） |

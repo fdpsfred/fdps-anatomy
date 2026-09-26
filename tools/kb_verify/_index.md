@@ -24,8 +24,8 @@
 | `refused_ticket25_17.js` | 第三段 workflow：被拒收的修正一筆一個 agent，判斷現行文字是否已經說出那筆修正要說的事實，不是就寫出對現行文字的修正；gate、回掃、落地與全部閘門、收尾報告到 `devlog/runs/<date>-kb-refused-*.json` |
 | `kboutside.py` | 前三段判定裡的 `outside`（修正不在被判的那一頁：`src/`／`tests/` 註解、`tools/` 的產生器與手寫資料、別的頁、票、Ghidra）：`freeze` 把三份收尾報告的每一條依它提到的非知識庫檔案以 union-find 分組（只提到知識庫頁的依第一頁），同一段註解的多條請求落在同一組、由同一個 agent 一次寫好；`apply` 只落地第二位 agent 確認或修改的修正，C 原始碼的修正整檔比對（`strip_c` 之後）必須只差註解或只差識別字改名，不寫 `docs/adr/`、`devlog/`、`README.md`，重產只能從固定清單選（`REGENERATE`）；`ghidra` 印出要由票的 session 逐項做的 Ghidra 改動 |
 | `outside_ticket25_17.js` | 第四段 workflow：一組一個 agent，逐條判斷請求是否已做、是否屬實，屬實的寫出修正；gate、回掃、落地（`apply`、重產、知識庫閘門、動到的工具的單元測試、完整建置閘門）、收尾報告到 `devlog/runs/<date>-kb-outside-*.json` |
-| `kbfollowup.py`、`followups_25_17.json` | 前四段留下、驗證者在自己那一項裡收不了的問題（別頁的一句、組外的一段註解、要重量的計數），逐條寫成請求放在 `followups_25_17.json`，沿用 `kboutside.py` 的分組、gate、回掃與落地（`use_workspace` 換到 `workspace/kb_followup/`） |
-| `followup_ticket25_17.js` | 第五段 workflow：形狀同第四段，收尾報告到 `devlog/runs/<date>-kb-followup-*.json` |
+| `kbfollowup.py`、`followups_25_17.json`、`followups_25_17_b2.json` | 前幾段留下、驗證者在自己那一項裡收不了的問題（別頁的一句、組外的一段註解、要重量的計數），逐條寫成請求，沿用 `kboutside.py` 的分組、gate、回掃與落地。一批一個檔、一個工作區（`--batch 1` 是前四段留下的，`workspace/kb_followup/`；`--batch 2` 是第一批自己留下的，`workspace/kb_followup2/`），後一批不重新分組前一批，所以不會讓前一批的判定失效 |
+| `followup_ticket25_17.js`、`followup2_ticket25_17.js` | 第五段與 5b 段 workflow：形狀同第四段，分別跑第 1、2 批，收尾報告到 `devlog/runs/<date>-kb-followup-*.json`、`-kb-followup2-*.json` |
 | `ApplyPlateEdits.java` | Ghidra script：把定案的 plate 改動逐字轉錄進 `FDPS.LE`。輸入是一個 TSV（位址、模式、base64 的舊文與新文），模式 `replace`（舊文在 plate 裡恰好出現一次才換）、`append`（接在 plate 最後）、`full`（現有 plate 必須與判定當時看到的完全相同才整段換掉）；前提不成立的一律拒收並列出，不自行調整。以 `run_ghidra_script` 帶 TSV 的絕對路徑執行 |
 | `test_kb_verify.py` | 單元測試：`python -m unittest tools/kb_verify/test_kb_verify.py` |
 
@@ -44,7 +44,9 @@ Workflow({ scriptPath: "tools/kb_verify/outside_ticket25_17.js",
            args: { date: "YYYY-MM-DD" } })                     （最後：前三段的 outside）
 python tools/kb_verify/kboutside.py ghidra                    （票的 session 逐項做 Ghidra 改動）
 Workflow({ scriptPath: "tools/kb_verify/followup_ticket25_17.js",
-           args: { date: "YYYY-MM-DD" } })                     （最後：前四段留下的問題）
+           args: { date: "YYYY-MM-DD" } })                     （前四段留下的問題）
+Workflow({ scriptPath: "tools/kb_verify/followup2_ticket25_17.js",
+           args: { date: "YYYY-MM-DD" } })                     （第五段自己留下的問題）
 ```
 
 兩支的最後都有落地段：`apply` 只落地第二位 agent 確認或修改的修正，其餘每一項（沒有判定、判定不過 gate、還沒回掃、`old` 已經不是恰好一次、`exclude` 擋下的頁）都以名字列在拒收清單，不靜默略過；接著跑全部知識庫閘門（`check_chapter.py --landed-all`、`index.py verify`、`data_tables.py check`、`global_text.py verify`、`cut_content.py check`、`story.py check --final`、`data_skill/build.py`、`kbverify.py indexes`），`lint` 的剩餘筆數只列出、由票的 session 人工檢視（驗證者判定「照原樣成立」的會留在裡面）。閘門不過時落地段只回報，修正要判斷，歸票的 session。`exclude` 擋下的頁之後直接再跑一次 `apply` 即可補落地。
