@@ -114,6 +114,11 @@ class GameData(unittest.TestCase):
             with self.subTest(f"{name} LV{lv}"):
                 self.assertEqual(self.at(self.rows(name, join), lv)["max"], want)
 
+    def test_only_lancelot_and_san_join_in_a_promoted_class(self):
+        # 聖騎士 is 亞克's no-badge route, 法師 法蓮娜's and 費塔加's.
+        joined = {c["name"] for c in self.model["chars"] if c["joins_promoted"]}
+        self.assertEqual(joined, {"蘭斯洛特", "珊"})
+
     def test_base_form_floor_is_twice_the_guide_average_less_its_ceiling(self):
         # list.txt: 蘭迪斯 劍士 40 = 193.5 143.5 83 426.5 117, 40(m) as above.
         self.assertEqual(self.at(self.rows("蘭迪斯", 1), 40)["min"], five(174, 124, 83, 407, 117))

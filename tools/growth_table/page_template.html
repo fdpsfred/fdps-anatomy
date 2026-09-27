@@ -683,11 +683,15 @@ function buildPicker(){
     const again = document.querySelector('#pickList .chip[data-key="' + k + '"]'); if (again) again.focus();
   });
 }
+/* 蘭斯洛特 and 珊 join in a class the others reach at the church, so on the
+   cumulative axis their LV n sits where a promoted LV n does: at the promotion
+   level + n. */
+const joinsPromoted = b => b.ri < 0 && b.c.joins_promoted;
 function compareSeries(){
   return [...selected.entries()].map(([k, slot]) => {
-    const b = BUILD_BY_KEY[k];
+    const b = BUILD_BY_KEY[k], dx = joinsPromoted(b) ? promoteAt : 0;
     return {name: buildLong(b), short: buildName(b), color: "--c" + slot,
-      pts: points(b).map(p => ({x:p.x, lv:p.lv, cls:p.cls, lo:p.min[cmpStat], hi:p.max[cmpStat]}))};
+      pts: points(b).map(p => ({x:p.x + dx, lv:p.lv, cls:p.cls, lo:p.min[cmpStat], hi:p.max[cmpStat]}))};
   });
 }
 function renderCompare(){
@@ -698,10 +702,13 @@ function renderCompare(){
   buildPicker();
   const verText = {max:"每級都擲到最大的上限", min:"每級都擲到最小的下限", band:"下限到上限的範圍"}[cmpVer];
   document.getElementById("cmpTitle").textContent = FULL[cmpStat] + "的成長";
-  document.getElementById("cmpSub").textContent = verText + "。橫軸是累計等級：在 LV" + promoteAt + " 轉職，轉職後的 LV1 接在第 " + (promoteAt + 1) + " 級。";
+  const sel = [...selected.keys()].map(k => BUILD_BY_KEY[k]);
+  const promotedNames = [...new Set(sel.filter(joinsPromoted).map(b => b.c.name + "（" + b.c.cls + "）"))];
+  document.getElementById("cmpSub").textContent = verText + "。橫軸是累計等級：在 LV" + promoteAt + " 轉職，轉職後的 LV1 接在第 " + (promoteAt + 1) + " 級。" +
+    (promotedNames.length ? promotedNames.join("、") + "加入時已是轉職後的職業，LV n 同樣畫在第 " + promoteAt + " + n 級。" : "");
   const box = document.getElementById("cmpChart"), legend = document.getElementById("cmpLegend"), tv = document.getElementById("cmpTableView");
   const series = compareSeries();
-  const anyPromo = [...selected.keys()].some(k => BUILD_BY_KEY[k].ri >= 0);
+  const anyPromo = sel.some(b => b.ri >= 0 || joinsPromoted(b));
   if (!series.length){ box.innerHTML = '<p class="empty">從左邊選一條路線，就會畫出它的成長曲線。</p>'; legend.innerHTML = ""; tv.hidden = true; return; }
   lineChart(box, series, {mode:cmpVer, labels:true, promoteX: anyPromo ? promoteAt : null, xTitle:"累計等級", aria:FULL[cmpStat] + "的成長曲線"});
   legend.innerHTML = legendHtml(series, cmpVer);

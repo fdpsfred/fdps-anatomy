@@ -220,8 +220,17 @@ def check_pairs(growth):
         gain_range(growth[s])
 
 
+def promoted_classes(game):
+    """Every class the church can turn someone into.  A character who joins in
+    one of them (蘭斯洛特's 聖騎士, 珊's 法師) is plotted on the promoted half of
+    the page's cumulative level axis."""
+    return {clazz for owner, rts in enumerate(game.promotions)
+            for _n, (_form, clazz, _move) in data_tables.offered_routes(owner, rts)}
+
+
 def model(game):
     """The parameters of every joining character: what the page embeds."""
+    promoted = promoted_classes(game)
     chars = []
     for join in JOINS:
         char_id = join.char_id
@@ -234,6 +243,7 @@ def model(game):
             "id": char_id, "name": game.char_name(char_id),
             "cls": game.class_name(app["class"]), "race": game.race_name(app["race"]),
             "chapter": join.chapter, "move": app["move"], "cap": level_cap(char_id),
+            "joins_promoted": app["class"] in promoted,
             "base": {s: app[s] for s in STATS},
             "growth": _pairs(game.growth[char_id]),
             "learn": _learned(game, char_id),
@@ -285,7 +295,8 @@ def main(argv=None):
     for c in m["chars"]:
         rts = ", ".join(f"{r['form']:02X} {r['cls']} ({r['badge'] or 'no badge'})" for r in c["routes"]) or "-"
         jl = "/".join(f"LV{j['level']} {j['how']}" for j in c["joins"])
-        print(f"{c['id']:02X} {c['name']}: join {jl}; cap {c['cap']}; routes {rts}")
+        promoted = " (joins promoted)" if c["joins_promoted"] else ""
+        print(f"{c['id']:02X} {c['name']}: join {jl}; cap {c['cap']}{promoted}; routes {rts}")
     print(f"wrote {OUT_DIR / 'growth_compact.json'} and growth_data.json")
     return 0
 
